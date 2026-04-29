@@ -1,0 +1,82 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Hierarquia de Acessos
+enum Role {
+  SUPER_ADMIN    // João (Hub)
+  ORG_ADMIN      // Contratante (Subdomínio)
+  OPERATOR       // Locutor (Subdomínio - restrito)
+}
+
+// Os Usuários (Sincronizados com o Clerk)
+model User {
+  id             String        @id // Será o ID gerado pelo Clerk (ex: user_2...)
+  email          String        @unique
+  role           Role          @default(OPERATOR)
+  
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  
+  createdAt      DateTime      @default(now())
+}
+
+// O Contratante (Inquilino do SaaS)
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique // A URL dele: ex 'saojose' (.acaoleve.com)
+  logoUrl       String?
+  active        Boolean  @default(true)
+  
+  users         User[]
+  events        Event[]
+  
+  createdAt     DateTime @default(now())
+}
+
+// O Evento (Onde a mágica acontece)
+model Event {
+  id             String       @id @default(cuid())
+  name           String
+  status         String       @default("DRAFT") // DRAFT, ACTIVE, FINISHED
+  drawnNumbers   Int[]        @default([])
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  sponsors       Sponsor[]
+  cards          Card[]
+  
+  createdAt      DateTime     @default(now())
+}
+
+// Patrocinadores do Evento
+model Sponsor {
+  id        String  @id @default(cuid())
+  name      String
+  logoUrl   String?
+  
+  eventId   String
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+// As Cartelas
+model Card {
+  id        String  @id @default(cuid())
+  shortId   String  // Ex: K85U
+  matrix    Json    // O JSON com B, I, N, G, O
+  isSold    Boolean @default(false)
+  
+  eventId   String
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  @@index([shortId]) // Acelera muito a busca do locutor na hora da auditoria
+}
