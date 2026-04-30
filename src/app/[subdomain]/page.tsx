@@ -1,3 +1,5 @@
+//src/app/[subdomain]/page.tsx
+
 export default function TenantHomePage({ params }: { params: { subdomain: string } }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-900 font-sans p-4">
