@@ -2,7 +2,7 @@ import { prisma } from "../../../lib/prisma"; // Ajuste o caminho se necessário
 import { redirect } from "next/navigation";
 import BingoGame from "./BingoGame";
 import { cookies } from "next/headers";
-import { currentUser } from "@clerk/nextjs/server";
+
 
 export default async function LivePage({ params, searchParams }: { 
   params: Promise<{ subdomain: string }>,
@@ -49,4 +49,8 @@ export default async function LivePage({ params, searchParams }: {
       />
     </div>
   );
+}
+
+function currentUser() {
+  throw new Error("Function not implemented.");
 }

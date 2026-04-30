@@ -1,6 +1,6 @@
 //src/proxy.ts
 
-// src/middleware.ts (Renomeie de proxy.ts para middleware.ts se necessário)
+// src/ (Renomeie de proxy.ts para middleware.ts se necessário)
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
