@@ -1,53 +1,68 @@
 import { prisma } from "../../../lib/prisma";
 import { redirect } from "next/navigation";
+import EventList from "./EventList"; 
+import OperatorManager from "./OperatorManager";
 
-export default async function TenantDashboardPage({ params }: { params: { subdomain: string } }) {
-  // 1. Busca no banco de dados a organização baseada na URL
+export default async function TenantDashboardPage({ params }: { params: Promise<{ subdomain: string }> }) {
+  const { subdomain } = await params;
+
   const org = await prisma.organization.findUnique({
-    where: { slug: params.subdomain },
-    include: { events: true } // Já trazemos os eventos (bingos) dessa org
+    where: { slug: subdomain },
+    include: { 
+      events: {
+        orderBy: { createdAt: 'desc' } // Boa prática: eventos mais novos primeiro
+      },
+      operators: true,
+    } 
   });
 
-  // 2. Se a URL estiver errada (ex: /dashboard de um slug que não existe), expulsa!
   if (!org) {
     redirect("/");
   }
 
   return (
-    <div className="p-10 font-sans max-w-5xl mx-auto">
-      <header className="flex justify-between items-center mb-12 border-b pb-6">
+    <div className="p-10 font-sans max-w-6xl mx-auto">
+      
+      {/* HEADER PROFISSIONAL COM LOGO DINÂMICA */}
+      <header className="flex justify-between items-center mb-10 border-b border-slate-200 pb-6">
         <div>
-          <h1 className="text-3xl font-black text-slate-800">{org.name}</h1>
+          <h1 className="text-4xl font-black text-slate-800">{org.name}</h1>
           <p className="text-slate-500 font-mono text-sm mt-1">{org.slug}.acaoleve.com</p>
         </div>
-        {/* Futuramente colocaremos a foto (UserButton) do Clerk aqui */}
-        <div className="h-12 w-12 bg-slate-200 rounded-full border-2 border-slate-300"></div>
-      </header>
-
-      <main>
-        <div className="flex justify-between items-center mb-6">
-           <h2 className="text-xl font-bold text-slate-800">Meus Eventos (Bingos)</h2>
-           <button className="bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold shadow-md hover:bg-emerald-600 transition-all hover:-translate-y-0.5">
-             + Novo Evento
-           </button>
-        </div>
-
-        {org.events.length === 0 ? (
-          <div className="p-12 border-2 border-dashed border-slate-200 rounded-2xl text-center bg-slate-50">
-            <h3 className="text-lg font-bold text-slate-700 mb-2">Nenhum evento ativo</h3>
-            <p className="text-slate-500 mb-6">Você ainda não criou o bingo desta organização.</p>
-          </div>
+        
+        {/* Renderiza a logo do Cloudinary ou a primeira letra da Paróquia */}
+        {org.logoUrl ? (
+          <img 
+            src={org.logoUrl.replace('/upload/', '/upload/c_pad,w_150,h_150/')} 
+            alt={`Logo ${org.name}`} 
+            className="h-16 w-16 object-contain rounded-xl border border-slate-200 shadow-sm bg-white p-1" 
+          />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {org.events.map((evento) => (
-              <div key={evento.id} className="p-6 border rounded-xl shadow-sm bg-white">
-                <h3 className="font-bold text-lg">{evento.name}</h3>
-                <p className="text-sm text-slate-500">Status: {evento.status}</p>
-              </div>
-            ))}
+          <div className="h-16 w-16 bg-slate-100 rounded-xl border-2 border-slate-200 flex items-center justify-center text-2xl font-black text-slate-400 shadow-inner">
+            {org.name.charAt(0)}
           </div>
         )}
-      </main>
+      </header>
+
+      {/* GRID DE DASHBOARD (Separação de Contextos) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* ÁREA PRINCIPAL (Core do SaaS: Eventos) */}
+        <main className="lg:col-span-2">
+          <EventList orgId={org.id} initialEvents={org.events} />
+        </main>
+
+        {/* BARRA LATERAL (Gestão e Configurações) */}
+        <aside className="flex flex-col gap-6">
+          <OperatorManager 
+            orgId={org.id} 
+            initialOperators={org.operators} 
+          />
+          
+          {/* Espaço reservado para futuros módulos (ex: Financeiro, Relatórios) */}
+        </aside>
+
+      </div>
     </div>
   );
 }

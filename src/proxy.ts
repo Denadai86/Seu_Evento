@@ -18,17 +18,18 @@ export default clerkMiddleware(async (auth, req) => {
     return session.redirectToSignIn();
   }
 
-  // 3. ROTEAMENTO
+ // 3. ROTEAMENTO
   
   // Caso A: É um SUBDOMÍNIO (ex: saojose.localhost:3000)
   if (isSubdomain && subdomain) {
-    return NextResponse.rewrite(new URL(`/${subdomain}${url.pathname}`, req.url));
+    // A MÁGICA AQUI: Adicionamos o ${url.search} para ele repassar o ?event=ID
+    return NextResponse.rewrite(new URL(`/${subdomain}${url.pathname}${url.search}`, req.url));
   }
 
   // Caso B: É o domínio principal (localhost:3000)
-  // IMPORTANTE: Se o caminho já começar com /hub, não mexemos. Se não, adicionamos /hub.
   if (!url.pathname.startsWith('/hub')) {
-    return NextResponse.rewrite(new URL(`/hub${url.pathname}`, req.url));
+    // Aqui também, por garantia!
+    return NextResponse.rewrite(new URL(`/hub${url.pathname}${url.search}`, req.url));
   }
 });
 

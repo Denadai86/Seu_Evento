@@ -5,7 +5,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { 
   checkCard, getActiveEvent, drawNumberToDB, getGameThermometer, 
-  resetEvent, generateBatchCards, addSponsor, deleteSponsor, updateOrgLogo 
+  resetEvent, generateBatchCards, addSponsor, removeSponsor, updateOrgLogo 
 } from "./actions";
 import UploadButton from ".././components/UploadButton"; // Criar este componente conforme instrução anterior
 
@@ -19,11 +19,18 @@ export default function DashboardAdmin() {
   const [rankings, setRankings] = useState<any>(null);
 
   const loadData = () => {
-    getActiveEvent().then((res) => {
-      if (res.success) {
-        setActiveEvent(res.event);
-        updateRankings(res.event.id);
+    getActiveEvent().then((eventData) => {
+      // 1. Verifica se o banco de dados retornou um evento (se não é null)
+      if (eventData) {
+        // 2. Como eventData existe, é seguro passar para o state e acessar o ID
+        setActiveEvent(eventData);
+        updateRankings(eventData.id);
+      } else {
+        // Opcional: Lógica caso não haja evento ativo (ex: setLoading(false))
+        console.log("Nenhum evento ativo encontrado no momento.");
       }
+    }).catch((error) => {
+      console.error("Erro ao buscar o evento:", error);
     });
   };
 
@@ -128,7 +135,7 @@ export default function DashboardAdmin() {
                      {s.logoUrl && <img src={s.logoUrl} className="w-6 h-6 object-contain" />}
                      <span className="font-bold">{s.name}</span>
                    </div>
-                   <button onClick={() => deleteSponsor(s.id).then(loadData)} className="text-red-400 font-bold">✕</button>
+                   <button onClick={() => removeSponsor(s.id).then(loadData)} className="text-red-400 font-bold">✕</button>
                 </div>
               ))}
             </div>

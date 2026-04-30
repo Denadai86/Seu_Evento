@@ -20,7 +20,10 @@ async function main() {
 
   console.log('⛪ Criando Paróquia...')
   const org = await prisma.organization.create({
-    data: { name: 'Paróquia São José' },
+    data: { 
+      name: 'Paróquia São José',
+      slug: 'paroquia-sao-jose' // CORREÇÃO 1: Slug movido para dentro do data
+    },
   })
 
   console.log('🎉 Criando Evento...')
@@ -28,19 +31,19 @@ async function main() {
     data: {
       organizationId: org.id,
       name: 'Bingo Beneficente de Páscoa',
-      date: new Date(),
-      ticketPrice: 15.00,
+      // date e ticketPrice foram removidos pois não existem no schema atual
       drawnNumbers: [], 
-      status: 'LIVE',
+      status: 'ACTIVE', // Mudei para ACTIVE para combinar com a lógica do seu sistema
     },
   })
 
   console.log('🤝 Criando Patrocinadores...')
   await prisma.sponsor.createMany({
     data: [
-      { eventId: event.id, name: 'Padaria do João', amount: 150 },
-      { eventId: event.id, name: 'Mercado Central', amount: 300 },
-      { eventId: event.id, name: 'Farmácia Saúde', amount: 100 },
+      // CORREÇÃO 2: 'amount' removido pois não existe no schema atual
+      { eventId: event.id, name: 'Padaria do João' },
+      { eventId: event.id, name: 'Mercado Central' },
+      { eventId: event.id, name: 'Farmácia Saúde' },
     ],
   })
 

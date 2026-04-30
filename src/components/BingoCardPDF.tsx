@@ -1,3 +1,5 @@
+//src/components/BingoCardPDF.tsx
+
 import {
   Document,
   Page,
@@ -22,6 +24,7 @@ interface BingoCard {
 interface Sponsor {
   id: string;
   name: string;
+  logoUrl?: string; // Adicionado para receber a imagem do banco
 }
 
 interface BingoCardPDFProps {
@@ -176,14 +179,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     flexDirection: 'row',
     justifyContent: 'space-around',
+    alignItems: 'center',
     flexWrap: 'wrap',
+  },
+
+  /* NOVOS ESTILOS PARA OS PATROCINADORES COM LOGO */
+  sponsorItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 4,
+    marginBottom: 2,
+  },
+
+  sponsorLogo: {
+    width: 25,
+    height: 25,
+    marginBottom: 3,
+    objectFit: 'contain',
   },
 
   sponsor: {
     fontSize: 6.5,
     fontWeight: 'bold',
     color: '#334155',
-    marginHorizontal: 3,
   },
 });
 
@@ -256,12 +274,19 @@ function BingoCardView({
           </View>
         </View>
 
-        {/* FOOTER */}
+        {/* FOOTER ATUALIZADO */}
         <View style={styles.footer}>
           {sponsors.map((s) => (
-            <Text key={s.id} style={styles.sponsor}>
-              • {s.name}
-            </Text>
+            <View key={s.id} style={styles.sponsorItem}>
+              {s.logoUrl && (
+                <Image
+                  /* A mágica do redimensionamento direto na URL */
+                  src={s.logoUrl.replace('/upload/', '/upload/c_pad,w_100,h_100/')}
+                  style={styles.sponsorLogo}
+                />
+              )}
+              <Text style={styles.sponsor}>{s.name}</Text>
+            </View>
           ))}
         </View>
       </View>

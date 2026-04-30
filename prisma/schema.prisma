@@ -40,6 +40,8 @@ model Organization {
   events        Event[]
   
   createdAt     DateTime @default(now())
+
+  operators     Operator[]
 }
 
 // O Evento (Onde a mágica acontece)
@@ -80,3 +82,14 @@ model Card {
   
   @@index([shortId]) // Acelera muito a busca do locutor na hora da auditoria
 }
+
+model Operator {
+  id             String       @id @default(cuid())
+  username       String
+  password       String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([username, organizationId]) // O username é único dentro da mesma igreja
+}
+
