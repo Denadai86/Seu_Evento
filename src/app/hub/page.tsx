@@ -1,3 +1,6 @@
+// src/app//hub/page.tsx
+
+
 export default function HubHomePage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white font-sans selection:bg-emerald-500 selection:text-white">

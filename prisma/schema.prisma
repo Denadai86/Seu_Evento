@@ -16,18 +16,6 @@ enum Role {
   OPERATOR       // Locutor (Subdomínio - restrito)
 }
 
-// Os Usuários (Sincronizados com o Clerk)
-model User {
-  id             String        @id // Será o ID gerado pelo Clerk (ex: user_2...)
-  email          String        @unique
-  role           Role          @default(OPERATOR)
-  
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  
-  createdAt      DateTime      @default(now())
-}
-
 // O Contratante (Inquilino do SaaS)
 model Organization {
   id            String   @id @default(cuid())
@@ -93,3 +81,14 @@ model Operator {
   @@unique([username, organizationId]) // O username é único dentro da mesma igreja
 }
 
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  password       String       // <-- Aqui guardaremos o hash da senha, NUNCA a senha pura
+  role           String       @default("ORG_ADMIN") // ORG_ADMIN ou SUPER_ADMIN
+  
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  createdAt      DateTime     @default(now())
+}

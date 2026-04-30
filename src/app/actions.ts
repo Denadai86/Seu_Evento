@@ -1,54 +1,157 @@
 "use server";
 
 import { PrismaClient } from "@prisma/client";
-import { currentUser } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
+import { hash, compare } from "bcryptjs";
+import { createSession } from "../lib/session"; // Certifique-se de que criamos este arquivo no Passo 3 anterior
 
+// --- SETUP DO PRISMA (Evita conexões duplicadas no modo Dev) ---
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
-// --- 1. GESTÃO DE SAAS (HUB / ADMIN) ---
 
-export async function createOrganization(name: string, slug: string) {
-  const user = await currentUser();
-  if (!user) throw new Error("Não autenticado");
+// ============================================================================
+// BLOCO 1: HUB MESTRE (Gestão do SaaS e Inquilinos)
+// ============================================================================
 
-  return await prisma.organization.create({
-    data: {
-      name,
-      slug: slug.toLowerCase(),
-      // A MÁGICA ESTÁ AQUI: connectOrCreate resolve o erro de ID duplicado!
-      users: { 
-        connectOrCreate: {
-          where: { id: user.id },
-          create: { 
-            id: user.id, 
-            email: user.emailAddresses[0].emailAddress, 
-            role: "ORG_ADMIN" 
-          }
-        } 
-      }
-    }
+export async function getAllOrganizations() {
+  return await prisma.organization.findMany({
+    orderBy: { createdAt: 'desc' }
   });
 }
 
-export async function getAllOrganizations() {
-  return await prisma.organization.findMany();
+export async function createOrganization(name: string, slug: string, clientEmail: string) {
+  // 1. Gera uma senha temporária leve (ex: bingo123!)
+  const tempPassword = Math.random().toString(36).slice(-6) + "!";
+  
+  // 2. Criptografa a senha para salvar no banco (NUNCA salvamos senha em texto puro)
+  const hashedPassword = await hash(tempPassword, 10);
+
+  try {
+    // 3. Salva a Organização e já cria o Usuário Dono (Admin) atrelado a ela
+    const org = await prisma.organization.create({
+      data: {
+        name,
+        slug: slug.toLowerCase(),
+        users: { 
+          create: { 
+            email: clientEmail.toLowerCase().trim(),
+            password: hashedPassword,
+            role: "ORG_ADMIN" 
+          } 
+        }
+      }
+    });
+
+    // 4. Retorna os dados para a tela Mestre
+    return { 
+      success: true, 
+      org, 
+      credentials: { 
+        email: clientEmail, 
+        password: tempPassword, 
+        loginUrl: `http://${slug}.localhost:3000/entrar`
+      } 
+    };
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      throw new Error("Este e-mail ou subdomínio já estão em uso.");
+    }
+    throw new Error("Erro interno ao criar o ambiente do cliente.");
+  }
+}
+
+export async function deleteOrganization(id: string) {
+  return await prisma.organization.delete({
+    where: { id }
+  });
 }
 
 export async function updateOrgLogo(organizationId: string, logoUrl: string) {
   return await prisma.organization.update({
     where: { id: organizationId },
-    data: {
-      logoUrl: logoUrl
+    data: { logoUrl }
+  });
+}
+
+
+// ============================================================================
+// BLOCO 2: AUTENTICAÇÃO UNIFICADA (Nossa Substituição do Clerk)
+// ============================================================================
+
+export async function loginTenantAdmin(subdomain: string, email: string, pass: string) {
+  // 1. Procura o usuário que pertence a este subdomínio específico
+  const user = await prisma.user.findFirst({
+    where: { 
+      email: email.toLowerCase().trim(),
+      organization: { slug: subdomain }
+    }
+  });
+
+  if (!user) return { success: false, message: "Acesso negado. E-mail ou subdomínio incorretos." };
+
+  // 2. Verifica se a senha bate com a criptografia do banco
+  const isValidPassword = await compare(pass, user.password);
+  if (!isValidPassword) return { success: false, message: "Senha incorreta." };
+
+  // 3. Gera o Cookie de segurança (JWT)
+  await createSession(user.id, subdomain, user.role);
+  
+  return { success: true };
+}
+
+
+// ============================================================================
+// BLOCO 3: GESTÃO DE OPERADORES (Locutores)
+// ============================================================================
+
+export async function createOperator(orgId: string, username: string, pass: string) {
+  return await prisma.operator.create({
+    data: { 
+      organizationId: orgId, 
+      username: username.toLowerCase(), 
+      password: pass // Como é acesso restrito temporário, mantemos simples
     }
   });
 }
 
-// --- 2. MOTOR DO BINGO (O que faz seu sistema funcionar) ---
+export async function deleteOperator(id: string) {
+  return await prisma.operator.delete({ where: { id } });
+}
+
+export async function loginOperator(subdomain: string, username: string, pass: string) {
+  const org = await prisma.organization.findUnique({ where: { slug: subdomain } });
+  if (!org) return { success: false, message: "Organização não encontrada" };
+
+  const op = await prisma.operator.findFirst({
+    where: { organizationId: org.id, username: username.toLowerCase(), password: pass }
+  });
+
+  if (op) {
+    const cookieStore = await cookies();
+    cookieStore.set(`auth_${subdomain}`, op.id, { maxAge: 60 * 60 * 24 }); // Cookie simples de 24h
+    return { success: true };
+  }
+  return { success: false, message: "Usuário ou senha inválidos" };
+}
+
+
+// ============================================================================
+// BLOCO 4: MOTOR DO BINGO (A Regra de Negócio)
+// ============================================================================
+
+export async function createEvent(organizationId: string, name: string) {
+  return await prisma.event.create({
+    data: {
+      name: name,
+      organizationId: organizationId,
+      status: "DRAFT", 
+    }
+  });
+}
 
 export async function getActiveEvent(orgId?: string) {
-  // Se orgId for passado, filtra por ele. Senão, pega o primeiro.
   const where = orgId ? { organizationId: orgId } : {};
   return await prisma.event.findFirst({
     where,
@@ -56,22 +159,11 @@ export async function getActiveEvent(orgId?: string) {
   });
 }
 
-export async function checkCard(shortId: string) {
-  const idFormatted = shortId.trim().toUpperCase();
-  const card = await prisma.card.findFirst({
-    where: { shortId: idFormatted },
-    include: { event: { include: { organization: true } } }
+export async function getEventCards(eventId: string) {
+  return await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { cards: true, sponsors: true }
   });
-  return card ? { success: true, card } : { success: false, message: "Cartela não encontrada." };
-}
-
-export async function drawNumberToDB(eventId: string, number: number) {
-  const event = await prisma.event.findUnique({ where: { id: eventId } });
-  if (!event || event.drawnNumbers.includes(number)) return { success: false };
-  
-  const newDrawnNumbers = [...event.drawnNumbers, number];
-  await prisma.event.update({ where: { id: eventId }, data: { drawnNumbers: newDrawnNumbers } });
-  return { success: true, drawnNumbers: newDrawnNumbers };
 }
 
 export async function generateBatchCards(eventId: string, quantity: number) {
@@ -89,19 +181,53 @@ export async function generateBatchCards(eventId: string, quantity: number) {
       isSold: true
     });
   }
+  
   await prisma.card.createMany({ data: cardsToCreate });
   
-  // A MÁGICA AQUI: Retornamos o shortId da primeira cartela do array (ou undefined se a quantidade for 0)
   return { 
     success: true, 
     sampleId: cardsToCreate.length > 0 ? cardsToCreate[0].shortId : null 
   };
 }
 
-//export async function resetEvent(eventId: string) {
-  //await prisma.event.update({ where: { id: eventId }, data: { drawnNumbers: [] } });
-  //return { success: true };
-//}
+export async function drawNumber(eventId: string, number: number) {
+  // Atualiza o evento empurrando o novo número para a array e ativando o status
+  return await prisma.event.update({
+    where: { id: eventId },
+    data: {
+      drawnNumbers: { push: number },
+      status: "ACTIVE"
+    }
+  });
+}
+
+export async function drawNumberToDB(eventId: string, number: number) {
+  const event = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!event || event.drawnNumbers.includes(number)) return { success: false };
+  
+  const newDrawnNumbers = [...event.drawnNumbers, number];
+  await prisma.event.update({ where: { id: eventId }, data: { drawnNumbers: newDrawnNumbers } });
+  return { success: true, drawnNumbers: newDrawnNumbers };
+}
+
+export async function resetEvent(eventId: string) {
+  return await prisma.event.update({
+    where: { id: eventId },
+    data: {
+      drawnNumbers: [],
+      status: "DRAFT"
+    }
+  });
+}
+
+export async function checkCard(shortId: string) {
+  const idFormatted = shortId.trim().toUpperCase();
+  const card = await prisma.card.findFirst({
+    where: { shortId: idFormatted },
+    include: { event: { include: { organization: true } } }
+  });
+  return card ? { success: true, card } : { success: false, message: "Cartela não encontrada." };
+}
 
 export async function getGameThermometer(eventId: string) {
   const event = await prisma.event.findUnique({
@@ -109,12 +235,12 @@ export async function getGameThermometer(eventId: string) {
     include: { cards: { where: { isSold: true } } }
   });
   if (!event) return { success: false };
-  // Lógica simplificada de ranking
+  
   const stats = event.cards.map(c => ({ shortId: c.shortId, totalHits: 0 }));
   return { success: true, rankings: { topFull: stats.slice(0, 3) } };
 }
 
-// Helpers
+// === Helpers Privados do Bingo ===
 function generateRandomId(length: number) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let result = '';
@@ -128,51 +254,17 @@ function generateColumn(min: number, max: number, count: number) {
   return Array.from(nums);
 }
 
-// src/app/actions.ts
-// ... (mantenha o que já tem e adicione esta):
 
-export async function deleteOrganization(id: string) {
-  return await prisma.organization.delete({
-    where: { id }
-  });
-}
-
-// Adicione no final do seu src/app/actions.ts
-
-export async function createEvent(organizationId: string, name: string) {
-  const newEvent = await prisma.event.create({
-    data: {
-      name: name,
-      organizationId: organizationId,
-      status: "DRAFT", // DRAFT = Rascunho (ainda não começou)
-    }
-  });
-  return newEvent;
-}
-
-// Adicione no final do src/app/actions.ts
-export async function getEventCards(eventId: string) {
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    include: { 
-      cards: true,
-      sponsors: true 
-    }
-  });
-  return event;
-}
-
-
-// --- 3. PATROCINADORES (A Mina de Ouro) ---
-
-// src/app/actions.ts
+// ============================================================================
+// BLOCO 5: PATROCINADORES (Monetização Extra)
+// ============================================================================
 
 export async function addSponsor(eventId: string, name: string, logoUrl?: string) {
   return await prisma.sponsor.create({
     data: { 
       name: name, 
       eventId: eventId,
-      logoUrl: logoUrl // Agora salvamos o link da imagem
+      logoUrl: logoUrl 
     }
   });
 }
@@ -182,60 +274,3 @@ export async function removeSponsor(sponsorId: string) {
     where: { id: sponsorId }
   });
 }
-
-// Adicione ao final do src/app/actions.ts
-
-export async function drawNumber(eventId: string, number: number) {
-  return await prisma.event.update({
-    where: { id: eventId },
-    data: {
-      drawnNumbers: {
-        push: number // Adiciona o número ao array de sorteados
-      },
-      status: "ACTIVE"
-    }
-  });
-}
-
-export async function resetEvent(eventId: string) {
-  return await prisma.event.update({
-    where: { id: eventId },
-    data: {
-      drawnNumbers: [],
-      status: "DRAFT"
-    }
-  });
-}
-
-import { cookies } from "next/headers";
-
-// 1. Criar Locutor (Usado pelo ADM da Paróquia)
-export async function createOperator(orgId: string, username: string, pass: string) {
-  return await prisma.operator.create({
-    data: { organizationId: orgId, username: username.toLowerCase(), password: pass }
-  });
-}
-
-// 2. Deletar Locutor
-export async function deleteOperator(id: string) {
-  return await prisma.operator.delete({ where: { id } });
-}
-
-// 3. Login do Locutor (Gera um Cookie de 24h)
-export async function loginOperator(subdomain: string, username: string, pass: string) {
-  const org = await prisma.organization.findUnique({ where: { slug: subdomain } });
-  if (!org) return { success: false, message: "Organização não encontrada" };
-
-  const op = await prisma.operator.findFirst({
-    where: { organizationId: org.id, username: username.toLowerCase(), password: pass }
-  });
-
-  if (op) {
-    const cookieStore = await cookies();
-    cookieStore.set(`auth_${subdomain}`, op.id, { maxAge: 60 * 60 * 24 }); // 24 horas
-    return { success: true };
-  }
-  return { success: false, message: "Usuário ou senha inválidos" };
-}
-
-
