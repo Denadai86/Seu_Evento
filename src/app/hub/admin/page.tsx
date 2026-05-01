@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAllOrganizations, createOrganization, deleteOrganization } from "../../actions";
+import { getAllOrganizations, createOrganization, deleteOrganization } from "../../../actions/tenant";
 import { Plus, Trash2, Globe, Settings, ExternalLink, Copy, CheckCircle2 } from "lucide-react"; 
 
 export default function AdminPage() {

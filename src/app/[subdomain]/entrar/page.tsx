@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { loginTenantAdmin, loginOperator } from "../../actions";
+import { loginTenantAdmin, loginOperator } from "../../../actions/auth";
 import { KeyRound, Mail, AlertCircle, Loader2 } from "lucide-react";
 
 export default function TenantLoginPage() {

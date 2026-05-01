@@ -1,3 +1,5 @@
+//src/app/[subdomain]/dashboard/page.tsx
+
 import { prisma } from "../../../lib/prisma";
 import { redirect } from "next/navigation";
 import EventList from "./EventList"; 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { drawNumber, resetEvent } from "../.././actions"; // Voltando 3 pastas para chegar no actions.ts
+import { drawNumber, resetEvent } from "../../../actions/bingo"; // Voltando 3 pastas para chegar no actions.ts
 
 export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }: {
   eventId: string,

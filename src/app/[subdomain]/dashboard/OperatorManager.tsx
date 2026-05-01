@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { createOperator, deleteOperator } from "../.././actions";
+import { createOperator, deleteOperator } from "@/actions/tenant";
 
 export default function OperatorManager({ orgId, initialOperators }: { orgId: string, initialOperators: any[] }) {
   const [ops, setOps] = useState(initialOperators);
