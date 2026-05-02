@@ -1,3 +1,5 @@
+//src/app/(marketing)/page.tsx
+
 import Sidebar from "./components/Sidebar";
 import { CheckCircle2, MonitorPlay, TicketPercent, Users } from "lucide-react";
 
