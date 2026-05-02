@@ -1,35 +1,64 @@
 // src/middleware.ts
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-
-export function middleware(req: NextRequest) {
-  const url = req.nextUrl;
-  const hostname = req.headers.get('host') || '';
-  const path = url.pathname;
-  
-  // Lista de domínios que mostram a Landing Page (Vendas)
-  const rootDomains = ['localhost:3000', 'seu-evento.acaoleve.com', 'acaoleve.com'];
-  const isRootDomain = rootDomains.includes(hostname);
-
-  let subdomain = null;
-  if (!isRootDomain) {
-    subdomain = hostname.split('.')[0];
-  }
-
-  // 1. Rota de Cliente (Ex: saojose.acaoleve.com)
-  if (subdomain && subdomain !== 'www') {
-    // Proteção de rotas do inquilino
-    if (path.startsWith('/dashboard') || path.startsWith('/live')) {
-      const session = req.cookies.has('acaoleve_session') || req.cookies.has(`auth_${subdomain}`);
-      if (!session) return NextResponse.redirect(new URL('/entrar', req.url));
-    }
-    return NextResponse.rewrite(new URL(`/${subdomain}${path}${url.search}`, req.url));
-  }
-
-  // 2. Rota de Vendas / Landing Page
-  return NextResponse.next();
-}
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 
 export const config = {
-  matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
+  matcher: [
+    "/((?!api|_next/static|_next/image|favicon.ico|file.svg|globe.svg|next.svg|vercel.svg|window.svg).*)",
+  ],
 };
+
+export default auth((req) => {
+  const url = req.nextUrl;
+  const hostname = req.headers.get("host") || "";
+
+  const currentHost =
+    process.env.NODE_ENV === "production" && process.env.VERCEL === "1"
+      ? hostname.replace(`.acaoleve.com`, "")
+      : hostname.replace(`.localhost:3000`, "");
+
+  const { pathname } = url;
+  const session = req.auth;
+
+  // 1. Área Master
+  if (pathname.startsWith("/hub/admin")) {
+    if (!session) return NextResponse.redirect(new URL("/entrar", req.url));
+    if (session.user.role !== "SUPER_ADMIN") {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+    return NextResponse.next();
+  }
+
+  // 2. Subdomínios
+  if (
+    currentHost !== "localhost:3000" &&
+    currentHost !== "acaoleve.com" &&
+    currentHost !== "www"
+  ) {
+    if (pathname.startsWith("/dashboard") || pathname.startsWith("/live")) {
+      if (!session) {
+        return NextResponse.redirect(new URL(`/entrar`, req.url));
+      }
+
+      if (
+        session.user.subdomain !== currentHost &&
+        session.user.role !== "SUPER_ADMIN"
+      ) {
+        return NextResponse.redirect(new URL(`/`, req.url));
+      }
+
+      if (
+        pathname.startsWith("/dashboard") &&
+        session.user.role === "OPERATOR"
+      ) {
+        return NextResponse.redirect(new URL(`/live`, req.url));
+      }
+    }
+
+    return NextResponse.rewrite(
+      new URL(`/${currentHost}${pathname}`, req.url)
+    );
+  }
+
+  return NextResponse.next();
+});

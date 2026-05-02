@@ -1,22 +1,66 @@
+// src/actions/tenant.ts
 "use server";
 
-import { cookies } from "next/headers";
-import { prisma } from "../lib/prisma";
+import prisma from "@/lib/prisma";
 import { hash } from "bcryptjs";
+import { auth } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { requireTenantAccess } from "@/lib/permissions";
 
-export async function getAllOrganizations() {
-  return await prisma.organization.findMany({ orderBy: { createdAt: 'desc' } });
+// ============================================================================
+// UTILITÁRIOS DE SEGURANÇA
+// ============================================================================
+
+/**
+ * Valida se quem está chamando a action tem permissão de SUPER_ADMIN (Você)
+ */
+async function requireSuperAdmin() {
+  const session = await auth();
+  if (!session || session.user?.role !== "SUPER_ADMIN") {
+    throw new Error("Acesso negado. Apenas o administrador global pode executar esta ação.");
+  }
+  return session;
 }
 
-export async function createOrganization(name: string, slug: string, clientEmail: string) {
-  const tempPassword = Math.random().toString(36).slice(-6) + "!";
+/**
+ * Valida se quem está chamando a action tem permissão de gerenciar o Tenant logado
+ */
+async function requireTenantAdmin() {
+  const session = await auth();
+  if (!session || (session.user?.role !== "ORG_ADMIN" && session.user?.role !== "SUPER_ADMIN")) {
+    throw new Error("Acesso negado. Apenas organizadores podem executar esta ação.");
+  }
+  if (!session.user.tenantId) {
+    throw new Error("Erro de contexto. Usuário não pertence a nenhum Tenant.");
+  }
+  return session;
+}
+
+// ============================================================================
+// BLOCO 1: GESTÃO DE TENANTS (Apenas para o Super Admin / Hub)
+// ============================================================================
+
+export async function getAllTenants() {
+  await requireSuperAdmin();
+  return await prisma.tenant.findMany({ 
+    orderBy: { createdAt: 'desc' },
+    include: { _count: { select: { users: true, events: true } } } // Traz métricas úteis pro seu painel
+  });
+}
+
+export async function createTenant(name: string, subdomain: string, clientEmail: string) {
+  await requireSuperAdmin();
+
+  // Gera uma senha temporária segura de 8 caracteres
+  const tempPassword = Math.random().toString(36).slice(-8) + "!";
   const hashedPassword = await hash(tempPassword, 10);
+  const cleanSubdomain = subdomain.toLowerCase().trim();
 
   try {
-    const org = await prisma.organization.create({
+    const tenant = await prisma.tenant.create({
       data: {
         name,
-        slug: slug.toLowerCase(),
+        subdomain: cleanSubdomain,
         users: { 
           create: { 
             email: clientEmail.toLowerCase().trim(),
@@ -27,52 +71,114 @@ export async function createOrganization(name: string, slug: string, clientEmail
       }
     });
 
+    revalidatePath("/admin");
+
     return { 
       success: true, 
-      org, 
-      credentials: { email: clientEmail, password: tempPassword, loginUrl: `http://${slug}.localhost:3000/entrar` } 
+      tenant, 
+      credentials: { 
+        email: clientEmail, 
+        password: tempPassword, 
+        // Em dev usa localhost, em prod usa o domínio oficial
+        loginUrl: process.env.NODE_ENV === "production" 
+          ? `https://${cleanSubdomain}.acaoleve.com/entrar`
+          : `http://${cleanSubdomain}.localhost:3000/entrar`
+      } 
     };
   } catch (error: any) {
-    if (error.code === 'P2002') throw new Error("E-mail ou subdomínio já em uso.");
-    throw new Error("Erro ao criar cliente.");
+    if (error.code === 'P2002') throw new Error("E-mail ou subdomínio já em uso no sistema.");
+    throw new Error("Erro interno ao criar o cliente.");
   }
 }
 
-export async function deleteOrganization(id: string) {
-  return await prisma.organization.delete({ where: { id } });
+export async function deleteTenant(id: string) {
+  await requireSuperAdmin();
+  
+  // O Prisma cuidará de deletar os usuários e eventos atrelados se o onDelete: Cascade estiver configurado no schema
+  await prisma.tenant.delete({ where: { id } });
+  revalidatePath("/hub/admin");
+  
+  return { success: true };
 }
 
 // ============================================================================
-// BLOCO 3: GESTÃO DE OPERADORES (Locutores)
+// BLOCO 2: GESTÃO DE OPERADORES (Locutores do Evento)
 // ============================================================================
 
-export async function createOperator(orgId: string, username: string, pass: string) {
-  return await prisma.operator.create({
-    data: { 
-      organizationId: orgId, 
-      username: username.toLowerCase(), 
-      password: pass // Como é acesso restrito temporário, mantemos simples
+export async function createOperator(name: string, email: string, rawPassword: string) {
+  const session = await requireTenantAdmin();
+
+  if (!session.user.tenantId) {
+    return { success: false, error: "Tenant inválido" };
+  }
+
+  const tenantId = session.user.tenantId;
+  const normalizedEmail = email.toLowerCase().trim();
+
+  if (!name.trim() || !normalizedEmail || !rawPassword.trim()) {
+    return { success: false, error: "Preencha todos os campos" };
+  }
+
+  if (rawPassword.length < 6) {
+    return { success: false, error: "Senha muito curta" };
+  }
+
+  try {
+    const hashedPassword = await hash(rawPassword, 10);
+
+    await prisma.user.create({
+      data: {
+        tenantId,
+        name: name.trim(),
+        email: normalizedEmail,
+        password: hashedPassword,
+        role: "OPERATOR"
+      }
+    });
+
+    revalidatePath("/dashboard");
+
+    return { success: true };
+
+  } catch (error: any) {
+    if (error.code === "P2002") {
+      return { success: false, error: "E-mail já está em uso." };
+    }
+
+    console.error("Erro ao criar operador:", error);
+    return { success: false, error: "Erro interno." };
+  }
+}
+
+export async function deleteOperator(operatorId: string) {
+  const session = await requireTenantAdmin();
+
+  if (!session.user.tenantId) {
+    return { success: false, error: "Tenant inválido" };
+  }
+
+  const tenantId = session.user.tenantId;
+
+  const result = await prisma.user.deleteMany({
+    where: {
+      id: operatorId,
+      tenantId,
+      role: "OPERATOR"
     }
   });
-}
 
-export async function deleteOperator(id: string) {
-  return await prisma.operator.delete({ where: { id } });
-}
-
-export async function loginOperator(subdomain: string, username: string, pass: string) {
-  const org = await prisma.organization.findUnique({ where: { slug: subdomain } });
-  if (!org) return { success: false, message: "Organização não encontrada" };
-
-  const op = await prisma.operator.findFirst({
-    where: { organizationId: org.id, username: username.toLowerCase(), password: pass }
-  });
-
-  if (op) {
-    const cookieStore = await cookies();
-    cookieStore.set(`auth_${subdomain}`, op.id, { maxAge: 60 * 60 * 24 }); // Cookie simples de 24h
-    return { success: true };
+  if (result.count === 0) {
+    return {
+      success: false,
+      error: "Operador não encontrado ou não pertence à sua organização."
+    };
   }
-  return { success: false, message: "Usuário ou senha inválidos" };
+
+  revalidatePath("/dashboard");
+
+  return { success: true };
 }
 
+// Nota: A função loginOperator foi intencionalmente REMOVIDA.
+// A autenticação do operador agora é feita 100% pelo Auth.js (Credentials Provider) 
+// através do componente de login que criamos anteriormente.

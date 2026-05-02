@@ -1,34 +1,172 @@
 "use client";
-import { useState } from "react";
+
+import { useState, useMemo, useTransition } from "react";
 import { createOperator, deleteOperator } from "@/actions/tenant";
+import { resetOperatorPassword } from "@/actions/operator";
 
-export default function OperatorManager({ orgId, initialOperators }: { orgId: string, initialOperators: any[] }) {
-  const [ops, setOps] = useState(initialOperators);
-  const [user, setUser] = useState("");
-  const [pass, setPass] = useState("");
+interface Operator {
+  id: string;
+  name: string | null;
+  email: string | null;
+}
 
-  const handleAdd = async (e: React.FormEvent) => {
+interface Props {
+  initialOperators: Operator[];
+}
+
+export default function OperatorManager({ initialOperators }: Props) {
+  const [isPending, startTransition] = useTransition();
+  const [search, setSearch] = useState("");
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const filtered = useMemo(() => {
+    return initialOperators.filter((op) =>
+      `${op.name} ${op.email}`
+        .toLowerCase()
+        .includes(search.toLowerCase())
+    );
+  }, [search, initialOperators]);
+
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    const newOp = await createOperator(orgId, user, pass);
-    setOps([...ops, newOp]);
-    setUser(""); setPass("");
+
+    startTransition(async () => {
+      await createOperator(name, email, password);
+      setName("");
+      setEmail("");
+      setPassword("");
+    });
+  };
+
+  const handleDelete = (id: string, name?: string | null) => {
+    if (!confirm(`Remover ${name}?`)) return;
+
+    startTransition(async () => {
+      await deleteOperator(id);
+    });
+  };
+
+  const handleReset = (id: string) => {
+    if (!confirm("Resetar senha deste operador?")) return;
+
+    startTransition(async () => {
+      const res = await resetOperatorPassword(id);
+      if (res.success) {
+        alert(`Nova senha: ${res.password}`);
+      }
+    });
   };
 
   return (
-    <div className="bg-white p-6 rounded-2xl border shadow-sm mb-8">
-      <h3 className="font-bold text-slate-800 mb-4">Gerenciar Locutores</h3>
-      <form onSubmit={handleAdd} className="flex gap-2 mb-4">
-        <input value={user} onChange={e => setUser(e.target.value)} placeholder="Usuário" className="border p-2 rounded-lg flex-1"/>
-        <input value={pass} onChange={e => setPass(e.target.value)} placeholder="Senha" title="Senha" className="border p-2 rounded-lg flex-1"/>
-        <button className="bg-slate-900 text-white px-4 rounded-lg font-bold">Criar Acesso</button>
+    <div>
+      <h3 className="font-bold text-lg mb-4 text-slate-800">
+        Locutores
+      </h3>
+
+      {/* 🔎 BUSCA */}
+      <input
+        placeholder="Buscar operador..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="w-full mb-4 p-2 border rounded-lg text-sm"
+      />
+
+      {/* ➕ FORM */}
+      <form onSubmit={handleCreate} className="grid gap-2 mb-6">
+        <input
+          placeholder="Nome"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+          className="p-2 border rounded"
+        />
+        <input
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="p-2 border rounded"
+        />
+        <input
+          placeholder="Senha"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          className="p-2 border rounded"
+        />
+
+        <button
+          disabled={isPending}
+          className="bg-slate-900 text-white py-2 rounded font-semibold"
+        >
+          {isPending ? "Criando..." : "Criar operador"}
+        </button>
       </form>
-      <div className="space-y-2">
-        {ops.map((o: any) => (
-          <div key={o.id} className="flex justify-between p-2 border-b text-sm">
-            <span>👤 <b>{o.username}</b> (Senha: {o.password})</span>
-            <button onClick={() => deleteOperator(o.id).then(() => setOps(ops.filter((x:any)=>x.id !== o.id)))} className="text-red-500">Remover</button>
-          </div>
-        ))}
+
+      {/* 📊 TABELA */}
+      <div className="border rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-100 text-left">
+            <tr>
+              <th className="p-3">Nome</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th className="text-right pr-4">Ações</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {filtered.map((op) => (
+              <tr
+                key={op.id}
+                className="border-t hover:bg-slate-50"
+              >
+                <td className="p-3 font-medium">
+                  {op.name || "—"}
+                </td>
+
+                <td>{op.email}</td>
+
+                {/* 🟢 STATUS MOCK */}
+                <td>
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                    ativo
+                  </span>
+                </td>
+
+                <td className="text-right pr-3 space-x-2">
+                  <button
+                    onClick={() => handleReset(op.id)}
+                    className="text-blue-600 hover:underline"
+                  >
+                    Reset
+                  </button>
+
+                  <button
+                    onClick={() => handleDelete(op.id, op.name)}
+                    className="text-red-500 hover:underline"
+                  >
+                    Remover
+                  </button>
+                </td>
+              </tr>
+            ))}
+
+            {filtered.length === 0 && (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="text-center py-6 text-slate-400"
+                >
+                  Nenhum operador encontrado
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

@@ -1,24 +1,30 @@
-import { prisma } from "../../../.././lib/prisma";
+//src/app/[subdomain]/dashboard/[eventId]/page.tsx
+
+import  prisma  from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import GenerateCardsButton from "./GenerateCardsButton";
 import SponsorManager from "./SponsorManager"; // <-- Importamos o painel aqui
 
-export default async function EventControlPanel({ params }: { params: Promise<{ subdomain: string, eventId: string }> }) {
-  const { subdomain, eventId } = await params;
+export default async function EventControlPanel({
+  params,
+}: {
+  params: { subdomain: string; eventId: string };
+}) {
+  const { subdomain, eventId } = params;
 
   // Busca o evento e já traz a lista de patrocinadores salvos!
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     include: { 
-      organization: true,
+      tenant: true,
       sponsors: true 
     }
   });
 
-  if (!event || event.organization.slug !== subdomain) {
-    redirect("/dashboard");
-  }
+  if (!event || !event.tenant || event.tenant.subdomain !== subdomain) {
+  redirect("/dashboard");
+}
 
   return (
     <div className="p-10 font-sans max-w-5xl mx-auto">

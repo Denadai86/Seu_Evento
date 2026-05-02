@@ -9,86 +9,106 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Hierarquia de Acessos
+// 🔐 ROLES (O coração da autorização unificada)
 enum Role {
-  SUPER_ADMIN    // João (Hub)
-  ORG_ADMIN      // Contratante (Subdomínio)
-  OPERATOR       // Locutor (Subdomínio - restrito)
+  SUPER_ADMIN // Você (Dono do SaaS)
+  ORG_ADMIN   // O Cliente (ex: João da Paróquia)
+  OPERATOR    // O Locutor do Bingo
 }
 
-// O Contratante (Inquilino do SaaS)
-model Organization {
-  id            String   @id @default(cuid())
-  name          String
-  slug          String   @unique // A URL dele: ex 'saojose' (.acaoleve.com)
-  logoUrl       String?
-  active        Boolean  @default(true)
-  
-  users         User[]
-  events        Event[]
-  
-  createdAt     DateTime @default(now())
+// 🏢 TENANT (Substitui a antiga "Organization" - Inquilino do SaaS)
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  subdomain String   @unique // ex: saobento, rotary
+  logoUrl   String?
+  active    Boolean  @default(true)
+  token     String?
 
-  operators     Operator[]
+  users     User[]
+  events    Event[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
-// O Evento (Onde a mágica acontece)
+// 👤 USERS (Unifica Donos e Operadores na mesma tabela de autenticação)
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String   @unique
+  password  String?  // Hashed via bcrypt
+  role      Role     @default(ORG_ADMIN)
+  operator  String?
+  // RELAÇÃO COM TENANT
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId]) // Otimiza a busca quando listarmos "Todos os usuários de um Tenant"
+}
+
+// 🎉 EVENTS
 model Event {
-  id             String       @id @default(cuid())
-  name           String
-  status         String       @default("DRAFT") // DRAFT, ACTIVE, FINISHED
-  drawnNumbers   Int[]        @default([])
-  
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  
-  sponsors       Sponsor[]
-  cards          Card[]
-  
-  createdAt      DateTime     @default(now())
+  id           String   @id @default(cuid())
+  name         String
+  status       String   @default("DRAFT")
+  drawnNumbers Int[]    @default([])
+  isActive     Boolean  @default(false)
+
+  // RELAÇÃO COM TENANT (Garante o isolamento dos dados)
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  sponsors     Sponsor[]
+  cards        Card[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId])
 }
 
-// Patrocinadores do Evento
+// 🤝 SPONSORS
 model Sponsor {
   id        String  @id @default(cuid())
   name      String
   logoUrl   String?
-  
+
+  // RELAÇÃO COM EVENT
   eventId   String
   event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
 }
 
-// As Cartelas
+// 🎟️ CARDS
 model Card {
-  id        String  @id @default(cuid())
-  shortId   String  // Ex: K85U
-  matrix    Json    // O JSON com B, I, N, G, O
-  isSold    Boolean @default(false)
-  
+  id        String   @id @default(cuid())
+  shortId   String   @unique // Garantia de unicidade no banco de dados!
+  matrix    Json     // Armazena {B:[], I:[], N:[], G:[], O:[]}
+  isSold    Boolean  @default(false)
+
+  // RELAÇÃO COM EVENT
   eventId   String
-  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  
-  @@index([shortId]) // Acelera muito a busca do locutor na hora da auditoria
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventId])
+  @@index([shortId])
 }
 
-model Operator {
-  id             String       @id @default(cuid())
-  username       String
-  password       String
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  userId    String?
+  tenantId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
 
-  @@unique([username, organizationId]) // O username é único dentro da mesma igreja
-}
-
-model User {
-  id             String       @id @default(cuid())
-  email          String       @unique
-  password       String       // <-- Aqui guardaremos o hash da senha, NUNCA a senha pura
-  role           String       @default("ORG_ADMIN") // ORG_ADMIN ou SUPER_ADMIN
-  
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  
-  createdAt      DateTime     @default(now())
+  @@index([tenantId])
 }

@@ -1,5 +1,7 @@
-import { prisma } from "../../../lib/prisma";
-import { auth } from "../../.././lib/auth";
+// src/app/[subdomain]/live/page.tsx
+
+import prisma from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import BingoGame from "./BingoGame";
@@ -8,40 +10,41 @@ export default async function LivePage({
   params,
   searchParams,
 }: {
-  params: Promise<{ subdomain: string }>;
-  searchParams: Promise<{ event: string }>;
+  params: { subdomain: string };
+  searchParams: { event?: string };
 }) {
-  const { subdomain } = await params;
-  const { event: eventId } = await searchParams;
+  const { subdomain } = params;
+  const eventId = searchParams.event;
 
-  // 1. Validação primária de rota
+  // 1. Validação básica
   if (!subdomain || !eventId) {
     redirect("/dashboard");
   }
 
-  // 2. Busca de dados e validação de Tenant
+  // 2. Busca evento + tenant correto
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     include: {
       sponsors: true,
-      organization: true,
+      tenant: true,
     },
   });
 
-  if (!event || event.organization.slug !== subdomain) {
+  // 3. Validação de isolamento (multi-tenant)
+  if (!event || !event.tenant || event.tenant.subdomain !== subdomain) {
     redirect("/dashboard");
   }
 
-  // 3. Autenticação híbrida: Dono via Google OAuth OU Locutor via Cookie
+  // 4. Auth (NextAuth OU operador via cookie)
   const session = await auth();
   const cookieStore = await cookies();
-  const isOperator = cookieStore.get(`auth_${subdomain}`);
+  const operatorCookie = cookieStore.get(`auth_${subdomain}`);
 
-  if (!session && !isOperator) {
+  if (!session && !operatorCookie) {
     redirect("/entrar");
   }
 
-  // 4. Renderização — só chega aqui após passar por toda a segurança
+  // 5. Render
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans overflow-hidden">
       <BingoGame
