@@ -3,12 +3,14 @@
 
 import { signIn } from "next-auth/react";
 import { useState } from "react";
+import { useRouter } from "next/navigation"; // Importação correta
 
 export default function TenantLoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter(); // Instanciando o router
 
   const handleCredentialsLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,7 +30,8 @@ export default function TenantLoginForm() {
         return;
       }
 
-      window.location.reload(); 
+      // Redirecionamento correto e suave para o Dashboard após o login
+      router.push("/dashboard"); 
     } catch (err) {
       setError("Ocorreu um erro ao tentar fazer login.");
       setIsLoading(false);
@@ -74,6 +77,7 @@ export default function TenantLoginForm() {
       </div>
 
       <button
+        type="button"
         onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
         className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 shadow-sm"
       >

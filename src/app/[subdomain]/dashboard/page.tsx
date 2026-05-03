@@ -4,13 +4,16 @@ import prisma from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import EventList from "./EventList";
 import OperatorManager from "./OperatorManager";
+import LogoutButton from "@/components/LogoutButton";
 
-export default async function TenantDashboardPage({
-  params,
-}: {
-  params: { subdomain: string };
-}) {
-  const { subdomain } = params;
+// 1. Tipagem atualizada para o padrão Next.js 15
+interface PageProps {
+  params: Promise<{ subdomain: string }>;
+}
+
+export default async function TenantDashboardPage({ params }: PageProps) {
+  // 2. Comando de espera (await) antes de desestruturar
+  const { subdomain } = await params;
 
   const tenant = await prisma.tenant.findUnique({
     where: { subdomain },
@@ -48,20 +51,26 @@ export default async function TenantDashboardPage({
           </p>
         </div>
 
-        {tenant.logoUrl ? (
-          <img
-            src={tenant.logoUrl.replace(
-              "/upload/",
-              "/upload/c_pad,w_150,h_150/"
-            )}
-            alt={`Logo ${tenant.name}`}
-            className="h-14 w-14 object-contain rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
-          />
-        ) : (
-          <div className="h-14 w-14 bg-slate-100 rounded-xl border flex items-center justify-center text-xl font-black text-slate-400">
-            {tenant.name.charAt(0)}
-          </div>
-        )}
+        {/* 🔥 Correção: Um único container flexível envolvendo a logo E o botão de logout */}
+        <div className="flex items-center gap-6">
+          {tenant.logoUrl ? (
+            <img
+              src={tenant.logoUrl.replace(
+                "/upload/",
+                "/upload/c_pad,w_150,h_150/"
+              )}
+              alt={`Logo ${tenant.name}`}
+              className="h-14 w-14 object-contain rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
+            />
+          ) : (
+            <div className="h-14 w-14 bg-slate-100 rounded-xl border flex items-center justify-center text-xl font-black text-slate-400">
+              {tenant.name.charAt(0)}
+            </div>
+          )}
+          
+          <div className="h-8 w-px bg-slate-200"></div> {/* Linha separadora */}
+          <LogoutButton callbackUrl="/entrar" variant="light" />
+        </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-10 py-10">

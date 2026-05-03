@@ -23,3 +23,41 @@ export async function createEvent(name: string) {
 
   return { success: true, event };
 }
+
+export async function toggleEventStatus(
+  eventId: string,
+  tenantId: string,
+  subdomain: string,
+  newStatus: "ACTIVE" | "DRAFT" | "FINISHED"
+) {
+  try {
+    // Se estiver ativando este evento, primeiro "pausa" (DRAFT) todos os outros deste cliente
+    if (newStatus === "ACTIVE") {
+      await prisma.$transaction([
+        prisma.event.updateMany({
+          where: { tenantId: tenantId, status: "ACTIVE" },
+          data: { status: "DRAFT" },
+        }),
+        prisma.event.update({
+          where: { id: eventId },
+          data: { status: newStatus },
+        }),
+      ]);
+    } else {
+      // Se for apenas pausar ou finalizar, altera só ele
+      await prisma.event.update({
+        where: { id: eventId },
+        data: { status: newStatus },
+      });
+    }
+
+    // Atualiza as telas em tempo real
+    revalidatePath(`/[subdomain]/dashboard`, "page");
+    revalidatePath(`/[subdomain]/dashboard/[eventId]`, "page");
+
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao alterar status do evento:", error);
+    return { success: false, error: "Falha ao alterar o status." };
+  }
+}

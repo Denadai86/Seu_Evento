@@ -1,4 +1,3 @@
-
 // src/lib/auth.ts
 import NextAuth, { DefaultSession } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
@@ -7,9 +6,7 @@ import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 
 /**
- * 1. MODULE AUGMENTATION: 
- * Ensinamos ao TypeScript que nosso User e Session do NextAuth 
- * possuem propriedades adicionais específicas do nosso SaaS.
+ * 1. MODULE AUGMENTATION
  */
 declare module "next-auth" {
   interface Session {
@@ -20,7 +17,6 @@ declare module "next-auth" {
       subdomain?: string | null;
     } & DefaultSession["user"];
   }
-
 }
 
 declare module "next-auth/jwt" {
@@ -37,20 +33,12 @@ declare module "next-auth/jwt" {
 export const { handlers, signIn, signOut, auth } = NextAuth({
   session: { strategy: "jwt" },
   pages: {
-    signIn: '/entrar', // Define a rota customizada de login
+    signIn: '/entrar',
   },
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      profile(profile) {
-        return {
-          id: profile.sub,
-          name: profile.name,
-          email: profile.email,
-          image: profile.picture,
-        };
-      },
     }),
     CredentialsProvider({
       name: "Credenciais",
@@ -63,7 +51,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         
         const user = await prisma.user.findUnique({
           where: { email: credentials.email as string },
-          include: { tenant: true } // O erro do Prisma sumirá após o npx prisma generate
+          include: { tenant: true } 
         });
 
         if (!user || !user.password) return null;
@@ -84,6 +72,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async signIn({ user, account }) {
+      // Trava de segurança: impede novos cadastros pelo Google
       if (account?.provider === "google") {
         const existingUser = await prisma.user.findUnique({
           where: { email: user.email! }
@@ -92,22 +81,32 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
+      // O `user` só é injetado nesta função no exato milissegundo do login
       if (user) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: user.email! },
-          include: { tenant: true }
-        });
-        if (dbUser) {
-          token.role = dbUser.role;
-          token.tenantId = dbUser.tenantId;
-          token.subdomain = dbUser.tenant?.subdomain;
+        if (account?.provider === "google") {
+          // O Google não sabe o cargo do usuário, então buscamos no banco
+          const dbUser = await prisma.user.findUnique({
+            where: { email: user.email! },
+            include: { tenant: true }
+          });
+          if (dbUser) {
+            token.role = dbUser.role;
+            token.tenantId = dbUser.tenantId;
+            token.subdomain = dbUser.tenant?.subdomain;
+          }
+        } else {
+          // Se foi login por senha, os dados já vieram prontos do `authorize`! Poupa o banco de dados.
+          token.role = (user as any).role;
+          token.tenantId = (user as any).tenantId;
+          token.subdomain = (user as any).subdomain;
         }
       }
       return token;
     },
     async session({ session, token }) {
-      if (session.user) {
+      // Repassa para o frontend apenas se o token tiver o cargo
+      if (session.user && token.role) {
         session.user.role = token.role as string;
         session.user.tenantId = token.tenantId as string | undefined;
         session.user.subdomain = token.subdomain as string | undefined;

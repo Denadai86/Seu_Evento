@@ -1,0 +1,7 @@
+allowBuilds:
+  '@clerk/shared': false
+  '@prisma/client': true
+  '@prisma/engines': true
+  prisma: true
+  sharp: true
+  unrs-resolver: false

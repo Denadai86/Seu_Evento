@@ -4,15 +4,20 @@ import prisma from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import ProjectorView from "./ProjectorView";
 
+// 1. Atualizar tipagens para refletir Promises
+interface ProjectorPageProps {
+  params: Promise<{ subdomain: string }>;
+  searchParams: Promise<{ event?: string }>;
+}
+
 export default async function ProjectorPage({
   params,
   searchParams,
-}: {
-  params: { subdomain: string };
-  searchParams: { event?: string };
-}) {
-  const { subdomain } = params;
-  const eventId = searchParams.event;
+}: ProjectorPageProps) {
+  // 2. Aguardar (await) os parâmetros antes de extrair os valores
+  const { subdomain } = await params;
+  const resolvedSearchParams = await searchParams;
+  const eventId = resolvedSearchParams.event;
 
   if (!eventId) redirect("/");
 

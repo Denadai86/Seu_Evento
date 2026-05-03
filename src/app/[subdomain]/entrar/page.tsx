@@ -17,6 +17,7 @@ export default async function TenantLoginPage({ params }: PageProps) {
 
   // Se o subdomínio for falso/inexistente, redireciona para a página 404 e mata o processo
   if (!tenant) {
+    console.log("❌ Cliente não encontrado no banco! Disparando 404.");
     notFound(); 
   }
 
