@@ -12,78 +12,94 @@ import { requireTenant } from "@/lib/requireTenant";
 /**
  * Gera um lote de códigos únicos (ex: "A9B2X1") garantindo zero colisões no array
  */
-function generateUniqueIds(count: number): string[] {
+function generateUniqueIds(count: number, existingIds: string[]): string[] {
   const ids = new Set<string>();
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   
   while (ids.size < count) {
     let id = "";
-    for (let i = 0; i < 6; i++) { // Aumentado para 6 caracteres (à prova de falhas)
+    for (let i = 0; i < 6; i++) {
       id += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    ids.add(id);
+    // Garante que não repete nem no novo lote, nem com as que já estão no banco!
+    if (!existingIds.includes(id)) {
+      ids.add(id);
+    }
   }
   return Array.from(ids);
 }
 
-/**
- * Gera uma coluna de Bingo com números únicos e já ordenados para facilitar a leitura
- */
 function generateBingoColumn(min: number, max: number, count: number): number[] {
   const numbers = new Set<number>();
-  
   while (numbers.size < count) {
     numbers.add(Math.floor(Math.random() * (max - min + 1)) + min);
   }
-  
-  // Ordena os números do menor para o maior (Padrão ouro de cartelas de bingo)
   return Array.from(numbers).sort((a, b) => a - b);
 }
 
+// 🔥 Helper para criar uma "Assinatura Única" de uma cartela
+function getCardSignature(matrix: any): string {
+  return [
+    ...matrix.B, ...matrix.I, ...matrix.N, ...matrix.G, ...matrix.O
+  ].join('-');
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // 🎟️ GERAÇÃO DE CARTELAS
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 🎟️ GERAÇÃO DE CARTELAS (CRIANDO LOTES SEGUROS)
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function generateBatchCards(eventId: string, quantity: number) {
-  // 1. Blindagem de Segurança Absoluta
   const { tenantId } = await requireTenant();
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
+    include: { cards: { select: { shortId: true, matrix: true } } } // Pega as antigas
   });
 
-  if (!event) {
-    throw new Error("Acesso negado ou evento inexistente.");
-  }
+  if (!event) throw new Error("Acesso negado ou evento inexistente.");
 
-  // 2. Limpa as cartelas antigas do evento
-  await prisma.card.deleteMany({ where: { eventId } });
+  const existingShortIds = event.cards.map(c => c.shortId);
+  
+  // Array com as "Assinaturas" das cartelas que já existem
+  const existingSignatures = event.cards.map(c => getCardSignature(c.matrix));
 
-  // 3. Gera os IDs únicos para este lote
-  const shortIds = generateUniqueIds(quantity);
+  const shortIds = generateUniqueIds(quantity, existingShortIds);
+  const cardsToCreate = [];
 
-  // 4. Cria as cartelas matematicamente perfeitas
-  const cardsToCreate = shortIds.map((shortId) => ({
-    eventId,
-    shortId,
-    matrix: {
+  let count = 0;
+  
+  // 🎰 GERAÇÃO MATEMATICAMENTE A PROVA DE CLONES
+  while (count < quantity) {
+    const newMatrix = {
       B: generateBingoColumn(1, 15, 5),
       I: generateBingoColumn(16, 30, 5),
-      N: generateBingoColumn(31, 45, 5), // O espaço do meio (N3) será tratado na UI (PDF)
+      N: generateBingoColumn(31, 45, 5), 
       G: generateBingoColumn(46, 60, 5),
       O: generateBingoColumn(61, 75, 5),
-    },
-    isSold: true,
-  }));
+    };
 
-  // 5. Inserção em massa super rápida
+    const newSignature = getCardSignature(newMatrix);
+
+    // Se essa exata combinação de 25 números já existe, descarta e tenta de novo
+    if (!existingSignatures.includes(newSignature)) {
+      cardsToCreate.push({
+        eventId,
+        shortId: shortIds[count],
+        matrix: newMatrix,
+        isSold: false, // 🔥 Corrigido: Nenhuma cartela nasce vendida/paga. O Vendedor que vende!
+      });
+      existingSignatures.push(newSignature); // Adiciona na memória pra não repetir neste lote
+      count++;
+    }
+  }
+
+  // Inserção no Banco
   await prisma.card.createMany({ data: cardsToCreate });
 
-  return {
-    success: true,
-    sampleId: cardsToCreate[0]?.shortId,
-    totalCreated: quantity,
-  };
+  return { success: true, totalCreated: quantity };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

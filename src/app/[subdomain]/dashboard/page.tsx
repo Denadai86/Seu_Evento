@@ -5,14 +5,13 @@ import { redirect } from "next/navigation";
 import EventList from "./EventList";
 import OperatorManager from "./OperatorManager";
 import LogoutButton from "@/components/LogoutButton";
+import { Calendar, Users, Activity, Settings, LayoutDashboard } from "lucide-react";
 
-// 1. Tipagem atualizada para o padrão Next.js 15
 interface PageProps {
   params: Promise<{ subdomain: string }>;
 }
 
 export default async function TenantDashboardPage({ params }: PageProps) {
-  // 2. Comando de espera (await) antes de desestruturar
   const { subdomain } = await params;
 
   const tenant = await prisma.tenant.findUnique({
@@ -27,10 +26,8 @@ export default async function TenantDashboardPage({ params }: PageProps) {
 
   if (!tenant) redirect("/");
 
-  // 🎯 separação de papéis (base do SaaS multi-role)
   const operators = tenant.users.filter((u) => u.role === "OPERATOR");
 
-  // 📊 métricas rápidas (cara de produto pago)
   const metrics = {
     totalEvents: tenant.events.length,
     activeEvents: tenant.events.filter((e) => e.status === "ACTIVE").length,
@@ -38,109 +35,119 @@ export default async function TenantDashboardPage({ params }: PageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans">
+    <div className="min-h-screen bg-[#0b0f14] text-slate-200 font-sans pb-20">
       
-      {/* HEADER */}
-      <header className="bg-white border-b border-slate-200 px-10 py-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-black text-slate-800">
-            {tenant.name}
-          </h1>
-          <p className="text-slate-500 text-sm font-mono mt-1">
-            {tenant.subdomain}.acaoleve.com
-          </p>
-        </div>
+      {/* 🚀 HEADER PREMIUM */}
+      <header className="sticky top-0 z-50 bg-[#0b0f14]/80 backdrop-blur-md border-b border-emerald-900/30">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-wide">{tenant.name}</h1>
+            <p className="text-emerald-500/70 text-sm font-bold uppercase tracking-widest mt-1">
+              {tenant.subdomain}.acaoleve.com
+            </p>
+          </div>
 
-        {/* 🔥 Correção: Um único container flexível envolvendo a logo E o botão de logout */}
-        <div className="flex items-center gap-6">
-          {tenant.logoUrl ? (
-            <img
-              src={tenant.logoUrl.replace(
-                "/upload/",
-                "/upload/c_pad,w_150,h_150/"
-              )}
-              alt={`Logo ${tenant.name}`}
-              className="h-14 w-14 object-contain rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
-            />
-          ) : (
-            <div className="h-14 w-14 bg-slate-100 rounded-xl border flex items-center justify-center text-xl font-black text-slate-400">
-              {tenant.name.charAt(0)}
-            </div>
-          )}
-          
-          <div className="h-8 w-px bg-slate-200"></div> {/* Linha separadora */}
-          <LogoutButton callbackUrl="/entrar" variant="light" />
+          <div className="flex items-center gap-6">
+            {tenant.logoUrl ? (
+              <img
+                src={tenant.logoUrl.replace("/upload/", "/upload/c_pad,w_150,h_150/")}
+                alt={`Logo ${tenant.name}`}
+                className="h-12 w-12 object-contain rounded-xl border border-emerald-900/50 bg-black/50 p-1 shadow-sm"
+              />
+            ) : (
+              <div className="h-12 w-12 bg-emerald-900/40 rounded-xl border border-emerald-500/20 flex items-center justify-center text-xl font-black text-emerald-400">
+                {tenant.name.charAt(0)}
+              </div>
+            )}
+            
+            <div className="h-6 w-px bg-slate-800"></div>
+            <LogoutButton callbackUrl="/entrar" variant="dark" />
+          </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-10 py-10">
+      <main className="max-w-7xl mx-auto px-6 mt-8">
 
-        {/* 📊 METRICS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        {/* 📊 ESTATÍSTICAS RÁPIDAS (Top Cards) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           
-          <MetricCard
-            label="Eventos"
-            value={metrics.totalEvents}
-          />
+          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center">
+              <Calendar size={32} />
+            </div>
+            <div>
+              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Eventos Criados</p>
+              <p className="text-4xl font-black text-white">{metrics.totalEvents}</p>
+            </div>
+          </div>
 
-          <MetricCard
-            label="Eventos Ativos"
-            value={metrics.activeEvents}
-          />
+          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-16 h-16 rounded-2xl bg-amber-900/40 text-amber-400 flex items-center justify-center">
+              <Activity size={32} />
+            </div>
+            <div>
+              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Eventos Ativos</p>
+              <p className="text-4xl font-black text-white">{metrics.activeEvents}</p>
+            </div>
+          </div>
 
-          <MetricCard
-            label="Locutores"
-            value={metrics.totalOperators}
-          />
+          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-16 h-16 rounded-2xl bg-blue-900/40 text-blue-400 flex items-center justify-center">
+              <Users size={32} />
+            </div>
+            <div>
+              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Locutores da Equipe</p>
+              <p className="text-4xl font-black text-white">{metrics.totalOperators}</p>
+            </div>
+          </div>
+
         </div>
 
-        {/* GRID PRINCIPAL */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* 🧩 BENTO GRID PRINCIPAL */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* EVENTOS */}
-          <main className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-            <EventList initialEvents={tenant.events} />
-          </main>
-
-          {/* SIDEBAR */}
-          <aside className="flex flex-col gap-6">
+          {/* MÓDULO 1: MEUS EVENTOS (Ocupa 2 colunas) */}
+          <div className="lg:col-span-2 bg-[#111827] border border-emerald-900/30 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+            {/* Efeito de brilho de fundo */}
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full"></div>
             
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <OperatorManager
-                initialOperators={operators}
-              />
+            <div className="flex items-center gap-3 mb-8 relative z-10">
+              <LayoutDashboard className="text-emerald-400" size={28} />
+              <h2 className="text-2xl font-black text-white">Gestão de Eventos</h2>
             </div>
 
-            {/* 🔮 FUTURO (plugável) */}
-            <div className="bg-white p-6 rounded-2xl border border-dashed border-slate-200 text-center text-sm text-slate-400">
-              Módulos futuros<br />
-              Financeiro • Relatórios • Analytics
+            <div className="relative z-10">
+              {/* O componente EventList vai ser renderizado aqui */}
+              <EventList initialEvents={tenant.events} />
+            </div>
+          </div>
+
+          {/* SIDEBAR: EQUIPE E FUTURO */}
+          <div className="flex flex-col gap-6">
+            
+            {/* MÓDULO 2: LOCUTORES / EQUIPE */}
+            <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-blue-900/30 rounded-3xl p-8 shadow-2xl">
+              <div className="flex items-center gap-3 mb-6">
+                <Users className="text-blue-400" size={24} />
+                <h2 className="text-xl font-black text-white">Equipe</h2>
+              </div>
+              
+              {/* O componente OperatorManager vai ser renderizado aqui */}
+              <OperatorManager initialOperators={operators} />
             </div>
 
-          </aside>
+            {/* 🔮 MÓDULO 3: FUTURO (plugável) */}
+            <div className="bg-[#111827]/50 p-8 rounded-3xl border border-dashed border-slate-700 text-center flex flex-col items-center justify-center gap-4">
+              <Settings className="text-slate-500" size={32} />
+              <div>
+                <h3 className="text-slate-400 font-bold uppercase tracking-wider text-sm mb-1">Módulos Futuros</h3>
+                <p className="text-slate-600 text-xs">Financeiro • Relatórios • Analytics B2B</p>
+              </div>
+            </div>
+
+          </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * 🧩 COMPONENTE INTERNO (padrão enterprise)
- * Reutilizável pra métricas
- */
-function MetricCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: number;
-}) {
-  return (
-    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-      <p className="text-sm text-slate-500 mb-2">{label}</p>
-      <p className="text-3xl font-black text-slate-800">
-        {value}
-      </p>
+      </main>
     </div>
   );
 }

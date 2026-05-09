@@ -1,8 +1,78 @@
+// src/app/[subdomain]/dashboard/[eventId]/GenerateCardsButton.tsx
 "use client";
 
-import { useState } from "react";
-import { generateBatchCards } from "@/actions/bingo";
-import { Printer, Loader2, CheckCircle2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { generateBatchCards as generateCards} from "@/actions/bingo";
+import { Printer, FileText, Smartphone, BookOpen, Award } from "lucide-react";
+
+// ======================== CONFIGURAÇÃO DE IMPRESSÃO ========================
+
+const printOptions = [
+  {
+    layout: "a4-4",
+    label: "Padrão A4",
+    description: "4 por folha",
+    color: "emerald",
+    icon: FileText,
+  },
+  {
+    layout: "a4-6",
+    label: "Econômico A4",
+    description: "6 por folha",
+    color: "purple",
+    icon: FileText,
+  },
+  {
+    layout: "a4-2",
+    label: "Modo Idoso",
+    description: "2 por folha (A4)",
+    color: "blue",
+    icon: BookOpen,
+  },
+  {
+    layout: "a4-1",
+    label: "Premium A4",
+    description: "1 por folha",
+    color: "rose",
+    icon: FileText,
+  },
+  {
+    layout: "a6",
+    label: "Padrão Gráfica",
+    description: "A6 (10x15)",
+    color: "amber",
+    icon: Smartphone,
+  },
+] as const;
+
+function PrintOptions({ eventId }: { eventId: string }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      {printOptions.map(({ layout, label, description, color, icon: Icon }) => (
+        <a
+          key={layout}
+          href={`/print?eventId=${eventId}&layout=${layout}`}
+          target="_blank"
+          className={`
+            bg-slate-900 border border-slate-700 
+            hover:border-${color}-500/50 
+            p-4 rounded-xl flex flex-col items-center text-center 
+            transition-all group
+          `}
+        >
+          <Icon 
+            className={`text-slate-500 group-hover:text-${color}-400 mb-2 transition-colors`} 
+            size={24} 
+          />
+          <span className="text-slate-200 font-bold text-sm">{label}</span>
+          <span className="text-slate-500 text-[10px] uppercase mt-1">
+            {description}
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
 
 export default function GenerateCardsButton({
   eventId,
@@ -11,97 +81,64 @@ export default function GenerateCardsButton({
   eventId: string;
   eventName: string;
 }) {
-  const [quantity, setQuantity] = useState(100);
-  const [loading, setLoading] = useState(false);
-  const [generatedCount, setGeneratedCount] = useState<number | null>(null);
+  const [amount, setAmount] = useState(100);
+  const [isPending, startTransition] = useTransition();
+  const [successCount, setSuccessCount] = useState(0);
 
-  const handleGenerate = async () => {
-    if (quantity < 1 || quantity > 5000) {
-      alert("Para garantir a performance, gere lotes entre 1 e 5000 cartelas.");
-      return;
-    }
-
-    if (!confirm(`Isso irá apagar as cartelas antigas e gerar ${quantity} novas cartelas únicas. Tem certeza?`)) {
-      return;
-    }
-
-    setLoading(true);
-    setGeneratedCount(null);
-
-    try {
-      // Chama a nossa nova action super-rápida e segura no servidor
-      const res = await generateBatchCards(eventId, quantity);
-      
-      if (res.success && res.totalCreated) {
-        setGeneratedCount(res.totalCreated);
+  const handleGenerate = () => {
+    if (amount <= 0 || amount > 5000) return alert("Quantidade inválida");
+    startTransition(async () => {
+      const res = await generateCards(eventId, amount);
+      if (res.success) {
+        setSuccessCount(amount);
       }
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "Erro ao gerar cartelas.");
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col sm:flex-row gap-3">
+    <div className="flex flex-col gap-6">
+      
+      {/* Módulo de Geração */}
+      <div className="flex flex-col sm:flex-row gap-4">
         <div className="flex-1">
-          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">
-            Qtd. de Cartelas
+          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">
+            Qtd. de Novas Cartelas
           </label>
           <input
             type="number"
-            value={quantity}
-            min={1}
-            max={5000}
-            onChange={(e) => setQuantity(Number(e.target.value))}
-            className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl p-4 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none font-bold text-slate-800 transition-all text-lg"
+            min="1"
+            max="5000"
+            value={amount}
+            onChange={(e) => setAmount(Number(e.target.value))}
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-emerald-500 transition-colors"
           />
         </div>
-
-        <div className="flex-[2] flex items-end">
+        <div className="flex items-end">
           <button
             onClick={handleGenerate}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white hover:bg-slate-800 font-black py-4 px-6 rounded-xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50 disabled:hover:scale-100 disabled:shadow-none"
+            disabled={isPending}
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black px-8 py-3 rounded-xl transition-all disabled:opacity-50 h-[50px]"
           >
-            {loading ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                PROCESSANDO LOTE...
-              </>
-            ) : (
-              "GERAR NOVAS CARTELAS"
-            )}
+            {isPending ? "Gerando..." : "+ Gerar Estoque"}
           </button>
         </div>
       </div>
 
-      {generatedCount !== null && (
-        <div className="mt-4 p-6 bg-emerald-50 border border-emerald-200 rounded-2xl text-center shadow-sm animate-in fade-in slide-in-from-top-4 duration-300">
-          <h3 className="text-emerald-700 font-black text-lg mb-2 flex items-center justify-center gap-2">
-            <CheckCircle2 size={24} />
-            {generatedCount} cartelas geradas com sucesso!
-          </h3>
-          <p className="text-emerald-600 text-sm mb-6 font-medium">
-            O lote matemático foi criado e salvo no banco de dados.
-          </p>
-
-          <a
-            href={`/imprimir?event=${eventId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-emerald-500 text-white font-black py-4 px-8 rounded-xl hover:bg-emerald-600 transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)] hover:-translate-y-1"
-          >
-            <Printer size={20} />
-            ABRIR TELA DE IMPRESSÃO
-          </a>
-          <p className="text-emerald-600/60 text-xs mt-3 font-medium">
-            Dica: Na próxima tela, aperte Ctrl+P (ou Cmd+P) e escolha "Salvar como PDF".
-          </p>
+      {successCount > 0 && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl text-emerald-400 text-sm text-center font-bold animate-in fade-in">
+          ✅ {successCount} cartelas criadas e adicionadas ao estoque com sucesso!
         </div>
       )}
+
+{/* Módulo de Impressão (Central de Saída) */}
+<div className="pt-6 border-t border-slate-800">
+  <h3 className="text-sm font-bold text-slate-400 mb-4 flex items-center gap-2">
+    <Printer size={16} /> Central de Impressão
+  </h3>
+
+  <PrintOptions eventId={eventId} />
+</div>
+
     </div>
   );
 }

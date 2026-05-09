@@ -85,6 +85,7 @@ export default auth((req) => {
     if (
       pathname.startsWith("/dashboard") &&
       session.user.role === "OPERATOR"
+      
     ) {
       return NextResponse.redirect(new URL("/live", req.url));
     }

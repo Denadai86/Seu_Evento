@@ -6,7 +6,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+
 }
 
 // 🔐 ROLES (O coração da autorização unificada)
@@ -58,13 +58,15 @@ model Event {
   drawnNumbers Int[]    @default([])
   isActive     Boolean  @default(false)
   showBoard    Boolean  @default(true) // 🔥 A nova chave do Modo Hardcore
-  
+  sellers      Seller[]
+  cards        Card[]
+
   // RELAÇÃO COM TENANT (Garante o isolamento dos dados)
   tenantId     String
   tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   sponsors     Sponsor[]
-  cards        Card[]
+
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -77,7 +79,9 @@ model Sponsor {
   id        String  @id @default(cuid())
   name      String
   logoUrl   String?
-
+  contribution  Int      @default(0)     // valor em centavos (R$ 500,00 = 50000)
+  order         Int      @default(0)     // para reordenação manual
+  
   // RELAÇÃO COM EVENT
   eventId   String
   event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -86,13 +90,20 @@ model Sponsor {
 }
 
 // 🎟️ CARDS
+// 🎟️ CARDS
 model Card {
   id        String   @id @default(cuid())
-  shortId   String   @unique // Garantia de unicidade no banco de dados!
-  matrix    Json     // Armazena {B:[], I:[], N:[], G:[], O:[]}
+  shortId   String   @unique
+  matrix    Json
   isSold    Boolean  @default(false)
 
-  // RELAÇÃO COM EVENT
+  // 🔥 Campos financeiros
+  sellerId  String?
+  isPaid    Boolean  @default(false)
+  price     Float?
+
+  // Relações
+  seller    Seller?  @relation(fields: [sellerId], references: [id])
   eventId   String
   event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
@@ -101,6 +112,7 @@ model Card {
 
   @@index([eventId])
   @@index([shortId])
+  @@map("cards")
 }
 
 model AuditLog {
@@ -112,4 +124,17 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([tenantId])
+}
+
+model Seller {
+  id        String   @id @default(cuid())
+  eventId   String
+  name      String
+  phone     String?
+  createdAt DateTime @default(now())
+
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  cards     Card[]   // Um vendedor pode ter um lote de cartelas na mão dele
+
+  @@map("sellers")
 }

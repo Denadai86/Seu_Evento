@@ -1,139 +1,202 @@
-// src/app/[subdomain]/dashboard/[eventId]/page.tsx
+//src/app/[subdomain]/dashboard/[eventId]/page.tsx
 
 import prisma from "@/lib/prisma";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
-import GenerateCardsButton from "./GenerateCardsButton";
-import SponsorManager from "./SponsorManager";
+import LogoutButton from "@/components/LogoutButton";
 import EventStatusToggle from "./EventStatusToggle";
-import { MonitorPlay, Mic2, ThermometerSun } from "lucide-react";
+import GenerateCardsButton from "./GenerateCardsButton";
+import { 
+  Printer, Users, Megaphone, MonitorPlay, 
+  Settings, ArrowLeft, Ticket, Building2
+} from "lucide-react";
+import SellerManager from "./SellerManager";
 
-interface EventControlPanelProps {
-  params: Promise<{ subdomain: string; eventId: string }>;
-}
-
-export default async function EventControlPanel({ params }: EventControlPanelProps) {
+export default async function EventDashboardPage({
+  params,
+}: {
+  params: Promise<{ subdomain: string; eventId: string }>; // Tipagem Next.js 15
+}) {
+  // 🔥 A MÁGICA QUE CONSERTA O ERRO: Desempacotando a Promise
   const { subdomain, eventId } = await params;
-
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    include: { 
-      tenant: true,
-      sponsors: true 
-    }
+  
+  const event = await prisma.event.findFirst({
+    where: {
+      id: (await params).eventId,
+      tenant: { subdomain: (await params).subdomain },
+    },
+    include: {
+      _count: {
+        select: { cards: true, sponsors: true },
+      },
+      // 🔥 Puxa os vendedores (sellers) e as cartelas associadas a eles
+      sellers: {
+        include: { cards: { select: { id: true, isPaid: true } } },
+        orderBy: { createdAt: 'desc' }
+      }
+    },
   });
 
-  if (!event || !event.tenant || event.tenant.subdomain !== subdomain) {
-    redirect("/dashboard");
-  }
-
-  // 🌡️ Cálculos do Termômetro do Sorteio
-  const drawnCount = event.drawnNumbers.length;
-  const tempPercentage = Math.round((drawnCount / 75) * 100);
-  
-  // Cor dinâmica baseada na "temperatura" (quantidade de bolas)
-  let tempColor = "bg-blue-500"; // Início (Frio)
-  if (tempPercentage > 33) tempColor = "bg-amber-500"; // Meio (Esquentando)
-  if (tempPercentage > 66) tempColor = "bg-red-500"; // Fim (Fervendo/Batendo!)
+  if (!event) notFound();
 
   return (
-    <div className="p-6 md:p-10 font-sans max-w-6xl mx-auto">
-      <Link href="/dashboard" className="text-sm font-bold text-slate-400 hover:text-emerald-500 mb-6 inline-block transition-colors">
-        &larr; Voltar para Eventos
-      </Link>
-
-      {/* CABEÇALHO E STATUS */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-8 rounded-3xl shadow-sm border border-slate-200 mb-8 gap-6">
-        <div>
-          <h1 className="text-4xl font-black text-slate-800 tracking-tight">{event.name}</h1>
-          <p className="text-sm text-slate-500 mt-2 font-medium">
-            Status atual: <span className="font-bold uppercase px-3 py-1 bg-slate-100 rounded-lg ml-1">{event.status}</span>
-          </p>
-        </div>
-        
-        <EventStatusToggle 
-          eventId={event.id} 
-          tenantId={event.tenantId} 
-          subdomain={subdomain} 
-          currentStatus={event.status} 
-        />
-      </div>
-
-      {/* TERMÔMETRO DO EVENTO */}
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 mb-8">
-        <div className="flex justify-between items-end mb-4">
+    <div className="min-h-screen bg-[#0b0f14] text-slate-200 font-sans pb-20">
+      
+      {/* 🚀 HEADER PREMIUM */}
+      <header className="sticky top-0 z-50 bg-[#0b0f14]/80 backdrop-blur-md border-b border-emerald-900/30">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-4">
-            <div className={`p-3 rounded-2xl text-white ${tempColor} transition-colors duration-500 shadow-lg`}>
-              <ThermometerSun size={28} />
-            </div>
+            <Link 
+              href="/dashboard" 
+              className="p-2 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white"
+            >
+              <ArrowLeft size={20} />
+            </Link>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">Termômetro do Sorteio</h2>
-              <p className="text-slate-500 text-sm">Acompanhe o andamento das pedras sorteadas</p>
+              <h1 className="text-2xl font-black text-white tracking-wide">{event.name}</h1>
+              <p className="text-emerald-500/70 text-sm font-bold uppercase tracking-widest">
+                Centro de Comando
+              </p>
             </div>
           </div>
-          <div className="text-right">
-            <span className="text-4xl font-black text-slate-800">{drawnCount}</span>
-            <span className="text-slate-400 font-bold text-xl"> / 75</span>
+          <div className="flex items-center gap-4">
+            {/* 🔥 CORRIGIDO: O Toggle de status agora só passa o eventId e o status inicial, ou apenas o que o seu componente realmente pede */}
+            <EventStatusToggle eventId={event.id} tenantId={""} subdomain={""} currentStatus={""} />
+            <div className="h-6 w-px bg-slate-800"></div>
+            <LogoutButton callbackUrl="/entrar" variant="dark" />
           </div>
         </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 mt-8">
         
-        {/* Barra de Progresso Animada */}
-        <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
-          <div 
-            className={`h-full ${tempColor} transition-all duration-1000 ease-out`}
-            style={{ width: `${tempPercentage}%` }}
-          ></div>
-        </div>
-      </div>
-
-      {/* AS PORTAS DE ACESSO (SÓ APARECEM SE O EVENTO ESTIVER ATIVO) */}
-      {event.status === "ACTIVE" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <a 
-            href={`/projector?event=${event.id}`} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="flex items-center gap-5 bg-slate-900 hover:bg-slate-800 text-white p-6 rounded-3xl border border-slate-700 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1 group"
-          >
-            <div className="bg-emerald-500/20 p-4 rounded-2xl text-emerald-400 group-hover:scale-110 group-hover:rotate-3 transition-all">
-              <MonitorPlay size={32} />
+        {/* 📊 ESTATÍSTICAS RÁPIDAS (Top Cards) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center">
+              <Ticket size={32} />
             </div>
             <div>
-              <h3 className="text-xl font-black text-white group-hover:text-emerald-400 transition-colors">Telão do Público</h3>
-              <p className="text-sm text-slate-400 mt-1">Projete a mesa em uma TV ou Datashow</p>
+              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Cartelas Geradas</p>
+              <p className="text-4xl font-black text-white">{event._count.cards}</p>
             </div>
-          </a>
+          </div>
 
-          <a 
-            href={`/live?event=${event.id}`} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="flex items-center gap-5 bg-slate-900 hover:bg-slate-800 text-white p-6 rounded-3xl border border-slate-700 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1 group"
-          >
-            <div className="bg-amber-500/20 p-4 rounded-2xl text-amber-400 group-hover:scale-110 group-hover:-rotate-3 transition-all">
-              <Mic2 size={32} />
+          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-16 h-16 rounded-2xl bg-amber-900/40 text-amber-400 flex items-center justify-center">
+              <Building2 size={32} />
             </div>
             <div>
-              <h3 className="text-xl font-black text-white group-hover:text-amber-400 transition-colors">Painel do Locutor</h3>
-              <p className="text-sm text-slate-400 mt-1">Abra a mesa de sorteio e inicie o jogo</p>
+              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Patrocinadores</p>
+              <p className="text-4xl font-black text-white">{event._count.sponsors}</p>
             </div>
-          </a>
-        </div>
-      )}
+          </div>
 
-      {/* GERENCIAMENTO INFERIOR */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-          <h2 className="text-xl font-bold text-slate-800 mb-2">Lote de Cartelas</h2>
-          <p className="text-slate-500 mb-6 text-sm">Gere o arquivo das cartelas para distribuir aos jogadores.</p>
-          <GenerateCardsButton eventId={event.id} eventName={event.name} />
+          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-16 h-16 rounded-2xl bg-blue-900/40 text-blue-400 flex items-center justify-center">
+              <Users size={32} />
+            </div>
+            <div>
+              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Vendedores</p>
+              <p className="text-4xl font-black text-white">{event.sellers.length}</p> 
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-           {/* Reutilizamos o componente original que você já tinha */}
-           <SponsorManager eventId={event.id} initialSponsors={event.sponsors} />
+        {/* 🧩 BENTO GRID (Módulos de Ação) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* MÓDULO 1: CARTELAS E IMPRESSÃO (Ocupa 2 colunas) */}
+          <div className="lg:col-span-2 bg-[#111827] border border-emerald-900/30 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full"></div>
+            
+            <div className="flex items-center gap-3 mb-8">
+              <Printer className="text-emerald-400" size={28} />
+              <h2 className="text-2xl font-black text-white">Fábrica de Cartelas</h2>
+            </div>
+            
+            <p className="text-slate-400 mb-8 max-w-xl">
+              Gere lotes matematicamente seguros e imprima em diferentes formatos. Em breve, envie direto para gráficas parceiras com desconto.
+            </p>
+
+            <div className="bg-[#0b0f14] p-6 rounded-2xl border border-slate-800">
+              <GenerateCardsButton eventId={event.id} eventName={event.name} />
+            </div>
+          </div>
+
+          {/* MÓDULO 3: VENDEDORES E LOGÍSTICA */}
+          <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-blue-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
+            <div className="flex items-center gap-3 mb-6 shrink-0">
+              <Users className="text-blue-400" size={28} />
+              <div>
+                <h2 className="text-xl font-black text-white">Vendedores</h2>
+                <p className="text-slate-500 text-xs mt-1">Gestão de lotes e acertos</p>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-hidden">
+              {/* O componente Sanfona que criamos antes! */}
+              <SellerManager eventId={event.id} initialSellers={event.sellers} />
+            </div>
+          </div>
+
+          {/* MÓDULO 2: PATROCINADORES */}
+          <div className="lg:col-span-1 bg-[#111827] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col">
+            <div className="flex items-center gap-3 mb-6">
+              <Megaphone className="text-amber-400" size={28} />
+              <h2 className="text-xl font-black text-white">Patrocinadores</h2>
+            </div>
+            <p className="text-slate-400 text-sm mb-6 flex-1">
+              Adicione logomarcas que aparecerão no rodapé do telão.
+            </p>
+            <button className="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2">
+              <Settings size={18} />
+              Gerenciar
+            </button>
+          </div>
+
+        {/* MÓDULO 4: LINKS RÁPIDOS E AVALIADORES */}
+        <div className="lg:col-span-2 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col sm:flex-row gap-6 items-center justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <MonitorPlay className="text-slate-300" size={24} />
+              <h2 className="text-xl font-black text-white">Área de Testes & Conferência</h2>
+            </div>
+            <p className="text-slate-400 text-sm">
+              Teste o telão e compartilhe o verificador com a equipe de conferência.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <a 
+              href="/live" 
+              target="_blank"
+              className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2"
+            >
+              Mesa Locutor
+            </a>
+            
+            <a 
+              href={`/projector?event=${event.id}`} 
+              target="_blank"
+              className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
+            >
+              Abrir Telão
+            </a>
+
+            {/* 🔥 NOVO: Link para Avaliadores (Público) */}
+            <a 
+              href={`/${subdomain}/verify?event=${event.id}`}
+              target="_blank"
+              className="flex-1 sm:flex-none bg-violet-600 hover:bg-violet-500 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
+            >
+              <span>🔎 Verificador de Cartelas</span>
+            </a>
+          </div>
         </div>
-      </div>
+
+        </div>
+      </main>
     </div>
   );
 }

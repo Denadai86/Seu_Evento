@@ -109,9 +109,9 @@ export default function OperatorManager({ initialOperators }: Props) {
       {/* 📊 TABELA */}
       <div className="border rounded-xl overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-100 text-left">
+          <thead className="bg-emerald-900 text-left">
             <tr>
-              <th className="p-3">Nome</th>
+              <th className="p-">Nome</th>
               <th>Email</th>
               <th>Status</th>
               <th className="text-right pr-4">Ações</th>
@@ -122,7 +122,7 @@ export default function OperatorManager({ initialOperators }: Props) {
             {filtered.map((op) => (
               <tr
                 key={op.id}
-                className="border-t hover:bg-slate-50"
+                className="border-t hover:bg-slate-50 transition-colors"
               >
                 <td className="p-3 font-medium">
                   {op.name || "—"}

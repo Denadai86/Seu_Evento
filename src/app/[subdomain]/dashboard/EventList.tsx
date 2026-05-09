@@ -66,7 +66,7 @@ export default function EventList({
           {initialEvents.map((evento) => (
             <div
               key={evento.id}
-              className="p-6 border rounded-xl shadow-sm bg-white flex justify-between items-center"
+              className="p-6 border rounded-xl shadow-sm bg-slate-800 flex justify-between items-center"
             >
               <div>
                 <h3 className="font-bold text-lg">

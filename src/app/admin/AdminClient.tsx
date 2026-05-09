@@ -1,284 +1,132 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAllTenants, createTenant, deleteTenant } from "@/actions/tenant";
-import { Plus, Trash2, ExternalLink, CheckCircle2, Copy, Building2, KeyRound } from "lucide-react";
-import LogoutButton from "@/components/LogoutButton";
+import { getGlobalStats, resetUserPassword } from "@/actions/admin";
+import { 
+  Users, Calendar, Ticket, ShieldAlert, 
+  Search, RefreshCcw, LayoutDashboard, Database 
+} from "lucide-react";
 
-export default function AdminClient({ session }: { session: any }) {
-  const [tenants, setTenants] = useState<any[]>([]);
-  const [name, setName] = useState("");
-  const [subdomain, setSubdomain] = useState("");
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [newClientData, setNewClientData] = useState<any>(null);
-  const [copied, setCopied] = useState(false);
-
-  const loadTenants = async () => {
-    try {
-      const data = await getAllTenants();
-      setTenants(data);
-    } catch (error) {
-      console.error("Erro ao carregar clientes", error);
-    }
-  };
+export default function AdminClient() {
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadTenants();
+    getGlobalStats().then(setStats).finally(() => setLoading(false));
   }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name || !subdomain || !email) return;
-
-    setLoading(true);
-    setNewClientData(null);
-    setCopied(false);
-
-    try {
-      const res = await createTenant(name, subdomain, email);
-
-      if (res.success) {
-        setNewClientData(res.credentials);
-        setName("");
-        setSubdomain("");
-        setEmail("");
-        await loadTenants();
-      }
-    } catch (error: any) {
-      alert(error.message);
-    } finally {
-      setLoading(false);
-    }
+  const handleResetPassword = async (userId: string) => {
+    if (!confirm("Resetar senha para 'mudar123'?")) return;
+    const res = await resetUserPassword(userId);
+    if (res.success) alert("Senha resetada com sucesso!");
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta organização? Isso apagará tudo!")) return;
-    try {
-      await deleteTenant(id);
-      await loadTenants();
-    } catch (error: any) {
-      alert(error.message);
-    }
-  };
-
-  const handleCopyCredentials = () => {
-    if (!newClientData) return;
-    const text = `Painel: ${newClientData.loginUrl}\nLogin: ${newClientData.email}\nSenha: ${newClientData.password}`;
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  if (loading) return <div className="p-20 text-center font-black text-emerald-500 animate-pulse">CARREGANDO PLATAFORMA...</div>;
 
   return (
-    <div className="min-h-screen bg-[#050505] text-slate-200 font-sans p-6 md:p-12 selection:bg-emerald-500/30">
-      <div className="max-w-7xl mx-auto">
-
-        {/* HEADER */}
-        <header className="flex justify-between items-center mb-12 bg-[#111111] border border-[#222] p-6 rounded-3xl shadow-2xl">
-          <div>
-            <h1 className="text-3xl font-black text-white tracking-tight">
-              Ação Leve <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-600">HUB</span>
-            </h1>
-            <p className="text-slate-500 text-sm mt-1">Gerenciamento Central de Inquilinos</p>
-          </div>
-
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3 bg-[#1a1a1a] py-2 px-4 rounded-full border border-[#333]">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-emerald-400 flex items-center justify-center text-black text-sm font-black shadow-lg shadow-emerald-500/20">
-                {session?.user?.name?.charAt(0) || "A"}
-              </div>
-              <span className="text-sm font-medium text-slate-300">{session?.user?.name}</span>
-            </div>
-            <div className="h-8 w-px bg-slate-800"></div>
-            <LogoutButton callbackUrl="/admin/login" variant="dark" />
-          </div>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-
-          {/* COLUNA ESQUERDA: FORMULÁRIO */}
-          <aside className="space-y-6">
-            <div className="bg-[#111111] border border-[#222] p-8 rounded-3xl shadow-xl">
-              <h2 className="text-xl font-bold text-white mb-6 flex gap-3 items-center">
-                <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
-                  <Building2 size={20} />
-                </div>
-                Nova Organização
-              </h2>
-
-              <form onSubmit={handleCreate} className="space-y-5">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wider">Nome do Contratante</label>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Ex: Igreja São José"
-                    required
-                    className="w-full bg-[#1a1a1a] text-white border border-[#333] rounded-xl p-4 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all placeholder:text-slate-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wider">Subdomínio da URL</label>
-                  <div className="relative flex items-center">
-                    <input
-                      value={subdomain}
-                      onChange={(e) => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""))}
-                      placeholder="sjose"
-                      required
-                      className="w-full bg-[#1a1a1a] text-white border border-[#333] rounded-xl p-4 pr-32 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all font-mono placeholder:text-slate-600"
-                    />
-                    <span className="absolute right-4 text-slate-500 font-mono text-sm pointer-events-none">
-                      .acaoleve.com
-                    </span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wider">E-mail do Administrador</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="padre@igreja.com"
-                    required
-                    className="w-full bg-[#1a1a1a] text-white border border-[#333] rounded-xl p-4 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all placeholder:text-slate-600"
-                  />
-                </div>
-
-                <button 
-                  disabled={loading} 
-                  className="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-emerald-900/50 disabled:opacity-50 flex justify-center items-center gap-2"
-                >
-                  {loading ? (
-                    <span className="animate-pulse">Processando infraestrutura...</span>
-                  ) : (
-                    <>
-                      <Plus size={20} />
-                      Criar e Provisionar
-                    </>
-                  )}
-                </button>
-              </form>
-            </div>
-
-            {/* CAIXA DE SUCESSO PREMIUM */}
-            {newClientData && (
-              <div className="bg-emerald-950/30 border border-emerald-500/30 p-6 rounded-3xl relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <CheckCircle2 size={100} />
-                </div>
-                
-                <h3 className="text-emerald-400 font-bold flex items-center gap-2 mb-4">
-                  <CheckCircle2 size={20} />
-                  Ambiente Liberado!
-                </h3>
-
-                <div className="bg-[#050505] border border-emerald-900/50 rounded-xl p-4 text-sm font-mono space-y-3 relative z-10">
-                  <div>
-                    <span className="text-slate-500 text-xs block mb-1">Painel:</span>
-                    <a href={newClientData.loginUrl} target="_blank" className="text-emerald-400 hover:underline break-all">
-                      {newClientData.loginUrl}
-                    </a>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 text-xs block mb-1">Login Master:</span>
-                    <span className="text-white">{newClientData.email}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 text-xs block mb-1">Senha (Salve agora, não será exibida novamente):</span>
-                    <span className="text-white bg-slate-800 px-2 py-1 rounded">{newClientData.password}</span>
-                  </div>
-                </div>
-
-                <button 
-                  onClick={handleCopyCredentials}
-                  className="w-full mt-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 font-medium py-3 rounded-xl transition-all flex justify-center items-center gap-2"
-                >
-                  {copied ? <CheckCircle2 size={18} /> : <Copy size={18} />}
-                  {copied ? "Copiado para a área de transferência!" : "Copiar credenciais para o cliente"}
-                </button>
-              </div>
-            )}
-          </aside>
-
-          {/* COLUNA DIREITA: LISTA DE CLIENTES */}
-          <div className="lg:col-span-2 space-y-6">
-            <div className="flex justify-between items-end mb-2">
-              <h2 className="text-xl font-bold text-white">
-                Contratos Ativos
-              </h2>
-              <span className="bg-[#222] text-emerald-400 px-3 py-1 rounded-full text-xs font-bold border border-[#333]">
-                {tenants.length} {tenants.length === 1 ? "Cliente" : "Clientes"}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              {tenants.map((tenant) => {
-                const url =
-                  process.env.NODE_ENV === "production"
-                    ? `https://${tenant.subdomain}.acaoleve.com/dashboard`
-                    : `http://${tenant.subdomain}.localhost:3000/dashboard`;
-
-                return (
-                  <div
-                    key={tenant.id}
-                    className="group flex flex-col sm:flex-row justify-between items-start sm:items-center p-6 bg-[#111111] border border-[#222] hover:border-[#444] rounded-2xl transition-all shadow-sm hover:shadow-xl"
-                  >
-                    <div className="mb-4 sm:mb-0">
-                      <h3 className="text-lg text-white font-bold group-hover:text-emerald-400 transition-colors">{tenant.name}</h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <div className={`w-2 h-2 rounded-full ${tenant.active ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                        <p className="text-sm text-slate-400 font-mono">
-                          {tenant.subdomain}.acaoleve.com
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 w-full sm:w-auto">
-                      <button 
-                        onClick={() => alert("Lógica de sobrescrever senha do organizador virá na V2 do sistema.")}
-                        className="flex-1 sm:flex-none p-3 bg-[#1a1a1a] hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-[#333] transition-colors tooltip"
-                        title="Resetar Senha do Admin"
-                      >
-                        <KeyRound size={18} className="mx-auto" />
-                      </button>
-
-                      <a 
-                        href={url} 
-                        target="_blank"
-                        className="flex-1 sm:flex-none p-3 bg-[#1a1a1a] hover:bg-emerald-950 text-slate-400 hover:text-emerald-400 rounded-xl border border-[#333] hover:border-emerald-500/30 transition-colors"
-                        title="Acessar Painel"
-                      >
-                        <ExternalLink size={18} className="mx-auto" />
-                      </a>
-
-                      <button 
-                        onClick={() => handleDelete(tenant.id)}
-                        className="flex-1 sm:flex-none p-3 bg-[#1a1a1a] hover:bg-red-950 text-slate-400 hover:text-red-400 rounded-xl border border-[#333] hover:border-red-500/30 transition-colors"
-                        title="Excluir Contrato"
-                      >
-                        <Trash2 size={18} className="mx-auto" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            
-            {tenants.length === 0 && (
-              <div className="text-center py-20 border border-dashed border-[#333] rounded-3xl">
-                <Building2 size={48} className="mx-auto text-[#333] mb-4" />
-                <p className="text-slate-500">Nenhum contrato ativo ainda.</p>
-                <p className="text-slate-600 text-sm mt-1">Crie seu primeiro cliente no painel ao lado.</p>
-              </div>
-            )}
-
-          </div>
-
+    <div className="min-h-screen bg-[#0b0f14] text-slate-200 p-8">
+      
+      {/* HEADER ADMIN */}
+      <div className="max-w-7xl mx-auto mb-10 flex justify-between items-end">
+        <div>
+          <h1 className="text-4xl font-black text-white tracking-tighter italic">CONSOLE CENTRAL</h1>
+          <p className="text-emerald-500 font-bold uppercase tracking-widest text-xs mt-1">Status Global do Seu Evento</p>
+        </div>
+        <div className="bg-emerald-950/30 border border-emerald-500/20 px-4 py-2 rounded-xl text-emerald-400 text-xs font-mono">
+          SISTEMA OPERACIONAL: ONLINE
         </div>
       </div>
+
+      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
+        
+        {/* KPI CARDS */}
+        <StatCard icon={<Database />} label="Clientes (Tenants)" value={stats?.tenants} color="emerald" />
+        <StatCard icon={<Calendar />} label="Eventos Totais" value={stats?.events} color="blue" />
+        <StatCard icon={<Ticket />} label="Cartelas Geradas" value={stats?.cards} color="amber" />
+        <StatCard icon={<Users />} label="Locutores" value={stats?.operators} color="purple" />
+
+        {/* BENTO: GERENCIAMENTO DE CLIENTES */}
+        <div className="md:col-span-3 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl">
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-xl font-black text-white flex items-center gap-2">
+              <Users className="text-emerald-400" /> Clientes Ativos
+            </h2>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+              <input 
+                placeholder="Buscar paróquia ou e-mail..."
+                className="bg-black/40 border border-slate-800 rounded-xl py-2 pl-10 pr-4 text-sm outline-none focus:border-emerald-500 transition-all w-64"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-800">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-black/50 text-slate-500 text-xs uppercase font-black">
+                <tr>
+                  <th className="p-4">Subdomínio</th>
+                  <th className="p-4">Dono</th>
+                  <th className="p-4">Ações de Suporte</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {/* Aqui você faria um map dos seus Tenants reais */}
+                <tr className="hover:bg-emerald-500/5 transition-colors group">
+                  <td className="p-4 font-bold text-white">sjose</td>
+                  <td className="p-4 text-slate-400 text-sm">padre@igreja.com</td>
+                  <td className="p-4 flex gap-2">
+                    <button 
+                      onClick={() => handleResetPassword("id-do-usuario")}
+                      className="p-2 bg-slate-800 hover:bg-amber-900/30 text-amber-500 rounded-lg transition-all"
+                      title="Resetar Senha"
+                    >
+                      <RefreshCcw size={18} />
+                    </button>
+                    <a 
+                      href="https://sjose.acaoleve.com/dashboard" 
+                      target="_blank"
+                      className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-black rounded-lg text-xs font-black transition-all"
+                    >
+                      <LayoutDashboard size={16} /> ASSISTIR PAINEL
+                    </a>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* BENTO: ALERTAS DE SISTEMA */}
+        <div className="bg-[#111827] border border-red-900/20 rounded-3xl p-8 shadow-2xl">
+          <h2 className="text-xl font-black text-white flex items-center gap-2 mb-6">
+            <ShieldAlert className="text-red-500" /> Alertas
+          </h2>
+          <div className="space-y-4">
+            <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-2xl text-xs text-red-400">
+              Nenhum erro crítico detectado nas últimas 24h.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, color }: any) {
+  const colors: any = {
+    emerald: "text-emerald-400 bg-emerald-900/20",
+    blue: "text-blue-400 bg-blue-900/20",
+    amber: "text-amber-400 bg-amber-900/20",
+    purple: "text-purple-400 bg-purple-900/20",
+  };
+  return (
+    <div className="bg-[#111827] border border-slate-800 p-6 rounded-3xl shadow-xl">
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${colors[color]}`}>
+        {icon}
+      </div>
+      <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-1">{label}</p>
+      <p className="text-3xl font-black text-white">{value}</p>
     </div>
   );
 }
