@@ -63,18 +63,25 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  // ═══════════════════════════════════════════════════════════════
+ // ═══════════════════════════════════════════════════════════════
   // SUBDOMÍNIOS DE CLIENTES  (sjose.acaoleve.com / sjose.localhost)
   // ═══════════════════════════════════════════════════════════════
 
-  // Rotas públicas — não precisam de sessão (telão, cartela do jogador)
-  if (pathname.startsWith("/projector") || pathname.startsWith("/cartela")) {
+  // 1. ROTAS PÚBLICAS (Sem login)
+  if (
+    pathname.startsWith("/projector") || 
+    pathname.startsWith("/cartela") || 
+    pathname === "/verify" // 🔥 Apenas a raiz do verify é pública
+  ) {
     // Deixa passar direto para o rewrite abaixo
-  } else if (pathname.startsWith("/dashboard") || pathname.startsWith("/live")) {
-    // Rotas protegidas: exigem sessão válida no tenant correto
-    if (!session)
+  } 
+  // 2. ROTAS PROTEGIDAS (Exigem login)
+  else {
+    if (!session) {
       return NextResponse.redirect(new URL("/entrar", req.url));
+    }
 
+    // Trava de Subdomínio (Não deixa acessar o painel do vizinho)
     if (
       session.user.subdomain !== currentHost &&
       session.user.role !== "SUPER_ADMIN"
@@ -82,20 +89,25 @@ export default auth((req) => {
       return NextResponse.redirect(new URL("/entrar", req.url));
     }
 
+    // Trava do Locutor (Operador não acessa Dashboard nem Vendas)
     if (
-      pathname.startsWith("/dashboard") &&
+      (pathname.startsWith("/dashboard") || pathname.startsWith("/vendas")) &&
       session.user.role === "OPERATOR"
-      
     ) {
       return NextResponse.redirect(new URL("/live", req.url));
+    }
+
+    // 🔥 Trava da Maquininha (Só Admin e Verifier acessam o PDV)
+    if (pathname.startsWith("/vendas")) {
+      if (!["ADMIN", "SUPER_ADMIN", "VERIFIER"].includes(session.user.role)) {
+        // Se for um operador curioso tentando acessar /vendas
+        return NextResponse.redirect(new URL("/live", req.url));
+      }
     }
   }
 
   // ─────────────────────────────────────────────────────────────
   // REESCRITA INTERNA
-  // ⚠️  USA req.nextUrl.clone() para preservar ?event=abc123 e
-  //     quaisquer outros query params — apenas o pathname muda.
-  //     new URL(`/${host}${path}`, req.url) DESCARTA query params!
   // ─────────────────────────────────────────────────────────────
   const rewriteUrl = req.nextUrl.clone();
   rewriteUrl.pathname = `/${currentHost}${pathname}`;

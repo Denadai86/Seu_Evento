@@ -110,4 +110,39 @@ export async function deleteSeller(sellerId: string) {
   return { success: true };
 }
 
+// src/actions/seller.ts
+
+export async function processBatchSale(eventId: string, shortIds: string[], paymentMethod: string) {
+  if (!shortIds || shortIds.length === 0) return { success: false, error: "Nenhuma cartela informada." };
+
+  const upperIds = shortIds.map(id => id.trim().toUpperCase());
+
+  // Garante que só vai atualizar as cartelas que pertencem a este evento
+  const result = await prisma.card.updateMany({
+    where: { 
+      eventId: eventId,
+      shortId: { in: upperIds } 
+    },
+    data: {
+      isSold: true,
+      isPaid: true,
+      // No futuro, se criar a coluna paymentMethod no banco, salva aqui:
+      // paymentMethod: paymentMethod 
+    }
+  });
+
+  if (result.count === 0) {
+    return { success: false, error: "Nenhuma cartela válida encontrada para ativar." };
+  }
+
+  // Opcional: Revalidar a página para atualizar os painéis do Admin
+  // import { revalidatePath } from "next/cache";
+  // revalidatePath("/");
+
+  return { 
+    success: true, 
+    count: result.count,
+    message: `${result.count} cartela(s) ativada(s) via ${paymentMethod}!`
+  };
+}
 

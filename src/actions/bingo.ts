@@ -220,3 +220,43 @@ export async function toggleBoardVisibility(eventId: string, showBoard: boolean)
   return { success: true };
 }
 
+// src/actions/bingo.ts
+
+export async function validateWinningCard(eventId: string, shortId: string) {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { cards: { where: { shortId: shortId.toUpperCase() } } }
+  });
+
+  if (!event || event.cards.length === 0) return { error: "Cartela não encontrada" };
+
+  const card = event.cards[0];
+  const drawn = event.drawnNumbers as number[];
+  const matrix = card.matrix as any;
+
+  // 1. Verificar Cheia (Full House)
+  const allNumbers = [
+    ...matrix.B, ...matrix.I, ...matrix.N, ...matrix.G, ...matrix.O
+  ].filter(n => n !== null); // Remove o centro livre
+  
+  const isFullHouse = allNumbers.every(n => drawn.includes(n));
+
+  // 2. Verificar Quinas (Linhas Horizontais)
+  // No bingo, a quina geralmente é completar qualquer uma das 5 linhas
+  const lines = [0, 1, 2, 3, 4].map(rowIndex => {
+    return ["B", "I", "N", "G", "O"].map(col => {
+      if (col === "N" && rowIndex === 2) return true; // Centro livre conta como sorteado
+      return drawn.includes(matrix[col][rowIndex]);
+    }).every(v => v === true);
+  });
+
+  const hasQuina = lines.some(line => line === true);
+
+  return {
+    isFullHouse,
+    hasQuina,
+    cardId: card.shortId,
+    // Se for quina, indica qual linha (opcional para o fiscal conferir)
+    winningLines: lines.map((l, i) => l ? i + 1 : null).filter(Boolean)
+  };
+}

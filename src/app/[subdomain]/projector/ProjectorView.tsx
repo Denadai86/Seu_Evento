@@ -1,16 +1,21 @@
-// src/app/[subdomain]/projector/ProjectorView.tsx
+//src/app/[subdomain]/projector/ProjectorView.tsx
 
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
 import useSWR from "swr";
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+// 1. 🔥 Fetcher blindado que dispara erro se a rede falhar
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Falha na sincronização com o servidor");
+  return res.json();
+};
 
 interface Sponsor { id: string; name: string; logoUrl?: string | null; }
 interface Props { eventId: string; eventName: string; initialDrawn: number[]; sponsors: Sponsor[]; }
 
-// 🔥 Helper para pegar a Letra B-I-N-G-O
+// Helper para pegar a Letra B-I-N-G-O
 const formatBall = (num: number | null) => {
   if (!num) return { letter: "", number: "--" };
   if (num <= 15) return { letter: "B", number: num };
@@ -21,12 +26,19 @@ const formatBall = (num: number | null) => {
 };
 
 export default function ProjectorView({ eventId, eventName, initialDrawn, sponsors }: Props) {
-  // 🔥 Estados Locais para a Animação no Telão
+  // Estados Locais para a Animação no Telão
   const [displayNumber, setDisplayNumber] = useState<number | null>(initialDrawn[initialDrawn.length - 1] || null);
   const [spinning, setSpinning] = useState(false);
 
+  // 2. 🔥 SWR com Fallback! Ele usa os dados do servidor até a primeira requisição do cliente terminar.
   const { data, error } = useSWR(`/api/bingo/state?eventId=${eventId}`, fetcher, {
-    refreshInterval: 1500, revalidateOnFocus: false,
+    refreshInterval: 1500, 
+    revalidateOnFocus: false,
+    fallbackData: {
+      drawnNumbers: initialDrawn,
+      latest: initialDrawn[initialDrawn.length - 1] || null,
+      showBoard: true
+    }
   });
 
   const drawnNumbers: number[] = data?.drawnNumbers || [];
@@ -39,7 +51,7 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
     { letter: "O", range: [61, 75] },
   ], []);
 
-  // 🔥 O EFEITO MÁGICO: Quando o banco avisa que tem número novo, o telão gira!
+  // O EFEITO MÁGICO: Quando o banco avisa que tem número novo, o telão gira!
   useEffect(() => {
     if (latestNumber && latestNumber !== displayNumber && !spinning) {
       const animate = async () => {
@@ -59,8 +71,7 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
 
   const currentBall = formatBall(displayNumber);
 
-  if (error) return <div className="min-h-screen flex items-center justify-center text-3xl text-red-500 bg-black">Erro de conexão.</div>;
-  if (!data) return <div className="min-h-screen flex items-center justify-center text-3xl text-[#fef08a] animate-pulse bg-[#081a0e]">Sincronizando...</div>;
+  if (error) return <div className="min-h-screen flex items-center justify-center text-3xl text-red-500 bg-black">Erro de conexão com o painel.</div>;
 
   return (
     <div className="min-h-screen flex flex-col p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#113a20] via-[#081a0e] to-black font-sans">

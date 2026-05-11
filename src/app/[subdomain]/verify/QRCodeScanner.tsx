@@ -15,7 +15,8 @@ export default function QRCodeScanner({
   const handleManualCheck = () => {
     if (!manualId.trim()) return;
     setLoading(true);
-    const url = `/${subdomain}/verify?event=${eventId || ""}&id=${manualId.trim().toUpperCase()}`;
+    // 🔥 CORREÇÃO: Removemos o /${subdomain} da URL do cliente
+    const url = `/verify?event=${eventId || ""}&id=${manualId.trim().toUpperCase()}`;
     window.location.href = url;
   };
 

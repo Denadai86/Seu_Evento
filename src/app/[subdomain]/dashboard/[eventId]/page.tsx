@@ -1,4 +1,4 @@
-//src/app/[subdomain]/dashboard/[eventId]/page.tsx
+// src/app/[subdomain]/dashboard/[eventId]/page.tsx
 
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
@@ -8,28 +8,30 @@ import EventStatusToggle from "./EventStatusToggle";
 import GenerateCardsButton from "./GenerateCardsButton";
 import { 
   Printer, Users, Megaphone, MonitorPlay, 
-  Settings, ArrowLeft, Ticket, Building2
+  Settings, ArrowLeft, Ticket, Building2, Wallet
 } from "lucide-react";
 import SellerManager from "./SellerManager";
 
 export default async function EventDashboardPage({
   params,
 }: {
-  params: Promise<{ subdomain: string; eventId: string }>; // Tipagem Next.js 15
+  params: Promise<{ subdomain: string; eventId: string }>;
 }) {
-  // 🔥 A MÁGICA QUE CONSERTA O ERRO: Desempacotando a Promise
   const { subdomain, eventId } = await params;
-  
+
   const event = await prisma.event.findFirst({
     where: {
-      id: (await params).eventId,
-      tenant: { subdomain: (await params).subdomain },
+      id: eventId,
+      tenant: { subdomain: subdomain },
     },
     include: {
       _count: {
         select: { cards: true, sponsors: true },
       },
-      // 🔥 Puxa os vendedores (sellers) e as cartelas associadas a eles
+      // 🔥 Puxa as cartelas para contar faturamento global
+      cards: {
+        select: { isPaid: true, isSold: true }
+      },
       sellers: {
         include: { cards: { select: { id: true, isPaid: true } } },
         orderBy: { createdAt: 'desc' }
@@ -38,6 +40,11 @@ export default async function EventDashboardPage({
   });
 
   if (!event) notFound();
+
+  // 💰 Cálculos Financeiros (Exemplo: Cartela a R$ 10)
+  const TICKET_PRICE = 10;
+  const totalPaid = event.cards.filter(c => c.isPaid).length;
+  const revenue = totalPaid * TICKET_PRICE;
 
   return (
     <div className="min-h-screen bg-[#0b0f14] text-slate-200 font-sans pb-20">
@@ -60,7 +67,6 @@ export default async function EventDashboardPage({
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {/* 🔥 CORRIGIDO: O Toggle de status agora só passa o eventId e o status inicial, ou apenas o que o seu componente realmente pede */}
             <EventStatusToggle eventId={event.id} tenantId={""} subdomain={""} currentStatus={""} />
             <div className="h-6 w-px bg-slate-800"></div>
             <LogoutButton callbackUrl="/entrar" variant="dark" />
@@ -70,35 +76,50 @@ export default async function EventDashboardPage({
 
       <main className="max-w-7xl mx-auto px-6 mt-8">
         
-        {/* 📊 ESTATÍSTICAS RÁPIDAS (Top Cards) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center">
-              <Ticket size={32} />
+        {/* 📊 ESTATÍSTICAS RÁPIDAS (Top Cards agora com 4 colunas) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          
+          <div className="bg-[#111827] border border-emerald-500/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center shrink-0">
+              <span className="text-2xl font-black">R$</span>
             </div>
             <div>
-              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Cartelas Geradas</p>
-              <p className="text-4xl font-black text-white">{event._count.cards}</p>
+              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total em Caixa</p>
+              <p className="text-2xl font-black text-white">
+                {revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
             </div>
           </div>
 
           <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
-            <div className="w-16 h-16 rounded-2xl bg-amber-900/40 text-amber-400 flex items-center justify-center">
-              <Building2 size={32} />
+            <div className="w-14 h-14 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center shrink-0">
+              <Ticket size={28} />
             </div>
             <div>
-              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Patrocinadores</p>
-              <p className="text-4xl font-black text-white">{event._count.sponsors}</p>
+              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Cartelas Pagas</p>
+              <p className="text-2xl font-black text-white">
+                {totalPaid} <span className="text-sm text-slate-500 font-normal">/ {event._count.cards}</span>
+              </p>
             </div>
           </div>
 
-          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
-            <div className="w-16 h-16 rounded-2xl bg-blue-900/40 text-blue-400 flex items-center justify-center">
-              <Users size={32} />
+          <div className="bg-[#111827] border border-amber-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-14 h-14 rounded-2xl bg-amber-900/40 text-amber-400 flex items-center justify-center shrink-0">
+              <Building2 size={28} />
             </div>
             <div>
-              <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">Vendedores</p>
-              <p className="text-4xl font-black text-white">{event.sellers.length}</p> 
+              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Patrocinadores</p>
+              <p className="text-2xl font-black text-white">{event._count.sponsors}</p>
+            </div>
+          </div>
+
+          <div className="bg-[#111827] border border-blue-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+            <div className="w-14 h-14 rounded-2xl bg-blue-900/40 text-blue-400 flex items-center justify-center shrink-0">
+              <Users size={28} />
+            </div>
+            <div>
+              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Vendedores</p>
+              <p className="text-2xl font-black text-white">{event.sellers.length}</p> 
             </div>
           </div>
         </div>
@@ -106,7 +127,7 @@ export default async function EventDashboardPage({
         {/* 🧩 BENTO GRID (Módulos de Ação) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* MÓDULO 1: CARTELAS E IMPRESSÃO (Ocupa 2 colunas) */}
+          {/* MÓDULO 1: CARTELAS E IMPRESSÃO (2 colunas) */}
           <div className="lg:col-span-2 bg-[#111827] border border-emerald-900/30 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full"></div>
             
@@ -124,24 +145,8 @@ export default async function EventDashboardPage({
             </div>
           </div>
 
-          {/* MÓDULO 3: VENDEDORES E LOGÍSTICA */}
-          <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-blue-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
-            <div className="flex items-center gap-3 mb-6 shrink-0">
-              <Users className="text-blue-400" size={28} />
-              <div>
-                <h2 className="text-xl font-black text-white">Vendedores</h2>
-                <p className="text-slate-500 text-xs mt-1">Gestão de lotes e acertos</p>
-              </div>
-            </div>
-            
-            <div className="flex-1 overflow-hidden">
-              {/* O componente Sanfona que criamos antes! */}
-              <SellerManager eventId={event.id} initialSellers={event.sellers} />
-            </div>
-          </div>
-
-          {/* MÓDULO 2: PATROCINADORES */}
-          <div className="lg:col-span-1 bg-[#111827] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col">
+          {/* MÓDULO 2: PATROCINADORES (1 coluna) */}
+          <div className="lg:col-span-1 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col">
             <div className="flex items-center gap-3 mb-6">
               <Megaphone className="text-amber-400" size={28} />
               <h2 className="text-xl font-black text-white">Patrocinadores</h2>
@@ -155,45 +160,93 @@ export default async function EventDashboardPage({
             </button>
           </div>
 
-        {/* MÓDULO 4: LINKS RÁPIDOS E AVALIADORES */}
-        <div className="lg:col-span-2 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col sm:flex-row gap-6 items-center justify-between">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <MonitorPlay className="text-slate-300" size={24} />
-              <h2 className="text-xl font-black text-white">Área de Testes & Conferência</h2>
+          {/* MÓDULO 3: VENDEDORES (2 colunas) */}
+          <div className="lg:col-span-2 bg-[#111827] border border-blue-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
+            <div className="flex items-center gap-3 mb-6 shrink-0">
+              <Users className="text-blue-400" size={28} />
+              <div>
+                <h2 className="text-xl font-black text-white">Vendedores & Logística</h2>
+                <p className="text-slate-500 text-xs mt-1">Gestão de lotes físicos e repasses</p>
+              </div>
             </div>
-            <p className="text-slate-400 text-sm">
-              Teste o telão e compartilhe o verificador com a equipe de conferência.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-            <a 
-              href="/live" 
-              target="_blank"
-              className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2"
-            >
-              Mesa Locutor
-            </a>
             
-            <a 
-              href={`/projector?event=${event.id}`} 
-              target="_blank"
-              className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
-            >
-              Abrir Telão
-            </a>
-
-            {/* 🔥 NOVO: Link para Avaliadores (Público) */}
-            <a 
-              href={`/${subdomain}/verify?event=${event.id}`}
-              target="_blank"
-              className="flex-1 sm:flex-none bg-violet-600 hover:bg-violet-500 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
-            >
-              <span>🔎 Verificador de Cartelas</span>
-            </a>
+            <div className="flex-1 overflow-hidden">
+              <SellerManager eventId={event.id} initialSellers={event.sellers} />
+            </div>
           </div>
-        </div>
+
+          {/* MÓDULO 4: AUDITORIA DE VENDAS (1 coluna) */}
+          <div className="lg:col-span-1 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
+            <div className="flex items-center gap-3 mb-6 shrink-0">
+              <Wallet className="text-emerald-400" size={28} />
+              <h2 className="text-xl font-black text-white">Auditoria</h2>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+              {event.sellers.length === 0 ? (
+                <p className="text-slate-500 text-sm text-center py-4">Nenhum dado financeiro.</p>
+              ) : (
+                event.sellers.map((seller) => {
+                  const sellerPaid = seller.cards.filter(c => c.isPaid).length;
+                  const sellerRevenue = sellerPaid * TICKET_PRICE;
+
+                  return (
+                    <div key={seller.id} className="flex justify-between items-center p-3 bg-black/20 rounded-xl border border-slate-800">
+                      <div>
+                        <p className="text-sm font-bold text-slate-200 truncate max-w-[120px]">{seller.name}</p>
+                        <p className="text-[10px] text-slate-500 uppercase">{sellerPaid} pagas</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-emerald-400 font-black text-sm">
+                          R$ {sellerRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* MÓDULO 5: LINKS RÁPIDOS (Ocupa a linha toda) */}
+          <div className="lg:col-span-3 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col sm:flex-row gap-6 items-center justify-between">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <MonitorPlay className="text-slate-300" size={24} />
+                <h2 className="text-xl font-black text-white">Área de Testes & Links</h2>
+              </div>
+              <p className="text-slate-400 text-sm max-w-xl">
+                Acesse a mesa do locutor, abra o telão do evento ou compartilhe o painel de verificação com a sua equipe de pátio.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+              <a 
+                href="/live" 
+                target="_blank"
+                className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2"
+              >
+                Mesa Locutor
+              </a>
+              
+              <a 
+                href={`/projector?eventId=${event.id}`} 
+                target="_blank"
+                className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
+              >
+                Abrir Telão
+              </a>
+
+              {/* Link Corrigido do Verificador/PDV */}
+              <a 
+                href={`/verify?event=${event.id}`}
+                target="_blank"
+                className="flex-1 sm:flex-none bg-violet-600 hover:bg-violet-500 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
+              >
+                <span>🔎 Verificador</span>
+              </a>
+            </div>
+          </div>
 
         </div>
       </main>

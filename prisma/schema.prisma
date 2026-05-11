@@ -11,9 +11,10 @@ datasource db {
 
 // 🔐 ROLES (O coração da autorização unificada)
 enum Role {
-  SUPER_ADMIN // Você (Dono do SaaS)
-  ORG_ADMIN   // O Cliente (ex: João da Paróquia)
-  OPERATOR    // O Locutor do Bingo
+  SUPER_ADMIN   // Você (Dono do SaaS)
+  ORG_ADMIN     // O Cliente (ex: João da Paróquia)
+  OPERATOR      // O Locutor do Bingo
+  VERIFIER      //  Nova função para o voluntário de pátio
 }
 
 // 🏢 TENANT (Substitui a antiga "Organization" - Inquilino do SaaS)
@@ -72,6 +73,7 @@ model Event {
   updatedAt    DateTime @updatedAt
 
   @@index([tenantId])
+  prizes Prize[]
 }
 
 // 🤝 SPONSORS
@@ -137,4 +139,22 @@ model Seller {
   cards     Card[]   // Um vendedor pode ter um lote de cartelas na mão dele
 
   @@map("sellers")
+}
+
+// Nova model para as Rodadas do Evento
+model Prize {
+  id          String   @id @default(cuid())
+  eventId     String
+  name        String   // Ex: "1ª Rodada - Quina"
+  type        PrizeType // Enum: QUINA, FULL_HOUSE
+  prizeName   String   // Ex: "Cesta de Natal"
+  order       Int      // Para saber qual rodada vem primeiro
+  isCompleted Boolean  @default(false)
+
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+enum PrizeType {
+  QUINA
+  FULL_HOUSE
 }
