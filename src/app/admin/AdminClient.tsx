@@ -6,8 +6,9 @@ import {
   Users, Calendar, Ticket, ShieldAlert, 
   Search, RefreshCcw, LayoutDashboard, Database 
 } from "lucide-react";
+import { Session } from "next-auth";
 
-export default function AdminClient() {
+export default function AdminClient({ session }: { session: Session }) {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 

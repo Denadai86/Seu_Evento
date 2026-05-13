@@ -1,11 +1,11 @@
-//src/app/[subdomain]/projector/ProjectorView.tsx
-
+// src/app/[subdomain]/projector/ProjectorView.tsx
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
 import useSWR from "swr";
+import { Trophy } from "lucide-react"; // 🔥 Import do ícone adicionado
 
-// 1. 🔥 Fetcher blindado que dispara erro se a rede falhar
+// 1. Fetcher blindado que dispara erro se a rede falhar
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error("Falha na sincronização com o servidor");
@@ -26,24 +26,26 @@ const formatBall = (num: number | null) => {
 };
 
 export default function ProjectorView({ eventId, eventName, initialDrawn, sponsors }: Props) {
-  // Estados Locais para a Animação no Telão
   const [displayNumber, setDisplayNumber] = useState<number | null>(initialDrawn[initialDrawn.length - 1] || null);
   const [spinning, setSpinning] = useState(false);
 
-  // 2. 🔥 SWR com Fallback! Ele usa os dados do servidor até a primeira requisição do cliente terminar.
+  // SWR busca os dados em tempo real
   const { data, error } = useSWR(`/api/bingo/state?eventId=${eventId}`, fetcher, {
     refreshInterval: 1500, 
     revalidateOnFocus: false,
     fallbackData: {
       drawnNumbers: initialDrawn,
       latest: initialDrawn[initialDrawn.length - 1] || null,
-      showBoard: true
+      showBoard: true,
+      currentPrize: null // Estado inicial do prêmio
     }
   });
 
+  // 🔥 AGORA SIM: Extraímos os dados AQUI DENTRO, depois do useSWR
   const drawnNumbers: number[] = data?.drawnNumbers || [];
   const latestNumber: number | null = data?.latest || null;
   const showBoard = data?.showBoard !== false;
+  const currentPrize = data?.currentPrize || null;
 
   const board = useMemo(() => [
     { letter: "B", range: [1, 15] }, { letter: "I", range: [16, 30] },
@@ -51,7 +53,6 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
     { letter: "O", range: [61, 75] },
   ], []);
 
-  // O EFEITO MÁGICO: Quando o banco avisa que tem número novo, o telão gira!
   useEffect(() => {
     if (latestNumber && latestNumber !== displayNumber && !spinning) {
       const animate = async () => {
@@ -65,7 +66,7 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
       };
       animate();
     } else if (!latestNumber && displayNumber) {
-      setDisplayNumber(null); // Caso o locutor resete o jogo
+      setDisplayNumber(null);
     }
   }, [latestNumber, displayNumber, spinning]);
 
@@ -80,6 +81,19 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
         <h1 className="text-5xl font-black tracking-wide text-[#fef08a] drop-shadow-[0_2px_15px_rgba(254,240,138,0.3)]">{eventName}</h1>
         <p className="text-emerald-400/60 uppercase tracking-widest text-lg mt-3 font-bold">Bingo Ao Vivo</p>
       </div>
+
+      {/* 🔥 FAIXA DO PRÊMIO NO TELÃO */}
+      {currentPrize && (
+        <div className="flex justify-center mb-8 animate-in fade-in slide-in-from-top-4 duration-700">
+          <div className="bg-gradient-to-r from-violet-900/80 to-purple-900/80 border border-violet-400/30 text-white px-8 py-3 rounded-full font-bold uppercase tracking-widest inline-flex items-center gap-3 shadow-[0_0_30px_rgba(139,92,246,0.4)] backdrop-blur-md">
+            <Trophy size={24} className="text-yellow-400" />
+            <span className="text-lg">
+              {currentPrize.name} • <span className="text-yellow-400 font-black">{currentPrize.prizeName}</span> 
+              <span className="text-violet-300 ml-2">({currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"})</span>
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* BOLA 3D COM LETRA E ANIMAÇÃO */}
       <div className="flex flex-col items-center justify-center mb-12">

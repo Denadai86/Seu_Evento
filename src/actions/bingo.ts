@@ -43,9 +43,6 @@ function getCardSignature(matrix: any): string {
     ...matrix.B, ...matrix.I, ...matrix.N, ...matrix.G, ...matrix.O
   ].join('-');
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// 🎟️ GERAÇÃO DE CARTELAS
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🎟️ GERAÇÃO DE CARTELAS (CRIANDO LOTES SEGUROS)
@@ -220,43 +217,109 @@ export async function toggleBoardVisibility(eventId: string, showBoard: boolean)
   return { success: true };
 }
 
-// src/actions/bingo.ts
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🏆 AUDITORIA DE VITÓRIA (VERIFICADOR INTELIGENTE)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function validateWinningCard(eventId: string, shortId: string) {
-  const event = await prisma.event.findUnique({
+  const event = await prisma.event.findFirst({
     where: { id: eventId },
-    include: { cards: { where: { shortId: shortId.toUpperCase() } } }
+    include: { 
+      cards: { where: { shortId: shortId.trim().toUpperCase() } },
+      prizes: { where: { isCompleted: false }, orderBy: { order: 'asc' } }
+    }
   });
 
-  if (!event || event.cards.length === 0) return { error: "Cartela não encontrada" };
+  if (!event) return { success: false, error: "Evento não encontrado." };
+  if (event.cards.length === 0) return { success: false, error: "Cartela não existe neste evento." };
 
   const card = event.cards[0];
   const drawn = event.drawnNumbers as number[];
   const matrix = card.matrix as any;
 
-  // 1. Verificar Cheia (Full House)
+  // Trava de Segurança Financeira (Regra de Ouro)
+  if (!card.isPaid) {
+    return { 
+      success: false, 
+      error: "⚠️ CARTELA NÃO PAGA! Esta cartela não tem direito a prêmios até que o pagamento seja baixado no caixa." 
+    };
+  }
+
+  // 1. Array com todos os 24 números da cartela
   const allNumbers = [
-    ...matrix.B, ...matrix.I, ...matrix.N, ...matrix.G, ...matrix.O
-  ].filter(n => n !== null); // Remove o centro livre
-  
+    ...matrix.B, ...matrix.I, 
+    matrix.N[0], matrix.N[1], matrix.N[3], matrix.N[4], // Pula o N[2] que é o Centro Livre
+    ...matrix.G, ...matrix.O
+  ];
+
+  // 2. Verifica Cartela Cheia (Full House)
   const isFullHouse = allNumbers.every(n => drawn.includes(n));
 
-  // 2. Verificar Quinas (Linhas Horizontais)
-  // No bingo, a quina geralmente é completar qualquer uma das 5 linhas
-  const lines = [0, 1, 2, 3, 4].map(rowIndex => {
+  // 3. Verifica Quina (5 números na mesma linha, coluna ou diagonal)
+  // 3.1 Linhas Horizontais
+  const horizontalLines = [0, 1, 2, 3, 4].map(rowIndex => {
     return ["B", "I", "N", "G", "O"].map(col => {
-      if (col === "N" && rowIndex === 2) return true; // Centro livre conta como sorteado
+      if (col === "N" && rowIndex === 2) return true; // Centro Livre
       return drawn.includes(matrix[col][rowIndex]);
-    }).every(v => v === true);
+    }).every(Boolean);
   });
 
-  const hasQuina = lines.some(line => line === true);
+  // 3.2 Colunas Verticais
+  const verticalLines = ["B", "I", "N", "G", "O"].map(col => {
+    return [0, 1, 2, 3, 4].map(rowIndex => {
+      if (col === "N" && rowIndex === 2) return true; // Centro Livre
+      return drawn.includes(matrix[col][rowIndex]);
+    }).every(Boolean);
+  });
+
+  // 3.3 Diagonais
+  const diag1 = [
+    drawn.includes(matrix.B[0]),
+    drawn.includes(matrix.I[1]),
+    true, // N[2] Centro Livre
+    drawn.includes(matrix.G[3]),
+    drawn.includes(matrix.O[4])
+  ].every(Boolean);
+
+  const diag2 = [
+    drawn.includes(matrix.B[4]),
+    drawn.includes(matrix.I[3]),
+    true, // N[2] Centro Livre
+    drawn.includes(matrix.G[1]),
+    drawn.includes(matrix.O[0])
+  ].every(Boolean);
+
+  const hasQuina = horizontalLines.some(Boolean) || verticalLines.some(Boolean) || diag1 || diag2;
+
+  // 4. Descobre qual é a rodada atual
+  const currentPrize = event.prizes[0] || null;
+  let isWinner = false;
+  let winMessage = "";
+
+  if (currentPrize) {
+    if (currentPrize.type === "QUINA" && hasQuina) {
+      isWinner = true;
+      winMessage = `🎉 BINGO! Cartela bateu QUINA na rodada: ${currentPrize.prizeName}`;
+    } else if (currentPrize.type === "FULL_HOUSE" && isFullHouse) {
+      isWinner = true;
+      winMessage = `🎉 BINGO! Cartela bateu CHEIA na rodada: ${currentPrize.prizeName}`;
+    } else {
+      winMessage = `Cartela Válida. Mas ainda não bateu a rodada atual (${currentPrize.type === "QUINA" ? "Quina" : "Cheia"}).`;
+    }
+  }
 
   return {
+    success: true,
+    cardId: card.shortId,
+    isPaid: card.isPaid,
     isFullHouse,
     hasQuina,
-    cardId: card.shortId,
-    // Se for quina, indica qual linha (opcional para o fiscal conferir)
-    winningLines: lines.map((l, i) => l ? i + 1 : null).filter(Boolean)
+    isWinner,
+    winMessage,
+    currentPrize,
+    // Estatísticas cruas caso o Frontend queira pintar a cartela na tela:
+    stats: { horizontalLines, verticalLines, diag1, diag2, drawnCount: drawn.length }
   };
 }
+

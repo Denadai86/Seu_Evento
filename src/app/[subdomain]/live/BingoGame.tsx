@@ -48,6 +48,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
 
   const drawnNumbers: number[] = data?.drawnNumbers || [];
   const showBoard = data?.showBoard !== false;
+  const currentPrize = data?.currentPrize || null;
   
   const board = useMemo(() => [
     { letter: "B", range: [1, 15] }, { letter: "I", range: [16, 30] },
@@ -134,6 +135,22 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
           <LogoutButton callbackUrl="/entrar" variant="dark" />
         </div>
       </div>
+      {/* 🔥 DESTAQUE DO PRÊMIO NA MESA DO LOCUTOR */}
+      {currentPrize && (
+        <div className="bg-violet-900/40 border border-violet-500/50 text-violet-200 px-6 py-4 rounded-2xl mb-8 flex items-center gap-4 shadow-lg">
+          <div className="bg-violet-500/20 p-3 rounded-full text-violet-400">
+            <Trophy size={28} />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-violet-400 mb-1">
+              Rodada da Vez • {currentPrize.name}
+            </p>
+            <p className="text-2xl font-black">
+              {currentPrize.prizeName} <span className="text-sm font-normal opacity-70">({currentPrize.type === "QUINA" ? "Batida de Quina" : "Cartela Cheia"})</span>
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 max-w-[1400px] mx-auto">
 

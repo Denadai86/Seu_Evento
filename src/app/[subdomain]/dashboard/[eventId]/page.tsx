@@ -8,9 +8,11 @@ import EventStatusToggle from "./EventStatusToggle";
 import GenerateCardsButton from "./GenerateCardsButton";
 import { 
   Printer, Users, Megaphone, MonitorPlay, 
-  Settings, ArrowLeft, Ticket, Building2, Wallet
+  Settings, ArrowLeft, Ticket, Building2, Wallet, Trophy
 } from "lucide-react";
 import SellerManager from "./SellerManager";
+import PrizeManager from "./PrizeManager";
+
 
 export default async function EventDashboardPage({
   params,
@@ -32,6 +34,7 @@ export default async function EventDashboardPage({
       cards: {
         select: { isPaid: true, isSold: true }
       },
+      prizes: { orderBy: { order: 'asc' } },
       sellers: {
         include: { cards: { select: { id: true, isPaid: true } } },
         orderBy: { createdAt: 'desc' }
@@ -158,6 +161,21 @@ export default async function EventDashboardPage({
               <Settings size={18} />
               Gerenciar
             </button>
+          </div>
+
+          {/* MÓDULO EXTRA: REGRAS DE VITÓRIA / RODADAS */}
+          <div className="lg:col-span-2 bg-[#111827] border border-violet-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
+            <div className="flex items-center gap-3 mb-6 shrink-0">
+              <Trophy className="text-violet-400" size={28} />
+              <div>
+                <h2 className="text-xl font-black text-white">Gestão de Rodadas</h2>
+                <p className="text-slate-500 text-xs mt-1">Configure os prémios (Quina e Cheia)</p>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-hidden">
+              <PrizeManager eventId={event.id} initialPrizes={event.prizes} />
+            </div>
           </div>
 
           {/* MÓDULO 3: VENDEDORES (2 colunas) */}
