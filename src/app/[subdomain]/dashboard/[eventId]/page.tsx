@@ -44,8 +44,8 @@ export default async function EventDashboardPage({
 
   if (!event) notFound();
 
-  // 💰 Cálculos Financeiros (Exemplo: Cartela a R$ 10)
-  const TICKET_PRICE = 10;
+ // 💰 Cálculos Financeiros (Agora puxando do Banco de Dados!)
+  const TICKET_PRICE = event.ticketPrice; 
   const totalPaid = event.cards.filter(c => c.isPaid).length;
   const revenue = totalPaid * TICKET_PRICE;
 

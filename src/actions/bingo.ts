@@ -323,3 +323,29 @@ export async function validateWinningCard(eventId: string, shortId: string) {
   };
 }
 
+// 1. O Verificador envia para a mesa do Locutor
+export async function alertLocutor(eventId: string, shortId: string, winnerName: string) {
+  return await prisma.event.update({
+    where: { id: eventId },
+    data: {
+      pendingWinnerCard: shortId.toUpperCase(),
+      pendingWinnerName: winnerName,
+    }
+  });
+}
+
+// 2. O Locutor confirma e joga no Telão (ou limpa o alerta se for barrigada)
+export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
+  return await prisma.event.update({
+    where: { id: eventId },
+    data: {
+      bingoConfirmed: confirm,
+      // Se estiver confirmando, mantém os dados. Se estiver limpando, reseta.
+      pendingWinnerCard: confirm ? undefined : null,
+      pendingWinnerName: confirm ? undefined : null,
+    }
+  });
+}
+
+
+

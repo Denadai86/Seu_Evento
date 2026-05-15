@@ -4,7 +4,7 @@
 
 import { useState, useTransition, useMemo, useEffect } from "react";
 import useSWR from "swr";
-import { drawNextNumber, resetGame, checkCard, toggleBoardVisibility, getEventCards } from "@/actions/bingo";
+import { drawNextNumber, resetGame, checkCard, toggleBoardVisibility, getEventCards, toggleBingoCelebration } from "@/actions/bingo";
 import LogoutButton from "@/components/LogoutButton";
 import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy } from "lucide-react";
 
@@ -179,7 +179,32 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
                <button onClick={handleReset} disabled={isPending} className="text-red-400/50 hover:text-red-400 text-xs transition-colors mt-2">⚠️ Resetar globo de sorteio</button>
             </div>
           </div>
-
+{data?.pendingWinnerCard && (
+  <div className="bg-amber-500 text-black p-6 rounded-3xl mb-8 flex items-center justify-between animate-pulse border-4 border-white shadow-[0_0_30px_rgba(245,158,11,0.5)]">
+    <div>
+      <p className="font-black uppercase text-xs tracking-tighter">🚨 ALERTA DE BINGO NO PÁTIO!</p>
+      <p className="text-2xl font-black">Cartela {data.pendingWinnerCard} - {data.pendingWinnerName}</p>
+    </div>
+    
+    <div className="flex gap-2">
+      {/* Botão de Cancelar (Barrigada) */}
+      <button 
+        onClick={() => toggleBingoCelebration(eventId, false)}
+        className="bg-black text-white px-4 py-2 rounded-xl font-bold text-sm"
+      >
+        Limpar
+      </button>
+      
+      {/* Botão de Fazer a Festa! */}
+      <button 
+        onClick={() => toggleBingoCelebration(eventId, true)}
+        className="bg-white text-black px-6 py-2 rounded-xl font-black text-lg shadow-xl"
+      >
+        🎉 SOLTAR TELÃO!
+      </button>
+    </div>
+  </div>
+)}
           {/* AUDITORIA */}
           <div className="bg-black/40 p-6 rounded-3xl border border-emerald-900/50 shadow-xl backdrop-blur-sm">
              <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-4">Auditoria BINGO!</h2>

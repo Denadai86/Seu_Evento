@@ -6,157 +6,17 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
+//  url      = env("DATABASE_URL")
 }
 
-// 🔐 ROLES (O coração da autorização unificada)
+// ==========================================
+// ENUMS
+// ==========================================
 enum Role {
-  SUPER_ADMIN   // Você (Dono do SaaS)
-  ORG_ADMIN     // O Cliente (ex: João da Paróquia)
+  SUPER_ADMIN   // Dono do SaaS (Ação Leve)
+  ORG_ADMIN     // O Cliente (ex: Contratante)
   OPERATOR      // O Locutor do Bingo
-  VERIFIER      //  Nova função para o voluntário de pátio
-}
-
-// 🏢 TENANT (Substitui a antiga "Organization" - Inquilino do SaaS)
-model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  subdomain String   @unique // ex: saobento, rotary
-  logoUrl   String?
-  active    Boolean  @default(true)
-  token     String?
-
-  users     User[]
-  events    Event[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// 👤 USERS (Unifica Donos e Operadores na mesma tabela de autenticação)
-model User {
-  id        String   @id @default(cuid())
-  name      String?
-  email     String   @unique
-  password  String?  // Hashed via bcrypt
-  role      Role     @default(ORG_ADMIN)
-  operator  String?
-  // RELAÇÃO COM TENANT
-  tenantId  String?
-  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([tenantId]) // Otimiza a busca quando listarmos "Todos os usuários de um Tenant"
-}
-
-// 🎉 EVENTS
-model Event {
-  id           String   @id @default(cuid())
-  name         String
-  status       String   @default("DRAFT")
-  drawnNumbers Int[]    @default([])
-  isActive     Boolean  @default(false)
-  showBoard    Boolean  @default(true) // 🔥 A nova chave do Modo Hardcore
-  sellers      Seller[]
-  cards        Card[]
-  sponsors     Sponsor[]
-  prizes       Prize[]
-
-  // RELAÇÃO COM TENANT (Garante o isolamento dos dados)
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@index([tenantId])
- 
-}
-
-// 🤝 SPONSORS
-model Sponsor {
-  id        String  @id @default(cuid())
-  name      String
-  logoUrl   String?
-  contribution  Int      @default(0)     // valor em centavos (R$ 500,00 = 50000)
-  order         Int      @default(0)     // para reordenação manual
-  
-  // RELAÇÃO COM EVENT
-  eventId   String
-  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@index([eventId])
-}
-
-// 🎟️ CARDS
-// 🎟️ CARDS
-model Card {
-  id        String   @id @default(cuid())
-  shortId   String   @unique
-  matrix    Json
-  isSold    Boolean  @default(false)
-
-  // 🔥 Campos financeiros
-  sellerId  String?
-  isPaid    Boolean  @default(false)
-  price     Float?
-
-  // Relações
-  seller    Seller?  @relation(fields: [sellerId], references: [id])
-  eventId   String
-  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([eventId])
-  @@index([shortId])
-  @@map("cards")
-}
-
-model AuditLog {
-  id        String   @id @default(cuid())
-  action    String
-  userId    String?
-  tenantId  String?
-  metadata  Json?
-  createdAt DateTime @default(now())
-
-  @@index([tenantId])
-}
-
-model Seller {
-  id        String   @id @default(cuid())
-  eventId   String
-  name      String
-  phone     String?
-  createdAt DateTime @default(now())
-
-  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  cards     Card[]   // Um vendedor pode ter um lote de cartelas na mão dele
-
-  @@map("sellers")
-}
-
-// Nova model para as Rodadas do Evento
-model Prize {
-  id          String   @id @default(cuid())
-  eventId     String
-  name        String   // Ex: "1ª Rodada - Quina"
-  type        PrizeType // Enum: QUINA, FULL_HOUSE
-  prizeName   String   // Ex: "Cesta de Natal"
-  order       Int      // Para saber qual rodada vem primeiro
-  isCompleted Boolean  @default(false)
-  winnerId    String?   // Guarda o shortId da cartela ganhadora (opcional)
-
-
-  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  VERIFIER      // O Voluntário/Fiscal de pátio
 }
 
 enum PrizeType {
@@ -164,3 +24,189 @@ enum PrizeType {
   FULL_HOUSE
 }
 
+enum PaymentMethod {
+  PIX
+  CASH   // Dinheiro vivo
+  CARD   // Débito/Crédito
+}
+
+// ==========================================
+// MODELS
+// ==========================================
+
+// 🏢 TENANT (Inquilino do SaaS)
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  subdomain   String   @unique
+  logoUrl     String?
+  active      Boolean  @default(true)
+  token       String?
+
+  users       User[]
+  events      Event[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("tenants")
+}
+
+// 👤 USERS (Autenticação Unificada)
+model User {
+  id          String   @id @default(cuid())
+  name        String?
+  email       String   @unique
+  password    String?
+  role        Role     @default(ORG_ADMIN)
+  operator    String?
+  
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+// 🎉 EVENTS (O Evento de Bingo)
+model Event {
+  id                String   @id @default(cuid())
+  tenantId          String
+  name              String
+  status            String   @default("DRAFT")
+  drawnNumbers      Int[]    @default([])
+  isActive          Boolean  @default(false)
+  showBoard         Boolean  @default(true)
+  ticketPrice       Float    @default(10.00)
+  
+  // Celebração em 3 vias
+  pendingWinnerCard String?
+  pendingWinnerName String?
+  bingoConfirmed    Boolean  @default(false)
+  bingoConfirmedAt  DateTime?
+
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Relações
+  sellers           Seller[]
+  cards             Card[]
+  sponsors          Sponsor[]
+  prizes            Prize[]
+  transactions      Transaction[] // 🔥 Adicionado para o Relatório Financeiro
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("events")
+}
+
+// 🤝 SPONSORS (Patrocinadores do Telão)
+model Sponsor {
+  id            String   @id @default(cuid())
+  eventId       String
+  name          String
+  logoUrl       String?
+  contribution  Int      @default(0)
+  order         Int      @default(0)
+  
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("sponsors")
+}
+
+// 🎟️ CARDS (Cartelas)
+model Card {
+  id            String   @id @default(cuid())
+  shortId       String   @unique
+  matrix        Json
+  isSold        Boolean  @default(false)
+  
+  sellerId      String?
+  isPaid        Boolean  @default(false)
+  price         Float?
+
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  seller        Seller?  @relation(fields: [sellerId], references: [id])
+  
+  transactions  Transaction[] // 🔥 Adicionado para o Relatório Financeiro
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([eventId])
+  @@index([shortId])
+  @@map("cards")
+}
+
+// 👥 SELLERS (Vendedores Físicos)
+model Seller {
+  id            String   @id @default(cuid())
+  eventId       String
+  name          String
+  phone         String?
+  
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  cards         Card[]
+  transactions  Transaction[] // 🔥 Adicionado para o Relatório Financeiro
+
+  createdAt     DateTime @default(now())
+
+  @@map("sellers")
+}
+
+// 🏆 PRIZES (Rodadas/Prêmios)
+model Prize {
+  id            String    @id @default(cuid())
+  eventId       String
+  name          String
+  type          PrizeType
+  prizeName     String
+  order         Int
+  isCompleted   Boolean   @default(false)
+  winnerId      String?
+  
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("prizes")
+}
+
+// 💰 TRANSACTIONS (Extrato Financeiro)
+model Transaction {
+  id            String        @id @default(cuid())
+  eventId       String
+  cardId        String?
+  sellerId      String?
+  amount        Float
+  method        PaymentMethod
+  
+  event         Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  card          Card?         @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  seller        Seller?       @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime      @default(now())
+
+  @@map("transactions")
+}
+
+// 🛡️ AUDIT LOGS (Registro de Integridade)
+model AuditLog {
+  id            String   @id @default(cuid())
+  action        String
+  userId        String?
+  tenantId      String?
+  metadata      Json?
+  
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("audit_logs")
+}

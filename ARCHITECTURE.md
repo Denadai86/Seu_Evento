@@ -53,4 +53,44 @@ Toda a aplicação roda debaixo do *middleware* `proxy.ts`, que identifica o sub
 - [ ] **Personalização da Marca:** Definir os metadados (Favicon, Logo oficial na tela de Login).
 
 ---
-*Documento atualizado automaticamente conforme o projeto evolui.*
+
+## 🏆 Lógica de Premiação e Rodadas
+- **Entidade `Prize`**: Define o objetivo atual (QUINA ou FULL_HOUSE).
+- **Sincronização**: O estado do prêmio é injetado no payload da API `/api/bingo/state`.
+- **Validação**: A função `validateWinningCard` (Server Action) cruza:
+  1. Status de pagamento da cartela (`isPaid`).
+  2. Pedras sorteadas no evento.
+  3. Matriz da cartela.
+  4. Regra da rodada ativa (Quina ou Cheia).
+
+  ----
+
+  ## 📡 Protocolo de Celebração de 3 Vias
+1. **Verificador:** Realiza o `alertLocutor` via Server Action, enviando o ID e o Nome (Logado).
+2. **Locutor:** Recebe o alerta via SWR Polling. Decide o *timing* ideal e aciona `toggleBingoCelebration`.
+3. **Projector:** Detecta o `bingoConfirmed: true` e renderiza o overlay de vitória com `canvas-confetti` e animações CSS.
+
+## 🏗️ Padrões de Arquitetura e Roadmap de Escalabilidade (Mitigação de Retrabalho)
+
+Para garantir que o sistema escale sem virar um "código espaguete" e facilitar a manutenção, adotamos as seguintes diretrizes e próximos passos de refatoração:
+
+### 1. Estrutura "Feature-Based" (Em Andamento)
+- Mover de uma estrutura agrupada por "tipo de arquivo" para "módulos de negócio".
+- Exemplo: `src/features/event-settings/` conterá suas próprias `actions.ts`, `components/` e validação `schema.ts` (Zod).
+
+### 2. Evolução Financeira (Módulo de Relatórios)
+- **Atual:** Faturamento calculado via soma de `isPaid` x `ticketPrice`.
+- **Futuro (Log de Transações):** Criação de uma tabela `Transaction` atrelada à cartela. Registrará quem vendeu, horário exato, e método (Pix/Dinheiro) para auditoria financeira perfeita e gráficos de pico de vendas.
+
+### 3. Herança de Tenant (Automação)
+- **Objetivo:** Adicionar campos como `defaultTicketPrice` no modelo `Tenant`.
+- **Benefício:** Quando um contratante recorrente cria um novo evento, o sistema herda os padrões dele, zerando o retrabalho de configuração.
+
+### 4. Ciclo de Vida do Evento (State Machine)
+- **Atual:** Booleano `isActive`.
+- **Futuro:** Migrar para `enum EventStatus { PLANNING, ACTIVE, FINISHED, ARCHIVED }`. Isso travará vendas após o evento e congelará relatórios financeiros automaticamente.
+
+### 5. UI Kit Genérico
+- Consolidar botões, modais e inputs padrão dentro de `src/components/ui` para garantir consistência visual em todo o SaaS e mudar o design global editando apenas um arquivo.
+
+*Documento atualizado automaticamente conforme o projeto evolui.* 

@@ -26,6 +26,9 @@ importers:
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
+      canvas-confetti:
+        specifier: ^1.9.4
+        version: 1.9.4
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -56,6 +59,9 @@ importers:
       swr:
         specifier: ^2.4.1
         version: 2.4.1(react@19.2.4)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -63,6 +69,9 @@ importers:
       '@types/bcryptjs':
         specifier: ^2.4.6
         version: 2.4.6
+      '@types/canvas-confetti':
+        specifier: ^1.9.0
+        version: 1.9.0
       '@types/node':
         specifier: ^20
         version: 20.19.39
@@ -888,6 +897,9 @@ packages:
   '@types/bcryptjs@2.4.6':
     resolution: {integrity: sha512-9xlo6R2qDs5uixm0bcIqCeMCE6HiQsIyel9KQySStiyqNl2tnj2mP3DX1Nf56MD6KMenNNlBBsy3LJ7gUEQPXQ==}
 
+  '@types/canvas-confetti@1.9.0':
+    resolution: {integrity: sha512-aBGj/dULrimR1XDZLtG9JwxX1b4HPRF6CX9Yfwh3NvstZEm1ZL7RBnel4keCPSqs1ANRu1u2Aoz9R+VmtjYuTg==}
+
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -1275,6 +1287,9 @@ packages:
 
   caniuse-lite@1.0.30001791:
     resolution: {integrity: sha512-yk0l/YSrOnFZk3UROpDLQD9+kC1l4meK/wed583AXrzoarMGJcbRi2Q4RaUYbKxYAsZ8sWmaSa/DsLmdBeI1vQ==}
+
+  canvas-confetti@1.9.4:
+    resolution: {integrity: sha512-yxQbJkAVrFXWNbTUjPqjF7G+g6pDotOUHGbkZq2NELZUMDpiJ85rIEazVb8GTaAptNW2miJAXbs1BtioA251Pw==}
 
   chalk@4.1.2:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
@@ -3012,8 +3027,8 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
-  zod@4.4.2:
-    resolution: {integrity: sha512-IynmDyxsEsb9RKzO3J9+4SxXnl2FTFSzNBaKKaMV6tsSk0rw9gYw9gs+JFCq/qk2LCZ78KDwyj+Z289TijSkUw==}
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
 
@@ -3800,6 +3815,8 @@ snapshots:
 
   '@types/bcryptjs@2.4.6': {}
 
+  '@types/canvas-confetti@1.9.0': {}
+
   '@types/estree@1.0.8': {}
 
   '@types/json-schema@7.0.15': {}
@@ -4198,6 +4215,8 @@ snapshots:
 
   caniuse-lite@1.0.30001791: {}
 
+  canvas-confetti@1.9.4: {}
+
   chalk@4.1.2:
     dependencies:
       ansi-styles: 4.3.0
@@ -4578,8 +4597,8 @@ snapshots:
       '@babel/parser': 7.29.3
       eslint: 9.39.4(jiti@1.21.7)
       hermes-parser: 0.25.1
-      zod: 4.4.2
-      zod-validation-error: 4.0.2(zod@4.4.2)
+      zod: 4.4.3
+      zod-validation-error: 4.0.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
 
@@ -6140,10 +6159,10 @@ snapshots:
       grammex: 3.1.12
       graphmatch: 1.1.1
 
-  zod-validation-error@4.0.2(zod@4.4.2):
+  zod-validation-error@4.0.2(zod@4.4.3):
     dependencies:
-      zod: 4.4.2
+      zod: 4.4.3
 
   zod@3.25.76: {}
 
-  zod@4.4.2: {}
+  zod@4.4.3: {}
