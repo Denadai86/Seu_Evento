@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import SellerManager from "./SellerManager";
 import PrizeManager from "./PrizeManager";
+import SponsorManager from "./SponsorManager";
 
 
 export default async function EventDashboardPage({
@@ -30,6 +31,7 @@ export default async function EventDashboardPage({
       _count: {
         select: { cards: true, sponsors: true },
       },
+      sponsors: true,
       // 🔥 Puxa as cartelas para contar faturamento global
       cards: {
         select: { isPaid: true, isSold: true }
@@ -149,18 +151,19 @@ export default async function EventDashboardPage({
           </div>
 
           {/* MÓDULO 2: PATROCINADORES (1 coluna) */}
-          <div className="lg:col-span-1 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col">
-            <div className="flex items-center gap-3 mb-6">
+          <div className="lg:col-span-1 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
+            <div className="flex items-center gap-3 mb-6 shrink-0">
               <Megaphone className="text-amber-400" size={28} />
               <h2 className="text-xl font-black text-white">Patrocinadores</h2>
             </div>
-            <p className="text-slate-400 text-sm mb-6 flex-1">
-              Adicione logomarcas que aparecerão no rodapé do telão.
-            </p>
-            <button className="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2">
-              <Settings size={18} />
-              Gerenciar
-            </button>
+            
+            {/* O Componente Renderizado e com Scroll Interno */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+              <SponsorManager 
+                eventId={event.id} 
+                initialSponsors={event.sponsors} 
+              />
+            </div>
           </div>
 
           {/* MÓDULO EXTRA: REGRAS DE VITÓRIA / RODADAS */}

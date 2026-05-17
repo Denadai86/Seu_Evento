@@ -11,8 +11,8 @@ export default defineConfig({
     // url: env("DIRECT_URL"),
   },
 
-  // Opcional: configurações de migração
   migrations: {
     path: "prisma/migrations",
+    seed: "npx tsx prisma/seed.ts", // 👈 A mágica acontece nesta linha aqui
   },
 });

@@ -1,17 +1,27 @@
+// src/app/[subdomain]/vendas/page.tsx
 import prisma from "@/lib/prisma";
-import { redirect } from "next/navigation";
 import LogoutButton from "@/components/LogoutButton";
 import PDVClient from "./PDVClient";
 
 export default async function VendasPage({ params }: { params: Promise<{ subdomain: string }> }) {
   const { subdomain } = await params;
 
-  // Busca o evento que está ativo no momento para este cliente
+  // 🔥 Busca o evento COM OS VENDEDORES e DADOS FINANCEIROS
   const activeEvent = await prisma.event.findFirst({
     where: { 
       tenant: { subdomain },
       isActive: true 
     },
+    select: {
+      id: true,
+      name: true,
+      ticketPrice: true,
+      pixKey: true, // Se não tiver essa coluna no Prisma, comente essa linha
+      sellers: {
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' }
+      }
+    }
   });
 
   if (!activeEvent) {
@@ -23,6 +33,13 @@ export default async function VendasPage({ params }: { params: Promise<{ subdoma
       </div>
     );
   }
+
+  // Fallback caso a chave PIX ainda não exista no banco de dados
+  const eventData = {
+    ...activeEvent,
+    ticketPrice: activeEvent.ticketPrice || 2500,
+    pixKey: activeEvent.pixKey || "sua-chave-pix-aqui@email.com",
+  };
 
   return (
     <div className="min-h-screen bg-[#0b0f14] text-slate-200 font-sans flex flex-col">
@@ -37,8 +54,8 @@ export default async function VendasPage({ params }: { params: Promise<{ subdoma
       </header>
 
       <main className="flex-1 flex flex-col">
-        {/* Passa o ID do evento para o componente interativo */}
-        <PDVClient eventId={activeEvent.id} />
+        {/* 🔥 Correção: Agora passamos o objeto inteiro para o PDVClient */}
+        <PDVClient activeEvent={eventData} />
       </main>
     </div>
   );

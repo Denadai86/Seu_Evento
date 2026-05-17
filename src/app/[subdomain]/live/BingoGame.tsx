@@ -146,7 +146,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
               Rodada da Vez • {currentPrize.name}
             </p>
             <p className="text-2xl font-black">
-              {currentPrize.prizeName} <span className="text-sm font-normal opacity-70">({currentPrize.type === "QUINA" ? "Batida de Quina" : "Cartela Cheia"})</span>
+              {currentPrize.prizeName} <span className="text-sm font-normal opacity-70">({currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"})</span>
             </p>
           </div>
         </div>

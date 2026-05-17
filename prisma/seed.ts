@@ -1,17 +1,19 @@
 // prisma/seed.ts
-import { PrismaClient } from '@prisma/client';
-import { hash } from 'bcryptjs';
 
-const prisma = new PrismaClient();
+// ❌ APAGUE ESSA LINHA: import { PrismaClient } from '@prisma/client';
+// ❌ APAGUE ESSA LINHA: const prisma = new PrismaClient();
+
+// ✅ USE A SUA INSTÂNCIA PRONTA COM NEON:
+import prisma from '../src/lib/prisma'; 
+import { hash } from 'bcryptjs';
 
 async function main() {
   console.log('🌱 Iniciando o seed do banco de dados...');
 
-  // Sua senha mestra criptografada. Mude 'admin123' para uma senha segura.
+  // Sua senha mestra criptografada
   const hashedPassword = await hash('admin123', 10);
   
-  // Coloque o seu e-mail do Google aqui. Isso permite que você logue 
-  // tanto digitando a senha quanto clicando em "Entrar com Google".
+  // Seu e-mail do Google
   const seuEmail = 'jaodena@gmail.com'; 
 
   const superAdmin = await prisma.user.upsert({
@@ -22,7 +24,6 @@ async function main() {
       name: 'João (Admin Ação Leve)',
       password: hashedPassword,
       role: 'SUPER_ADMIN',
-      // tenantId fica nulo, pois você é o dono da plataforma inteira, não um cliente
     },
   });
 
@@ -35,5 +36,7 @@ main()
     process.exit(1);
   })
   .finally(async () => {
+    // Desconecta de forma segura
     await prisma.$disconnect();
   });
+  

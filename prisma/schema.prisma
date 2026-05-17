@@ -42,6 +42,7 @@ model Tenant {
   logoUrl     String?
   active      Boolean  @default(true)
   token       String?
+  isActive Boolean @default(true)
 
   users       User[]
   events      Event[]
