@@ -4,14 +4,13 @@
 
 import prisma from "@/lib/prisma";
 import { requireTenant } from "@/lib/requireTenant";
+import { unstable_noStore as noStore } from "next/cache";
+import { revalidatePath } from "next/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🧮 HELPERS MATEMÁTICOS PARA GERAÇÃO
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Gera um lote de códigos únicos (ex: "A9B2X1") garantindo zero colisões no array
- */
 function generateUniqueIds(count: number, existingIds: string[]): string[] {
   const ids = new Set<string>();
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -21,10 +20,7 @@ function generateUniqueIds(count: number, existingIds: string[]): string[] {
     for (let i = 0; i < 6; i++) {
       id += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    // Garante que não repete nem no novo lote, nem com as que já estão no banco!
-    if (!existingIds.includes(id)) {
-      ids.add(id);
-    }
+    if (!existingIds.includes(id)) ids.add(id);
   }
   return Array.from(ids);
 }
@@ -37,7 +33,6 @@ function generateBingoColumn(min: number, max: number, count: number): number[] 
   return Array.from(numbers).sort((a, b) => a - b);
 }
 
-// 🔥 Helper para criar uma "Assinatura Única" de uma cartela
 function getCardSignature(matrix: any): string {
   return [
     ...matrix.B, ...matrix.I, ...matrix.N, ...matrix.G, ...matrix.O
@@ -45,30 +40,26 @@ function getCardSignature(matrix: any): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 🎟️ GERAÇÃO DE CARTELAS (CRIANDO LOTES SEGUROS)
+// 🎟️ GERAÇÃO DE CARTELAS
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function generateBatchCards(eventId: string, quantity: number) {
-  const { tenantId } = await requireTenant();
+  const tenantId = await requireTenant(); // 🔥 CORREÇÃO TYPE
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
-    include: { cards: { select: { shortId: true, matrix: true } } } // Pega as antigas
+    include: { cards: { select: { shortId: true, matrix: true } } }
   });
 
   if (!event) throw new Error("Acesso negado ou evento inexistente.");
 
   const existingShortIds = event.cards.map(c => c.shortId);
-  
-  // Array com as "Assinaturas" das cartelas que já existem
   const existingSignatures = event.cards.map(c => getCardSignature(c.matrix));
-
   const shortIds = generateUniqueIds(quantity, existingShortIds);
   const cardsToCreate = [];
 
   let count = 0;
   
-  // 🎰 GERAÇÃO MATEMATICAMENTE A PROVA DE CLONES
   while (count < quantity) {
     const newMatrix = {
       B: generateBingoColumn(1, 15, 5),
@@ -80,33 +71,30 @@ export async function generateBatchCards(eventId: string, quantity: number) {
 
     const newSignature = getCardSignature(newMatrix);
 
-    // Se essa exata combinação de 25 números já existe, descarta e tenta de novo
     if (!existingSignatures.includes(newSignature)) {
       cardsToCreate.push({
         eventId,
         shortId: shortIds[count],
         matrix: newMatrix,
-        isSold: false, // 🔥 Corrigido: Nenhuma cartela nasce vendida/paga. O Vendedor que vende!
+        isSold: false,
+        isPaid: false
       });
-      existingSignatures.push(newSignature); // Adiciona na memória pra não repetir neste lote
+      existingSignatures.push(newSignature);
       count++;
     }
   }
 
-  // Inserção no Banco
   await prisma.card.createMany({ data: cardsToCreate });
-
   return { success: true, totalCreated: quantity };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 🎰 SORTEIO SEGURO (TRANSACTION)
+// 🎰 SORTEIO SEGURO
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function drawNextNumber(eventId: string) {
-  const { tenantId } = await requireTenant();
+  const tenantId = await requireTenant(); // 🔥 CORREÇÃO TYPE
 
-  // Usa transação para evitar condições de corrida (vários cliques simultâneos)
   return await prisma.$transaction(async (tx) => {
     const event = await tx.event.findFirst({
       where: { id: eventId, tenantId },
@@ -119,7 +107,6 @@ export async function drawNextNumber(eventId: string) {
       return { error: "Todas as pedras já foram aclamadas!" };
     }
 
-    // Filtra apenas os números que AINDA NÃO saíram
     const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
       (n) => !event.drawnNumbers.includes(n)
     );
@@ -144,11 +131,11 @@ export async function drawNextNumber(eventId: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 🧹 GERENCIAMENTO DO JOGO E CARTELAS
+// 🧹 GERENCIAMENTO E CONSULTAS DA MESA
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function resetGame(eventId: string) {
-  const { tenantId } = await requireTenant();
+  const tenantId = await requireTenant(); // 🔥 CORREÇÃO TYPE
 
   await prisma.event.updateMany({
     where: { id: eventId, tenantId },
@@ -158,30 +145,23 @@ export async function resetGame(eventId: string) {
   return { success: true };
 }
 
-export async function checkCard(shortId: string) {
-  const card = await prisma.card.findFirst({
-    where: { shortId: shortId.trim().toUpperCase() },
-    include: {
-      event: {
-        include: { tenant: true },
-      },
-    },
+export async function toggleBoardVisibility(eventId: string, showBoard: boolean) {
+  const tenantId = await requireTenant(); // 🔥 CORREÇÃO TYPE
+  
+  await prisma.event.updateMany({
+    where: { id: eventId, tenantId },
+    data: { showBoard },
   });
-
-  if (!card) return { success: false, message: "Cartela não encontrada." };
-
-  return { success: true, card };
+  return { success: true };
 }
 
 export async function getEventCards(eventId: string) {
-  const { tenantId } = await requireTenant();
+  const tenantId = await requireTenant(); // 🔥 CORREÇÃO TYPE
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
     include: {
-      cards: {
-        orderBy: { shortId: 'asc' } // Ordena alfabeticamente para a impressão
-      },
+      cards: { orderBy: { shortId: 'asc' } },
       sponsors: true,
     },
   });
@@ -192,13 +172,7 @@ export async function getEventCards(eventId: string) {
     cards: event.cards.map((card) => ({
       id: card.id,
       shortId: card.shortId,
-      matrix: card.matrix as {
-        B: number[];
-        I: number[];
-        N: number[];
-        G: number[];
-        O: number[];
-      },
+      matrix: card.matrix as any,
     })),
     sponsors: event.sponsors.map((s) => ({
       id: s.id,
@@ -208,18 +182,22 @@ export async function getEventCards(eventId: string) {
   };
 }
 
-export async function toggleBoardVisibility(eventId: string, showBoard: boolean) {
-  const { tenantId } = await requireTenant();
-  await prisma.event.updateMany({
-    where: { id: eventId, tenantId },
-    data: { showBoard },
+
+
+export async function checkCard(shortId: string) {
+  const card = await prisma.card.findFirst({
+    where: { shortId: shortId.trim().toUpperCase() },
+    include: {
+      event: { include: { tenant: true } },
+    },
   });
-  return { success: true };
+
+  if (!card) return { success: false, message: "Cartela não encontrada." };
+  return { success: true, card };
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
-// 🏆 AUDITORIA DE VITÓRIA (VERIFICADOR INTELIGENTE)
+// 🏆 AUDITORIA DE VITÓRIA (VERIFICADOR INTELIGENTE ANTIFRAUDE)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function validateWinningCard(eventId: string, shortId: string) {
@@ -238,7 +216,7 @@ export async function validateWinningCard(eventId: string, shortId: string) {
   const drawn = event.drawnNumbers as number[];
   const matrix = card.matrix as any;
 
-  // Trava de Segurança Financeira (Regra de Ouro)
+  // 🛑 TRAVA DE SEGURANÇA FINANCEIRA (REGRA DE OURO)
   if (!card.isPaid) {
     return { 
       success: false, 
@@ -249,50 +227,40 @@ export async function validateWinningCard(eventId: string, shortId: string) {
   // 1. Array com todos os 24 números da cartela
   const allNumbers = [
     ...matrix.B, ...matrix.I, 
-    matrix.N[0], matrix.N[1], matrix.N[3], matrix.N[4], // Pula o N[2] que é o Centro Livre
+    matrix.N[0], matrix.N[1], matrix.N[3], matrix.N[4], // Pula o N[2] Centro Livre
     ...matrix.G, ...matrix.O
   ];
 
-  // 2. Verifica Cartela Cheia (Full House)
   const isFullHouse = allNumbers.every(n => drawn.includes(n));
 
-  // 3. Verifica Quina (5 números na mesma linha, coluna ou diagonal)
-  // 3.1 Linhas Horizontais
   const horizontalLines = [0, 1, 2, 3, 4].map(rowIndex => {
     return ["B", "I", "N", "G", "O"].map(col => {
-      if (col === "N" && rowIndex === 2) return true; // Centro Livre
+      if (col === "N" && rowIndex === 2) return true;
       return drawn.includes(matrix[col][rowIndex]);
     }).every(Boolean);
   });
 
-  // 3.2 Colunas Verticais
   const verticalLines = ["B", "I", "N", "G", "O"].map(col => {
     return [0, 1, 2, 3, 4].map(rowIndex => {
-      if (col === "N" && rowIndex === 2) return true; // Centro Livre
+      if (col === "N" && rowIndex === 2) return true;
       return drawn.includes(matrix[col][rowIndex]);
     }).every(Boolean);
   });
 
-  // 3.3 Diagonais
   const diag1 = [
-    drawn.includes(matrix.B[0]),
-    drawn.includes(matrix.I[1]),
-    true, // N[2] Centro Livre
-    drawn.includes(matrix.G[3]),
-    drawn.includes(matrix.O[4])
+    drawn.includes(matrix.B[0]), drawn.includes(matrix.I[1]),
+    true, // N[2]
+    drawn.includes(matrix.G[3]), drawn.includes(matrix.O[4])
   ].every(Boolean);
 
   const diag2 = [
-    drawn.includes(matrix.B[4]),
-    drawn.includes(matrix.I[3]),
-    true, // N[2] Centro Livre
-    drawn.includes(matrix.G[1]),
-    drawn.includes(matrix.O[0])
+    drawn.includes(matrix.B[4]), drawn.includes(matrix.I[3]),
+    true, // N[2]
+    drawn.includes(matrix.G[1]), drawn.includes(matrix.O[0])
   ].every(Boolean);
 
   const hasQuina = horizontalLines.some(Boolean) || verticalLines.some(Boolean) || diag1 || diag2;
 
-  // 4. Descobre qual é a rodada atual
   const currentPrize = event.prizes[0] || null;
   let isWinner = false;
   let winMessage = "";
@@ -318,34 +286,70 @@ export async function validateWinningCard(eventId: string, shortId: string) {
     isWinner,
     winMessage,
     currentPrize,
-    // Estatísticas cruas caso o Frontend queira pintar a cartela na tela:
     stats: { horizontalLines, verticalLines, diag1, diag2, drawnCount: drawn.length }
   };
 }
 
-// 1. O Verificador envia para a mesa do Locutor
+// 🔥 O MOTOR DE ESTADO DO TELÃO E LOCUTOR (PARA O SWR)
+export async function getGameState(eventId: string) {
+  noStore(); // 🚨 MATADOR DE CACHE: Garante que a mesa leia ao vivo do banco a cada 2 segundos!
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { 
+      drawnNumbers: true, 
+      showBoard: true, 
+      pendingWinnerCard: true,
+      pendingWinnerName: true,
+      bingoConfirmed: true
+    }
+  });
+
+  if (!event) return null;
+
+  return {
+    drawnNumbers: event.drawnNumbers || [],
+    latest: event.drawnNumbers[event.drawnNumbers.length - 1] || null,
+    showBoard: event.showBoard,
+    pendingWinnerCard: event.pendingWinnerCard,
+    pendingWinnerName: event.pendingWinnerName,
+    bingoConfirmed: event.bingoConfirmed
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 📢 NOTIFICAÇÕES (PÁTIO -> MESA) - COM MARRETADA DE CACHE!
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function alertLocutor(eventId: string, shortId: string, winnerName: string) {
-  return await prisma.event.update({
+  const result = await prisma.event.update({
     where: { id: eventId },
     data: {
       pendingWinnerCard: shortId.toUpperCase(),
       pendingWinnerName: winnerName,
+      bingoConfirmed: false, // Garante que a celebração está desligada
     }
   });
+  
+  // 🔥 MARRETADA DE CACHE: Força o Next.js a atualizar a tela do locutor em todos os computadores!
+  revalidatePath("/", "layout"); 
+  
+  return result;
 }
 
-// 2. O Locutor confirma e joga no Telão (ou limpa o alerta se for barrigada)
 export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
-  return await prisma.event.update({
+  const result = await prisma.event.update({
     where: { id: eventId },
     data: {
       bingoConfirmed: confirm,
-      // Se estiver confirmando, mantém os dados. Se estiver limpando, reseta.
-      pendingWinnerCard: confirm ? undefined : null,
-      pendingWinnerName: confirm ? undefined : null,
+      // 🔥 CORREÇÃO: Tem que ser null SEMPRE. Assim a caixinha laranja some da mesa do locutor!
+      pendingWinnerCard: null, 
+      pendingWinnerName: null,
+      bingoConfirmedAt: confirm ? new Date() : null,
     }
   });
+
+  revalidatePath("/", "layout");
+  
+  return result;
 }
-
-
-

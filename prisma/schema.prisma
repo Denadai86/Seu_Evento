@@ -29,6 +29,10 @@ enum PaymentMethod {
   CASH   // Dinheiro vivo
   CARD   // Débito/Crédito
 }
+enum PlanType {
+  SINGLE_EVENT   // Plano por Evento Único
+  ANNUAL         // Plano Anual Livre
+}
 
 // ==========================================
 // MODELS
@@ -43,12 +47,13 @@ model Tenant {
   active      Boolean  @default(true)
   token       String?
   isActive Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  planType    PlanType @default(SINGLE_EVENT)
+  expiresAt   DateTime? // Data limite real do acesso (já com os 7 dias inclusos se for evento único)
 
   users       User[]
   events      Event[]
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 
   @@map("tenants")
 }

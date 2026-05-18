@@ -61,3 +61,30 @@ export async function toggleEventStatus(
     return { success: false, error: "Falha ao alterar o status." };
   }
 }
+
+export async function updateTicketPrice(eventId: string, priceInCents: number) {
+  if (priceInCents < 0) throw new Error("O valor não pode ser negativo.");
+
+  await prisma.event.update({
+    where: { id: eventId },
+    data: { ticketPrice: priceInCents }
+  });
+
+  return { success: true };
+}
+
+// src/actions/event.ts
+
+export async function activateDemoMode(eventId: string) {
+  // Pega todas as cartelas que ainda não estão pagas e valida todas!
+  await prisma.card.updateMany({
+    where: { eventId: eventId, isPaid: false },
+    data: { 
+      isSold: true, 
+      isPaid: true,
+      price: 0 // Marca como 0 para não bagunçar o seu faturamento financeiro real!
+    }
+  });
+
+  return { success: true };
+}

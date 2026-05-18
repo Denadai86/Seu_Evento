@@ -2,157 +2,177 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createSeller, assignCardsToSeller, markSellerAsPaid, returnCardsFromSeller, deleteSeller } from "@/actions/seller";
-import { Users, ChevronDown, ChevronUp, Wallet, PackagePlus, PackageMinus, CheckCircle2, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { processBatchSale } from "@/actions/venda"; // Ajuste o caminho se necessário
+import { Trash2, Plus, CheckCircle2, X, Receipt, Search } from "lucide-react";
 
-export default function SellerManager({ eventId, initialSellers }: { eventId: string, initialSellers: any[] }) {
-  const [isPending, startTransition] = useTransition();
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  
+export default function SellerManager({ eventId, initialSellers }: any) {
+  const [sellers, setSellers] = useState(initialSellers || []);
   const [newSellerName, setNewSellerName] = useState("");
-  const [transferAmount, setTransferAmount] = useState<number | "">("");
-  const [returnAmount, setReturnAmount] = useState<number | "">("");
-  const [payAmount, setPayAmount] = useState<number | "">(""); // 🔥 Novo estado para pagamento parcial
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
-  const handleCreateSeller = (e: React.FormEvent) => {
+  // Estados do Modal de Acerto de Contas
+  const [settleModalOpen, setSettleModalOpen] = useState(false);
+  const [selectedSeller, setSelectedSeller] = useState<any>(null);
+  const [batchInput, setBatchInput] = useState("");
+  const [settleMessage, setSettleMessage] = useState("");
+
+  const handleAddSeller = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSellerName) return;
-    startTransition(async () => {
-      await createSeller(eventId, newSellerName);
-      setNewSellerName("");
-    });
+    if (!newSellerName.trim()) return;
+    
+    // Aqui você chama sua action de criar vendedor (se já tiver)
+    // Exemplo visual:
+    alert(`Ação para criar vendedor: ${newSellerName}`);
+    setNewSellerName("");
   };
 
-  const handleAssignCards = (sellerId: string) => {
-    if (!transferAmount || transferAmount <= 0) return;
-    startTransition(async () => {
-      const res = await assignCardsToSeller(eventId, sellerId, Number(transferAmount));
-      if (!res.success) alert(res.error);
-      setTransferAmount("");
-    });
+  const handleOpenSettleModal = (seller: any) => {
+    setSelectedSeller(seller);
+    setBatchInput("");
+    setSettleMessage("");
+    setSettleModalOpen(true);
   };
 
-  const handleReturnCards = (sellerId: string) => {
-    if (!returnAmount || returnAmount <= 0) return;
-    startTransition(async () => {
-      const res = await returnCardsFromSeller(sellerId, Number(returnAmount));
-      if (!res.success) alert(res.error);
-      setReturnAmount("");
-    });
-  };
+  const handleSettleUp = async () => {
+    if (!batchInput.trim()) return;
 
-  // 🔥 Nova função que recebe a quantidade
-  const handleMarkAsPaid = (sellerId: string) => {
-    if (!payAmount || payAmount <= 0) return;
-    if (!confirm(`Confirmar o recebimento em dinheiro de ${payAmount} cartelas?`)) return;
-    startTransition(async () => {
-      const res = await markSellerAsPaid(sellerId, Number(payAmount));
-      if (!res?.success) alert(res?.error);
-      setPayAmount("");
-    });
-  };
+    // Pega o texto "A1B2, C3D4 E5F6" e transforma num array limpo: ["A1B2", "C3D4", "E5F6"]
+    const cardsArray = batchInput
+      .toUpperCase()
+      .split(/[\s,]+/) // Divide por espaço, vírgula ou quebra de linha
+      .filter(code => code.length > 0);
 
-  const handleDeleteSeller = (sellerId: string, sellerName: string) => {
-    if (!confirm(`Tem certeza que deseja excluir o vendedor ${sellerName}? Cartelas não pagas retornarão ao estoque.`)) return;
+    if (cardsArray.length === 0) return;
+
     startTransition(async () => {
-      const res = await deleteSeller(sellerId);
-      if (!res.success) alert(res.error);
+      try {
+        // Assume que Acerto de Contas de rua é sempre entregue em DINHEIRO (CASH) para a secretária
+        // Ajuste "CASH" para "DINHEIRO" se for o que estiver no seu schema.prisma
+        const res = await processBatchSale(eventId, cardsArray, "CASH", selectedSeller.id);
+        
+        if (res.success) {
+          setSettleMessage(`✅ Acerto concluído! ${cardsArray.length} cartelas baixadas.`);
+          setBatchInput("");
+          router.refresh(); // Atualiza o Dashboard financeiro por trás
+          
+          setTimeout(() => {
+            setSettleModalOpen(false);
+          }, 2000);
+        } else {
+          setSettleMessage(`❌ Erro: ${res.error}`);
+        }
+      } catch (error: any) {
+        setSettleMessage(`❌ Erro crítico: ${error.message}`);
+      }
     });
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       
-      <form onSubmit={handleCreateSeller} className="flex gap-2 mb-6 shrink-0">
+      {/* ADD VENDEDOR */}
+      <form onSubmit={handleAddSeller} className="flex gap-2 mb-4 shrink-0">
         <input 
-          type="text" placeholder="Nome do Vendedor..." value={newSellerName} onChange={(e) => setNewSellerName(e.target.value)}
-          className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-500 outline-none focus:border-emerald-500 transition-colors"
-          disabled={isPending}
+          type="text" 
+          value={newSellerName}
+          onChange={(e) => setNewSellerName(e.target.value)}
+          placeholder="Nome do Vendedor..." 
+          className="flex-1 bg-black/40 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-blue-500 transition-colors"
         />
-        <button type="submit" disabled={isPending || !newSellerName} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 rounded-xl font-bold transition-all disabled:opacity-50 flex items-center justify-center">
-          +
+        <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-xl transition-colors">
+          <Plus size={20} />
         </button>
       </form>
 
-      <div className="flex flex-col gap-3 overflow-y-auto pr-2 custom-scrollbar">
-        {initialSellers.length === 0 ? (
-          <p className="text-slate-500 text-sm text-center py-4">Nenhum vendedor cadastrado.</p>
-        ) : (
-          initialSellers.map((seller) => {
-            const isExpanded = expandedId === seller.id;
-            const totalCards = seller.cards.length;
-            const paidCards = seller.cards.filter((c: any) => c.isPaid).length;
-            const pendingCards = totalCards - paidCards;
-            const isFullyPaid = totalCards > 0 && pendingCards === 0;
-
-            return (
-              <div key={seller.id} className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden transition-all shrink-0">
-                
-                <div className="flex items-center justify-between p-1">
-                  <div onClick={() => setExpandedId(isExpanded ? null : seller.id)} className="p-3 flex-1 flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 transition-colors rounded-xl">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isFullyPaid ? 'bg-emerald-900/50 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-                      {isFullyPaid ? <CheckCircle2 size={20} /> : <Users size={20} />}
-                    </div>
-                    <div>
-                      <h3 className="text-white font-bold text-sm">{seller.name}</h3>
-                      <p className="text-xs text-slate-500">
-                        {totalCards} cartelas {totalCards > 0 ? <span className="text-emerald-500/70">({paidCards} pagas)</span> : ''}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center pr-3 gap-2 text-slate-500">
-                    <button onClick={() => handleDeleteSeller(seller.id, seller.name)} disabled={isPending} className="p-2 hover:bg-red-900/30 hover:text-red-400 rounded-lg transition-colors" title="Excluir Vendedor"><Trash2 size={16} /></button>
-                    <div onClick={() => setExpandedId(isExpanded ? null : seller.id)} className="p-2 cursor-pointer">{isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}</div>
-                  </div>
+      {/* LISTA DE VENDEDORES */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
+        {sellers.map((seller: any) => {
+          const cardsSold = seller.cards?.filter((c: any) => c.isPaid).length || 0;
+          
+          return (
+            <div key={seller.id} className="bg-black/20 border border-slate-800 p-3 rounded-xl flex items-center justify-between group">
+              <div className="flex items-center gap-3 overflow-hidden">
+                <div className="w-8 h-8 rounded-full bg-blue-900/30 text-blue-400 flex items-center justify-center shrink-0 font-bold text-xs uppercase">
+                  {seller.name.substring(0, 2)}
                 </div>
-
-                {/* CORPO EXPANDIDO COM GRID DE 3 COLUNAS */}
-                {isExpanded && (
-                  <div className="p-4 border-t border-slate-800 bg-slate-900/60 flex flex-col gap-4 animate-in slide-in-from-top-2 duration-200">
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      {/* 1. Entregar */}
-                      <div>
-                        <label className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mb-1 block">Entregar Lote</label>
-                        <div className="flex gap-1">
-                          <input type="number" min="1" placeholder="Qtd" value={transferAmount} onChange={(e) => setTransferAmount(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 text-center" />
-                          <button onClick={() => handleAssignCards(seller.id)} disabled={isPending || !transferAmount} className="bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-600/50 px-3 rounded-lg transition-colors flex items-center justify-center shrink-0" title="Repassar">
-                            <PackagePlus size={16} />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 2. Devolver */}
-                      <div>
-                        <label className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mb-1 block">Devolver</label>
-                        <div className="flex gap-1">
-                          <input type="number" min="1" max={pendingCards} placeholder="Qtd" value={returnAmount} onChange={(e) => setReturnAmount(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200 outline-none focus:border-amber-500 text-center" />
-                          <button onClick={() => handleReturnCards(seller.id)} disabled={isPending || !returnAmount || pendingCards === 0} className="bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 border border-amber-600/50 px-3 rounded-lg transition-colors flex items-center justify-center shrink-0 disabled:opacity-30" title="Devolver">
-                            <PackageMinus size={16} />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 3. Receber Dinheiro (Baixa Parcial) */}
-                      <div>
-                        <label className="text-[10px] uppercase font-bold tracking-widest text-emerald-500 mb-1 block">Receber $</label>
-                        <div className="flex gap-1">
-                          <input type="number" min="1" max={pendingCards} placeholder="Qtd" value={payAmount} onChange={(e) => setPayAmount(Number(e.target.value))} className="w-full bg-emerald-950/20 border border-emerald-900/50 rounded-lg px-2 py-2 text-sm text-emerald-400 outline-none focus:border-emerald-500 text-center" />
-                          <button onClick={() => handleMarkAsPaid(seller.id)} disabled={isPending || !payAmount || pendingCards === 0} className="bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 px-3 rounded-lg transition-colors flex items-center justify-center shrink-0 disabled:opacity-30" title="Dar Baixa Financeira">
-                            <Wallet size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                  </div>
-                )}
+                <div className="truncate">
+                  <p className="text-sm font-bold text-slate-200 truncate">{seller.name}</p>
+                  <p className="text-xs text-slate-500">{cardsSold} cartelas baixadas</p>
+                </div>
               </div>
-            );
-          })
+
+              <div className="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                {/* 🔥 BOTÃO DE ACERTO DE CONTAS */}
+                <button 
+                  onClick={() => handleOpenSettleModal(seller)}
+                  className="bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 p-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold px-2"
+                  title="Acerto de Contas (Dar baixa em lote)"
+                >
+                  <Receipt size={14} /> Baixa
+                </button>
+                <button className="text-slate-600 hover:text-red-400 p-1.5 transition-colors">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {sellers.length === 0 && (
+          <p className="text-center text-slate-500 text-sm py-4">Nenhum vendedor cadastrado.</p>
         )}
       </div>
+
+      {/* 🚀 MODAL DE ACERTO DE CONTAS (BACKOFFICE) */}
+      {settleModalOpen && selectedSeller && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl relative">
+            <button onClick={() => setSettleModalOpen(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white">
+              <X size={24} />
+            </button>
+            
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-blue-500/10 text-blue-400 rounded-xl">
+                <Receipt size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Acerto de Contas</h3>
+                <p className="text-slate-400 text-xs">Baixa de canhotos do(a) <strong className="text-slate-200">{selectedSeller.name}</strong></p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-400 mb-2">
+              Digite ou bipe os códigos das cartelas vendidas (separe por vírgula, espaço ou linha):
+            </p>
+
+            <textarea 
+              value={batchInput}
+              onChange={(e) => setBatchInput(e.target.value)}
+              placeholder="Ex: A1B2, C3D4&#10;E5F6"
+              className="w-full bg-black/50 border border-slate-700 rounded-xl p-4 text-white font-mono uppercase tracking-wider outline-none focus:border-emerald-500 transition-colors min-h-[120px] resize-none mb-4"
+            />
+
+            {settleMessage && (
+              <div className={`p-3 rounded-xl text-sm font-bold mb-4 ${settleMessage.includes('✅') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                {settleMessage}
+              </div>
+            )}
+
+            <button 
+              onClick={handleSettleUp}
+              disabled={isPending || !batchInput.trim()}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50"
+            >
+              {isPending ? "Processando Lote..." : "Confirmar Recebimento em Dinheiro"}
+            </button>
+            
+            <p className="text-[10px] text-center text-slate-500 mt-4 uppercase tracking-widest">
+              O valor será creditado no Caixa Geral
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

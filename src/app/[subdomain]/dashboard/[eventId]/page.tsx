@@ -8,12 +8,12 @@ import EventStatusToggle from "./EventStatusToggle";
 import GenerateCardsButton from "./GenerateCardsButton";
 import { 
   Printer, Users, Megaphone, MonitorPlay, 
-  Settings, ArrowLeft, Ticket, Building2, Wallet, Trophy
+  ArrowLeft, Ticket, Building2, Wallet, Trophy, ShieldAlert
 } from "lucide-react";
 import SellerManager from "./SellerManager";
 import PrizeManager from "./PrizeManager";
 import SponsorManager from "./SponsorManager";
-
+import TicketPriceEditor from "./TicketPriceEditor";
 
 export default async function EventDashboardPage({
   params,
@@ -32,13 +32,12 @@ export default async function EventDashboardPage({
         select: { cards: true, sponsors: true },
       },
       sponsors: true,
-      // 🔥 Puxa as cartelas para contar faturamento global
       cards: {
-        select: { isPaid: true, isSold: true }
+        select: { isPaid: true, isSold: true, price: true }
       },
       prizes: { orderBy: { order: 'asc' } },
       sellers: {
-        include: { cards: { select: { id: true, isPaid: true } } },
+        include: { cards: { select: { id: true, isPaid: true, price: true } } },
         orderBy: { createdAt: 'desc' }
       }
     },
@@ -46,10 +45,19 @@ export default async function EventDashboardPage({
 
   if (!event) notFound();
 
- // 💰 Cálculos Financeiros (Agora puxando do Banco de Dados!)
-  const TICKET_PRICE = event.ticketPrice; 
+  // 💰 CORREÇÃO DEFINITIVA (Cartelas Legadas + Patrocinadores)
   const totalPaid = event.cards.filter(c => c.isPaid).length;
-  const revenue = totalPaid * TICKET_PRICE;
+  
+  // 1. Soma das cartelas (Se a cartela for antiga e não tiver preço, usa o ticketPrice do evento)
+  const cardsRevenueCents = event.cards
+    .filter(c => c.isPaid)
+    .reduce((sum, card) => sum + (card.price || event.ticketPrice), 0);
+
+  // 2. Soma dos Patrocinadores
+  const sponsorsRevenueCents = event.sponsors.reduce((sum, s) => sum + s.contribution, 0);
+
+  // 3. Faturamento Bruto (Total em Caixa = Cartelas + Patrocinadores)
+  const totalEmCaixaReal = (cardsRevenueCents + sponsorsRevenueCents) / 100;
 
   return (
     <div className="min-h-screen bg-[#0b0f14] text-slate-200 font-sans pb-20">
@@ -64,6 +72,7 @@ export default async function EventDashboardPage({
             >
               <ArrowLeft size={20} />
             </Link>
+
             <div>
               <h1 className="text-2xl font-black text-white tracking-wide">{event.name}</h1>
               <p className="text-emerald-500/70 text-sm font-bold uppercase tracking-widest">
@@ -71,7 +80,12 @@ export default async function EventDashboardPage({
               </p>
             </div>
           </div>
+          
           <div className="flex items-center gap-4">
+            <TicketPriceEditor eventId={event.id} initialPrice={event.ticketPrice} />
+            
+            <div className="hidden sm:block h-6 w-px bg-slate-700"></div>
+
             <EventStatusToggle eventId={event.id} tenantId={""} subdomain={""} currentStatus={""} />
             <div className="h-6 w-px bg-slate-800"></div>
             <LogoutButton callbackUrl="/entrar" variant="dark" />
@@ -81,7 +95,7 @@ export default async function EventDashboardPage({
 
       <main className="max-w-7xl mx-auto px-6 mt-8">
         
-        {/* 📊 ESTATÍSTICAS RÁPIDAS (Top Cards agora com 4 colunas) */}
+        {/* 📊 ESTATÍSTICAS RÁPIDAS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           
           <div className="bg-[#111827] border border-emerald-500/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
@@ -91,7 +105,7 @@ export default async function EventDashboardPage({
             <div>
               <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total em Caixa</p>
               <p className="text-2xl font-black text-white">
-                {revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                {totalEmCaixaReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
           </div>
@@ -129,40 +143,32 @@ export default async function EventDashboardPage({
           </div>
         </div>
 
-        {/* 🧩 BENTO GRID (Módulos de Ação) */}
+        {/* 🧩 BENTO GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* MÓDULO 1: CARTELAS E IMPRESSÃO (2 colunas) */}
+          {/* MÓDULO 1: CARTELAS E IMPRESSÃO */}
           <div className="lg:col-span-2 bg-[#111827] border border-emerald-900/30 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full"></div>
-            
             <div className="flex items-center gap-3 mb-8">
               <Printer className="text-emerald-400" size={28} />
               <h2 className="text-2xl font-black text-white">Fábrica de Cartelas</h2>
             </div>
-            
             <p className="text-slate-400 mb-8 max-w-xl">
               Gere lotes matematicamente seguros e imprima em diferentes formatos. Em breve, envie direto para gráficas parceiras com desconto.
             </p>
-
             <div className="bg-[#0b0f14] p-6 rounded-2xl border border-slate-800">
               <GenerateCardsButton eventId={event.id} eventName={event.name} />
             </div>
           </div>
 
-          {/* MÓDULO 2: PATROCINADORES (1 coluna) */}
+          {/* MÓDULO 2: PATROCINADORES */}
           <div className="lg:col-span-1 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
             <div className="flex items-center gap-3 mb-6 shrink-0">
               <Megaphone className="text-amber-400" size={28} />
               <h2 className="text-xl font-black text-white">Patrocinadores</h2>
             </div>
-            
-            {/* O Componente Renderizado e com Scroll Interno */}
             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-              <SponsorManager 
-                eventId={event.id} 
-                initialSponsors={event.sponsors} 
-              />
+              <SponsorManager eventId={event.id} initialSponsors={event.sponsors} />
             </div>
           </div>
 
@@ -172,16 +178,15 @@ export default async function EventDashboardPage({
               <Trophy className="text-violet-400" size={28} />
               <div>
                 <h2 className="text-xl font-black text-white">Gestão de Rodadas</h2>
-                <p className="text-slate-500 text-xs mt-1">Configure os prémios (Quina e Cheia)</p>
+                <p className="text-slate-500 text-xs mt-1">Configure os prêmios (Quina e Cheia)</p>
               </div>
             </div>
-            
             <div className="flex-1 overflow-hidden">
               <PrizeManager eventId={event.id} initialPrizes={event.prizes} />
             </div>
           </div>
 
-          {/* MÓDULO 3: VENDEDORES (2 colunas) */}
+          {/* MÓDULO 3: VENDEDORES */}
           <div className="lg:col-span-2 bg-[#111827] border border-blue-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
             <div className="flex items-center gap-3 mb-6 shrink-0">
               <Users className="text-blue-400" size={28} />
@@ -190,13 +195,12 @@ export default async function EventDashboardPage({
                 <p className="text-slate-500 text-xs mt-1">Gestão de lotes físicos e repasses</p>
               </div>
             </div>
-            
             <div className="flex-1 overflow-hidden">
               <SellerManager eventId={event.id} initialSellers={event.sellers} />
             </div>
           </div>
 
-          {/* MÓDULO 4: AUDITORIA DE VENDAS (1 coluna) */}
+          {/* MÓDULO 4: AUDITORIA DE VENDAS */}
           <div className="lg:col-span-1 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
             <div className="flex items-center gap-3 mb-6 shrink-0">
               <Wallet className="text-emerald-400" size={28} />
@@ -208,18 +212,22 @@ export default async function EventDashboardPage({
                 <p className="text-slate-500 text-sm text-center py-4">Nenhum dado financeiro.</p>
               ) : (
                 event.sellers.map((seller) => {
-                  const sellerPaid = seller.cards.filter(c => c.isPaid).length;
-                  const sellerRevenue = sellerPaid * TICKET_PRICE;
+                  const sellerPaidCount = seller.cards.filter(c => c.isPaid).length;
+                  
+                  // 🔥 CORREÇÃO NA AUDITORIA (Fallback de preço para cartelas antigas)
+                  const sellerRevenueInCents = seller.cards
+                    .filter(c => c.isPaid)
+                    .reduce((sum, card) => sum + (card.price || event.ticketPrice), 0);
 
                   return (
                     <div key={seller.id} className="flex justify-between items-center p-3 bg-black/20 rounded-xl border border-slate-800">
                       <div>
                         <p className="text-sm font-bold text-slate-200 truncate max-w-[120px]">{seller.name}</p>
-                        <p className="text-[10px] text-slate-500 uppercase">{sellerPaid} pagas</p>
+                        <p className="text-[10px] text-slate-500 uppercase">{sellerPaidCount} pagas</p>
                       </div>
                       <div className="text-right">
                         <p className="text-emerald-400 font-black text-sm">
-                          R$ {sellerRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          R$ {(sellerRevenueInCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
                       </div>
                     </div>
@@ -229,23 +237,27 @@ export default async function EventDashboardPage({
             </div>
           </div>
 
-          {/* MÓDULO 5: LINKS RÁPIDOS (Ocupa a linha toda) */}
-          <div className="lg:col-span-3 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col sm:flex-row gap-6 items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <MonitorPlay className="text-slate-300" size={24} />
-                <h2 className="text-xl font-black text-white">Área de Testes & Links</h2>
+          {/* MÓDULO 5: LINKS RÁPIDOS E AÇÕES GLOBAIS */}
+          <div className="lg:col-span-3 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col gap-6 relative overflow-hidden">
+            <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-blue-500/5 blur-[120px] rounded-full pointer-events-none"></div>
+
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <MonitorPlay className="text-slate-300" size={24} />
+                  <h2 className="text-xl font-black text-white">Área de Testes & Links Operacionais</h2>
+                </div>
+                <p className="text-slate-400 text-sm max-w-2xl">
+                  Acesse ferramentas externas do evento: mesa de sorteio, painel do telão, validador de cartelas e o fechamento de caixa detalhado.
+                </p>
               </div>
-              <p className="text-slate-400 text-sm max-w-xl">
-                Acesse a mesa do locutor, abra o telão do evento ou compartilhe o painel de verificação com a sua equipe de pátio.
-              </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full relative z-10">
               <a 
                 href="/live" 
                 target="_blank"
-                className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2"
+                className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-slate-700"
               >
                 Mesa Locutor
               </a>
@@ -253,23 +265,65 @@ export default async function EventDashboardPage({
               <a 
                 href={`/projector?eventId=${event.id}`} 
                 target="_blank"
-                className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
               >
                 Abrir Telão
               </a>
 
-              {/* Link Corrigido do Verificador/PDV */}
               <a 
                 href={`/verify?event=${event.id}`}
                 target="_blank"
-                className="flex-1 sm:flex-none bg-violet-600 hover:bg-violet-500 text-white font-bold py-3 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
+                className="bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
               >
-                <span>🔎 Verificador</span>
+                🔎 Verificador
+              </a>
+              
+             
+              <form action={async () => {
+                "use server";
+                const { activateDemoMode } = await import("@/actions/event");
+                await activateDemoMode(event.id);
+              }}>
+                <button 
+                  type="submit"
+                  className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-pink-900/20 text-center flex items-center justify-center gap-2"
+                >
+                  ✨ Validar Todas (Demo)
+                </button>
+              </form>
+
+              <a 
+                href={`/dashboard/${event.id}/relatorio`} 
+                target="_blank"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
+              >
+                📄 Fechar Caixa
               </a>
             </div>
           </div>
 
         </div>
+
+        {/* 🌟 FOOTER MEGA BLASTER PREMIUM SAAS */}
+        <footer className="mt-20 border-t border-slate-800/50 pt-12 pb-8 flex flex-col items-center justify-center text-center">
+          <div className="w-14 h-14 bg-gradient-to-br from-emerald-500/20 to-emerald-900/20 rounded-2xl flex items-center justify-center text-emerald-400 mb-6 border border-emerald-500/20 shadow-[0_0_40px_rgba(16,185,129,0.1)]">
+            <ShieldAlert size={28} /> 
+          </div>
+          
+          <h3 className="text-2xl font-black text-white tracking-[0.2em] uppercase mb-3">Ação Leve</h3>
+          <p className="text-slate-500 text-sm mb-8 max-w-md leading-relaxed">
+            Tecnologia antifraude e transparência financeira para eventos beneficentes de alto padrão.
+          </p>
+          
+          <div className="flex items-center gap-3 text-xs font-bold text-slate-500 bg-black/40 px-5 py-2.5 rounded-full border border-slate-800/80 shadow-inner">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            SISTEMA OPERACIONAL E PROTEGIDO
+          </div>
+        </footer>
+
       </main>
     </div>
   );

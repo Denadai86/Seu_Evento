@@ -1,4 +1,4 @@
-// src/proxy.ts
+// src/proxy.ts (ou middleware.ts)
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
@@ -63,17 +63,25 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
- // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
   // SUBDOMÍNIOS DE CLIENTES  (sjose.acaoleve.com / sjose.localhost)
   // ═══════════════════════════════════════════════════════════════
 
-  // 1. ROTAS PÚBLICAS (Sem login)
+  // 1. ROTAS PÚBLICAS E LOGIN
   if (
+    pathname === "/entrar" || // 🔥 CORREÇÃO: Liberamos o login do loop infinito!
     pathname.startsWith("/projector") || 
     pathname.startsWith("/cartela") || 
-    pathname === "/verify" // 🔥 Apenas a raiz do verify é pública
+    pathname === "/verify" 
   ) {
-    // Deixa passar direto para o rewrite abaixo
+    // Se a pessoa já estiver logada e tentar acessar a tela de login de novo, manda ela pro painel
+    if (pathname === "/entrar" && session) {
+      if (session.user.role === "OPERATOR") {
+        return NextResponse.redirect(new URL("/live", req.url));
+      }
+      return NextResponse.redirect(new URL("/dashboard", req.url));
+    }
+    // Caso contrário (deslogada), deixa ela ver a tela de login e renderiza o rewrite final.
   } 
   // 2. ROTAS PROTEGIDAS (Exigem login)
   else {
@@ -97,10 +105,9 @@ export default auth((req) => {
       return NextResponse.redirect(new URL("/live", req.url));
     }
 
-    // 🔥 Trava da Maquininha (Só Admin e Verifier acessam o PDV)
+    // Trava da Maquininha (Só Admin e Verifier acessam o PDV)
     if (pathname.startsWith("/vendas")) {
-      if (!["ADMIN", "SUPER_ADMIN", "VERIFIER"].includes(session.user.role)) {
-        // Se for um operador curioso tentando acessar /vendas
+      if (!["ADMIN", "SUPER_ADMIN", "VERIFIER", "ORG_ADMIN"].includes(session.user.role)) {
         return NextResponse.redirect(new URL("/live", req.url));
       }
     }
