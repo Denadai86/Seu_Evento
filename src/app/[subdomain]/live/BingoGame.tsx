@@ -1,21 +1,29 @@
 // src/app/[subdomain]/live/BingoGame.tsx
-
 "use client";
 
 import { useState, useTransition, useMemo, useEffect } from "react";
 import useSWR from "swr";
-import { drawNextNumber, resetGame, checkCard, toggleBoardVisibility, getEventCards, toggleBingoCelebration } from "@/actions/bingo";
+import { 
+  drawNextNumber, 
+  resetGame, 
+  checkCard, 
+  toggleBoardVisibility, 
+  getEventCards, 
+  toggleBingoCelebration,
+  completeCurrentPrizeAndNext // 🔥 Nova ação importada
+} from "@/actions/bingo";
 import LogoutButton from "@/components/LogoutButton";
-import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy } from "lucide-react";
+import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy, Send } from "lucide-react";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 interface BingoGameProps {
-  eventId: string; eventName: string; initialDrawn: number[];
+  eventId: string;
+  eventName: string;
+  initialDrawn: number[];
   sponsors: { id: string; name: string; logoUrl: string | null; }[];
 }
 
-// 🔥 Helper para pegar a Letra B-I-N-G-O
 const formatBall = (num: number | null) => {
   if (!num) return { letter: "", number: "--" };
   if (num <= 15) return { letter: "B", number: num };
@@ -35,31 +43,39 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
   const [auditResult, setAuditResult] = useState<any>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState("");
-
   const [cards, setCards] = useState<any[]>([]);
 
   useEffect(() => {
     getEventCards(eventId).then(res => setCards(res.cards)).catch(console.error);
   }, [eventId]);
 
+  // Polling via API blindada contra cache
   const { data, mutate } = useSWR(`/api/bingo/state?eventId=${eventId}`, fetcher, {
-    refreshInterval: 2000, fallbackData: { drawnNumbers: initialDrawn, latest: initialDrawn[initialDrawn.length - 1] || null, showBoard: true },
+    refreshInterval: 1500, // Diminuído para 1.5s para maior agilidade
   });
 
   const drawnNumbers: number[] = data?.drawnNumbers || [];
   const showBoard = data?.showBoard !== false;
   const currentPrize = data?.currentPrize || null;
-  
+
   const board = useMemo(() => [
-    { letter: "B", range: [1, 15] }, { letter: "I", range: [16, 30] },
-    { letter: "N", range: [31, 45] }, { letter: "G", range: [46, 60] },
+    { letter: "B", range: [1, 15] },
+    { letter: "I", range: [16, 30] },
+    { letter: "N", range: [31, 45] },
+    { letter: "G", range: [46, 60] },
     { letter: "O", range: [61, 75] },
   ], []);
 
   const ranking = useMemo(() => {
     if (!cards.length || drawnNumbers.length === 0) return [];
     return cards.map(card => {
-      const allNumbers = [...card.matrix.B, ...card.matrix.I, ...card.matrix.N.filter((_: any, i: number) => i !== 2), ...card.matrix.G, ...card.matrix.O];
+      const allNumbers = [
+        ...card.matrix.B, 
+        ...card.matrix.I, 
+        ...card.matrix.N.filter((_: any, i: number) => i !== 2), 
+        ...card.matrix.G, 
+        ...card.matrix.O
+      ];
       const hits = allNumbers.filter((n: number) => drawnNumbers.includes(n)).length;
       return { shortId: card.shortId, remaining: 24 - hits };
     }).filter(c => c.remaining <= 4).sort((a, b) => a.remaining - b.remaining).slice(0, 10);
@@ -80,37 +96,52 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
       const res = await drawNextNumber(eventId);
       if (res?.success) {
         await animateDraw(res.latest);
-        mutate({ ...data, drawnNumbers: res.drawnNumbers, latest: res.latest }, false);
+        mutate();
       }
     });
   };
 
   const handleReset = () => {
-    if (!confirm("Isso vai zerar a mesa. Tem certeza?")) return;
+    if (!confirm("Isso vai zerar a mesa atual. Tem certeza?")) return;
     startTransition(async () => {
       await resetGame(eventId);
       setDisplayNumber(null);
       setAuditResult(null);
-      mutate({ drawnNumbers: [], latest: null, showBoard: true }, false);
+      mutate();
     });
   };
 
   const handleToggleBoard = () => {
     startTransition(async () => {
       await toggleBoardVisibility(eventId, !showBoard);
-      mutate({ ...data, showBoard: !showBoard }, false);
+      mutate();
+    });
+  };
+
+  const handleNextRound = (prizeId: string) => {
+    if (!confirm("Confirmar encerramento desta rodada? Isso salvará o ganhador atual e limpará o painel para o próximo prêmio!")) return;
+    startTransition(async () => {
+      const res = await completeCurrentPrizeAndNext(eventId, prizeId);
+      if (res.success) {
+        setDisplayNumber(null);
+        setAuditResult(null);
+        mutate();
+      }
     });
   };
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(`${window.location.origin}/projector?event=${eventId}`);
-    setCopied(true); setTimeout(() => setCopied(false), 2000);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleAudit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auditCode) return;
-    setAuditLoading(true); setAuditError(""); setAuditResult(null);
+    setAuditLoading(true);
+    setAuditError("");
+    setAuditResult(null);
     const res = await checkCard(auditCode);
     if (res.success && res.card && res.card.eventId === eventId) setAuditResult(res.card);
     else setAuditError(res.card?.eventId !== eventId ? "Cartela de outro evento!" : "Cartela não encontrada.");
@@ -135,82 +166,93 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
           <LogoutButton callbackUrl="/entrar" variant="dark" />
         </div>
       </div>
-      {/* 🔥 DESTAQUE DO PRÊMIO NA MESA DO LOCUTOR */}
-      {currentPrize && (
-        <div className="bg-violet-900/40 border border-violet-500/50 text-violet-200 px-6 py-4 rounded-2xl mb-8 flex items-center gap-4 shadow-lg">
-          <div className="bg-violet-500/20 p-3 rounded-full text-violet-400">
-            <Trophy size={28} />
+
+      {/* RODADA DA VEZ */}
+      {currentPrize ? (
+        <div className="bg-violet-900/40 border border-violet-500/50 text-violet-200 px-6 py-4 rounded-2xl mb-8 flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-4">
+            <div className="bg-violet-500/20 p-3 rounded-full text-violet-400">
+              <Trophy size={28} />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-violet-400 mb-1">Rodada Ativa</p>
+              <p className="text-2xl font-black">{currentPrize.prizeName} <span className="text-sm font-normal opacity-70">({currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"})</span></p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-violet-400 mb-1">
-              Rodada da Vez • {currentPrize.name}
-            </p>
-            <p className="text-2xl font-black">
-              {currentPrize.prizeName} <span className="text-sm font-normal opacity-70">({currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"})</span>
-            </p>
+          <div className="text-sm text-violet-300 bg-violet-950/60 border border-violet-800 px-4 py-2 rounded-xl font-medium">
+            Prêmio: {currentPrize.name}
           </div>
+        </div>
+      ) : (
+        <div className="bg-slate-900/50 border border-slate-800 text-slate-400 px-6 py-4 rounded-2xl mb-8 text-center font-bold">
+          🏆 Todos os prêmios agendados foram entregues! Fim do evento.
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 max-w-[1400px] mx-auto">
+      {/* CONTRATO DE BINGO (5 E 6 UNIFICADOS) */}
+      <div className="max-w-[1400px] mx-auto mb-6">
+        {data?.pendingWinnerCard && !data?.bingoConfirmed && (
+          <div className="bg-amber-500 text-black p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between animate-pulse border-4 border-white shadow-[0_0_30px_rgba(245,158,11,0.5)] gap-4">
+            <div>
+              <p className="font-black uppercase text-xs tracking-tighter">🚨 ALERTA DE BINGO NO PÁTIO!</p>
+              <p className="text-2xl font-black">Cartela {data.pendingWinnerCard} — {data.pendingWinnerName}</p>
+            </div>
+            <div className="flex gap-2 w-full md:w-auto">
+              <button onClick={() => toggleBingoCelebration(eventId, false).then(() => mutate())} className="flex-1 md:flex-none bg-black text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-800">
+                Falso Alarme (Limpar)
+              </button>
+              <button onClick={() => toggleBingoCelebration(eventId, true).then(() => mutate())} className="flex-1 md:flex-none bg-white text-black px-6 py-3 rounded-xl font-black text-lg shadow-xl hover:scale-105 transition-transform">
+                🎉 SOLTAR TELÃO!
+              </button>
+            </div>
+          </div>
+        )}
 
-        {/* COLUNA 1: SORTEIO E AUDITORIA */}
+        {data?.bingoConfirmed && currentPrize && (
+          <div className="bg-emerald-500 text-white p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between border-4 border-white shadow-[0_0_30px_rgba(16,185,129,0.5)] gap-4">
+            <div>
+              <p className="font-black uppercase text-xs tracking-tighter text-emerald-900">🎉 FESTA ROLANDO NO TELÃO DO PROJETOR!</p>
+              <p className="text-2xl font-black">Ganhador(a): {data.pendingWinnerName}</p>
+            </div>
+            <button 
+              onClick={() => handleNextRound(currentPrize.id)}
+              className="w-full md:w-auto bg-black hover:bg-slate-900 text-white px-8 py-4 rounded-xl font-black text-lg shadow-2xl flex items-center justify-center gap-2 animate-bounce"
+            >
+              🏁 Encerrar Rodada e Ir Pro Próximo Prêmio
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* GRID DA MESA */}
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 max-w-[1400px] mx-auto">
         <div className="flex flex-col gap-6">
           <div className="flex flex-col items-center justify-center bg-black/40 p-8 rounded-3xl border border-emerald-900/50 shadow-2xl backdrop-blur-sm">
-            <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-6">Mesa de Sorteio</h2>
-            
-            {/* BOLA 3D COM LETRA E NÚMERO */}
+            <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-6">Sorteador Manual</h2>
             <div className="w-56 h-56 rounded-full flex items-center justify-center relative bg-[radial-gradient(circle_at_35%_25%,_#fef08a_0%,_#eab308_25%,_#a16207_80%,_#422006_100%)] shadow-[inset_-16px_-16px_32px_rgba(0,0,0,0.6),_inset_8px_8px_16px_rgba(255,255,255,0.4),_0_20px_40px_rgba(0,0,0,0.6)] border border-[#ca8a04]/30">
               <div className={`flex flex-col items-center justify-center leading-none ${spinning ? "animate-pulse blur-[1px]" : ""}`}>
                 <span className="text-3xl font-bold text-black/40 -mb-2 tracking-widest">{currentBall.letter}</span>
                 <span className="text-[100px] font-black text-black drop-shadow-[0_2px_2px_rgba(255,255,255,0.3)]">{currentBall.number}</span>
               </div>
             </div>
-
-            <button onClick={handleDraw} disabled={isPending || drawnNumbers.length >= 75} className="w-full py-5 mt-8 bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black font-black text-xl rounded-2xl shadow-[0_10px_20px_rgba(202,138,4,0.3),_inset_0_2px_0_rgba(255,255,255,0.5)] hover:scale-[1.02] hover:-translate-y-1 active:scale-95 active:translate-y-0 transition-all disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0">
+            <button onClick={handleDraw} disabled={isPending || drawnNumbers.length >= 75 || !currentPrize} className="w-full py-5 mt-8 bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black font-black text-xl rounded-2xl shadow-[0_10px_20px_rgba(202,138,4,0.3)] hover:scale-[1.02] transition-all disabled:opacity-40">
               {isPending ? "Girando globo..." : "🎯 Sortear Pedra"}
             </button>
-
             <div className="w-full pt-6 mt-4 border-t border-emerald-900/30 text-center flex flex-col gap-3">
-               <span className="text-emerald-200/50 font-mono text-sm">Pedras aclamadas: <strong className="text-[#fef08a] text-lg">{drawnNumbers.length}</strong> / 75</span>
-               <button onClick={handleToggleBoard} disabled={isPending} className="mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-emerald-900/50 hover:bg-emerald-900/30 text-emerald-400 text-xs font-bold uppercase transition-colors">
+               <span className="text-emerald-200/50 font-mono text-sm">Pedras cantadas: <strong className="text-[#fef08a] text-lg">{drawnNumbers.length}</strong> / 75</span>
+               <button onClick={handleToggleBoard} className="mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-emerald-900/50 hover:bg-emerald-900/30 text-emerald-400 text-xs font-bold uppercase transition-colors">
                  {showBoard ? <Eye size={16} /> : <EyeOff size={16} className="text-amber-500" />} {showBoard ? "Ocultar Grade no Telão" : "Mostrar Grade no Telão"}
                </button>
-               <button onClick={handleReset} disabled={isPending} className="text-red-400/50 hover:text-red-400 text-xs transition-colors mt-2">⚠️ Resetar globo de sorteio</button>
+               <button onClick={handleReset} className="text-red-400/50 hover:text-red-400 text-xs transition-colors mt-2">⚠️ Forçar reset do globo atual</button>
             </div>
           </div>
-{data?.pendingWinnerCard && (
-  <div className="bg-amber-500 text-black p-6 rounded-3xl mb-8 flex items-center justify-between animate-pulse border-4 border-white shadow-[0_0_30px_rgba(245,158,11,0.5)]">
-    <div>
-      <p className="font-black uppercase text-xs tracking-tighter">🚨 ALERTA DE BINGO NO PÁTIO!</p>
-      <p className="text-2xl font-black">Cartela {data.pendingWinnerCard} - {data.pendingWinnerName}</p>
-    </div>
-    
-    <div className="flex gap-2">
-      {/* Botão de Cancelar (Barrigada) */}
-      <button 
-        onClick={() => toggleBingoCelebration(eventId, false)}
-        className="bg-black text-white px-4 py-2 rounded-xl font-bold text-sm"
-      >
-        Limpar
-      </button>
-      
-      {/* Botão de Fazer a Festa! */}
-      <button 
-        onClick={() => toggleBingoCelebration(eventId, true)}
-        className="bg-white text-black px-6 py-2 rounded-xl font-black text-lg shadow-xl"
-      >
-        🎉 SOLTAR TELÃO!
-      </button>
-    </div>
-  </div>
-)}
-          {/* AUDITORIA */}
+
+          {/* AUDITORIA MANUAL */}
           <div className="bg-black/40 p-6 rounded-3xl border border-emerald-900/50 shadow-xl backdrop-blur-sm">
-             <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-4">Auditoria BINGO!</h2>
+             <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-4">Auditoria de Mesa</h2>
              <form onSubmit={handleAudit} className="flex gap-2">
-               <input type="text" placeholder="Código. Ex: A9B2X1" value={auditCode} onChange={(e) => setAuditCode(e.target.value.toUpperCase())} className="flex-1 w-full min-w-0 bg-black/50 border border-emerald-900/50 rounded-xl px-3 text-[#fef08a] font-mono uppercase outline-none focus:border-[#ca8a04] transition-colors placeholder:text-emerald-900" maxLength={6}/>
-               <button type="submit" disabled={auditLoading || !auditCode} className="bg-emerald-800 hover:bg-emerald-700 text-white p-3 rounded-xl transition-colors disabled:opacity-50 shrink-0"><Search size={20} /></button>
+               <input type="text" placeholder="Código. Ex: A9B2X1" value={auditCode} onChange={(e) => setAuditCode(e.target.value.toUpperCase())} className="flex-1 w-full min-w-0 bg-black/50 border border-emerald-900/50 rounded-xl px-3 text-[#fef08a] font-mono uppercase outline-none focus:border-[#ca8a04] placeholder:text-emerald-900" maxLength={6}/>
+               <button type="submit" disabled={auditLoading || !auditCode} className="bg-emerald-800 hover:bg-emerald-700 text-white p-3 rounded-xl shrink-0"><Search size={20} /></button>
              </form>
              {auditError && <div className="mt-4 p-3 bg-red-950/50 border border-red-900/50 text-red-400 text-xs rounded-xl flex items-center gap-2"><XCircle size={16} /> {auditError}</div>}
              {auditResult && (
@@ -236,16 +278,16 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
           </div>
         </div>
 
-        {/* COLUNA 2 e 3: A GRID DO JOGO */}
+        {/* PAINEL GERAL */}
         <div className="xl:col-span-2 bg-black/40 p-6 md:p-8 rounded-3xl border border-emerald-900/50 shadow-2xl backdrop-blur-sm h-fit">
           <div className="flex flex-col gap-4">
             {board.map((row) => (
               <div key={row.letter} className="flex items-center gap-2 md:gap-4">
-                <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 bg-gradient-to-br from-[#fef08a] to-[#ca8a04] text-black rounded-xl flex items-center justify-center text-xl md:text-3xl font-black shadow-lg border border-yellow-200/50">{row.letter}</div>
+                <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 bg-gradient-to-br from-[#fef08a] to-[#ca8a04] text-black rounded-xl flex items-center justify-center text-xl md:text-3xl font-black border border-yellow-200/50">{row.letter}</div>
                 <div className="flex-1 grid grid-cols-5 sm:grid-cols-15 gap-1 md:gap-2">
                   {Array.from({ length: 15 }, (_, i) => i + row.range[0]).map((num) => {
                     const isDrawn = drawnNumbers.includes(num);
-                    return <div key={num} className={`h-10 md:h-14 rounded-lg flex items-center justify-center text-sm md:text-lg font-bold transition-all duration-300 border ${isDrawn ? "bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black scale-105 border-yellow-200/50 shadow-[0_0_15px_rgba(202,138,4,0.4)]" : "bg-black/40 text-emerald-900 border-emerald-900/30"}`}>{num}</div>;
+                    return <div key={num} className={`h-10 md:h-14 rounded-lg flex items-center justify-center text-sm md:text-lg font-bold border ${isDrawn ? "bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black scale-105 border-yellow-200/50 shadow-[0_0_15px_rgba(202,138,4,0.4)]" : "bg-black/40 text-emerald-900 border-emerald-900/30"}`}>{num}</div>;
                   })}
                 </div>
               </div>
@@ -253,16 +295,16 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
           </div>
         </div>
 
-        {/* COLUNA 4: O RANKING AO VIVO */}
+        {/* RANKING */}
         <div className="bg-black/40 p-6 rounded-3xl border border-emerald-900/50 shadow-xl backdrop-blur-sm h-fit">
           <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
             <Trophy size={18} className="text-[#ca8a04]" /> Na Cara do Gol
           </h2>
           <div className="flex flex-col gap-3">
             {!cards.length ? (
-              <div className="text-center text-emerald-900 text-xs py-4">Sincronizando cartelas...</div>
+              <div className="text-center text-emerald-900 text-xs py-4">Sincronizando banco...</div>
             ) : ranking.length === 0 ? (
-              <div className="text-center text-emerald-900/50 text-xs py-4 border border-emerald-900/30 rounded-xl bg-black/30">Nenhuma cartela quente ainda.</div>
+              <div className="text-center text-emerald-900/50 text-xs py-4 border border-emerald-900/30 rounded-xl bg-black/30">Nenhuma cartela na quina ainda.</div>
             ) : (
               ranking.map((r, idx) => (
                 <div key={r.shortId} className={`flex justify-between items-center p-4 rounded-xl border transition-all ${r.remaining === 0 ? "bg-emerald-900/50 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]" : "bg-black/50 border-emerald-900/30"}`}>
@@ -275,9 +317,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
               ))
             )}
           </div>
-          <p className="text-center text-emerald-900/60 text-[10px] mt-6 uppercase font-bold tracking-widest">Top 10 - Cartela Cheia</p>
         </div>
-
       </div>
     </div>
   );

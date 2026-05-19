@@ -4,28 +4,26 @@
 import prisma from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
-export async function createPrize(
-  eventId: string, 
-  name: string, 
-  type: "QUINA" | "FULL_HOUSE", 
-  prizeName: string, 
-  order: number
-) {
-  if (!name || !prizeName || !order) {
-    return { success: false, error: "Preencha todos os campos." };
-  }
 
+// Adicionamos o sponsorId como último parâmetro (opcional)
+export async function createPrize(eventId: string, name: string, type: "QUINA" | "FULL_HOUSE", prizeName: string, order: number, sponsorId?: string | null) {
   await prisma.prize.create({
-    data: { eventId, name, type, prizeName, order }
+    data: {
+      eventId,
+      name,
+      type,
+      prizeName,
+      order,
+      sponsorId: sponsorId || null, // Salva o patrocinador ou deixa null
+    }
   });
-
+  
+  revalidatePath("/", "layout");
   return { success: true };
 }
 
-export async function deletePrize(prizeId: string) {
-  await prisma.prize.delete({ where: { id: prizeId } });
-  return { success: true };
-}
+// Suas outras funções continuam iguais (deletePrize, updatePrizeOrders, etc)...
+
 
 // 🔥 NOVO: Motor de Reordenação em Lote
 export async function updatePrizeOrders(orderedIds: string[]) {
@@ -46,4 +44,29 @@ export async function updatePrizeOrders(orderedIds: string[]) {
     console.error("Erro ao reordenar prêmios:", error);
     return { success: false, error: "Falha ao salvar a nova ordem." };
   }
+}
+
+export async function addPrize(eventId: string, name: string, type: "QUINA" | "FULL_HOUSE", prizeName: string, sponsorId?: string) {
+  const count = await prisma.prize.count({ where: { eventId } });
+  
+  await prisma.prize.create({
+    data: {
+      eventId,
+      name,
+      type,
+      prizeName,
+      order: count + 1,
+      // Se não vier patrocinador, ele salva como null (Próprio)
+      sponsorId: sponsorId || null, 
+    }
+  });
+  
+  revalidatePath("/", "layout");
+  return { success: true };
+}
+
+export async function deletePrize(prizeId: string) {
+  await prisma.prize.delete({ where: { id: prizeId } });
+  revalidatePath("/", "layout");
+  return { success: true };
 }

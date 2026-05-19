@@ -118,11 +118,12 @@ model Sponsor {
   logoUrl       String?
   contribution  Int      @default(0)
   order         Int      @default(0)
-  
+  prizes        Prize[]  
   event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([eventId])
   @@map("sponsors")
+
 }
 
 // 🎟️ CARDS (Cartelas)
@@ -176,6 +177,8 @@ model Prize {
   order         Int
   isCompleted   Boolean   @default(false)
   winnerId      String?
+  sponsorId     String?
+  sponsor       Sponsor?  @relation(fields: [sponsorId], references: [id], onDelete: SetNull)
   
   event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
   

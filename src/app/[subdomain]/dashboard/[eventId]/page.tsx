@@ -14,6 +14,8 @@ import SellerManager from "./SellerManager";
 import PrizeManager from "./PrizeManager";
 import SponsorManager from "./SponsorManager";
 import TicketPriceEditor from "./TicketPriceEditor";
+import EventWizard from "./EventWizard";
+
 
 export default async function EventDashboardPage({
   params,
@@ -45,18 +47,14 @@ export default async function EventDashboardPage({
 
   if (!event) notFound();
 
-  // 💰 CORREÇÃO DEFINITIVA (Cartelas Legadas + Patrocinadores)
+  // 💰 CÁLCULOS FINANCEIROS
   const totalPaid = event.cards.filter(c => c.isPaid).length;
   
-  // 1. Soma das cartelas (Se a cartela for antiga e não tiver preço, usa o ticketPrice do evento)
   const cardsRevenueCents = event.cards
     .filter(c => c.isPaid)
     .reduce((sum, card) => sum + (card.price || event.ticketPrice), 0);
 
-  // 2. Soma dos Patrocinadores
   const sponsorsRevenueCents = event.sponsors.reduce((sum, s) => sum + s.contribution, 0);
-
-  // 3. Faturamento Bruto (Total em Caixa = Cartelas + Patrocinadores)
   const totalEmCaixaReal = (cardsRevenueCents + sponsorsRevenueCents) / 100;
 
   return (
@@ -95,214 +93,219 @@ export default async function EventDashboardPage({
 
       <main className="max-w-7xl mx-auto px-6 mt-8">
         
-        {/* 📊 ESTATÍSTICAS RÁPIDAS */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          
-          <div className="bg-[#111827] border border-emerald-500/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center shrink-0">
-              <span className="text-2xl font-black">R$</span>
-            </div>
-            <div>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total em Caixa</p>
-              <p className="text-2xl font-black text-white">
-                {totalEmCaixaReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center shrink-0">
-              <Ticket size={28} />
-            </div>
-            <div>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Cartelas Pagas</p>
-              <p className="text-2xl font-black text-white">
-                {totalPaid} <span className="text-sm text-slate-500 font-normal">/ {event._count.cards}</span>
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-[#111827] border border-amber-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
-            <div className="w-14 h-14 rounded-2xl bg-amber-900/40 text-amber-400 flex items-center justify-center shrink-0">
-              <Building2 size={28} />
-            </div>
-            <div>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Patrocinadores</p>
-              <p className="text-2xl font-black text-white">{event._count.sponsors}</p>
-            </div>
-          </div>
-
-          <div className="bg-[#111827] border border-blue-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
-            <div className="w-14 h-14 rounded-2xl bg-blue-900/40 text-blue-400 flex items-center justify-center shrink-0">
-              <Users size={28} />
-            </div>
-            <div>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Vendedores</p>
-              <p className="text-2xl font-black text-white">{event.sellers.length}</p> 
-            </div>
-          </div>
-        </div>
-
-        {/* 🧩 BENTO GRID */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* MÓDULO 1: CARTELAS E IMPRESSÃO */}
-          <div className="lg:col-span-2 bg-[#111827] border border-emerald-900/30 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full"></div>
-            <div className="flex items-center gap-3 mb-8">
-              <Printer className="text-emerald-400" size={28} />
-              <h2 className="text-2xl font-black text-white">Fábrica de Cartelas</h2>
-            </div>
-            <p className="text-slate-400 mb-8 max-w-xl">
-              Gere lotes matematicamente seguros e imprima em diferentes formatos. Em breve, envie direto para gráficas parceiras com desconto.
-            </p>
-            <div className="bg-[#0b0f14] p-6 rounded-2xl border border-slate-800">
-              <GenerateCardsButton eventId={event.id} eventName={event.name} />
-            </div>
-          </div>
-
-          {/* MÓDULO 2: PATROCINADORES */}
-          <div className="lg:col-span-1 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
-            <div className="flex items-center gap-3 mb-6 shrink-0">
-              <Megaphone className="text-amber-400" size={28} />
-              <h2 className="text-xl font-black text-white">Patrocinadores</h2>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-              <SponsorManager eventId={event.id} initialSponsors={event.sponsors} />
-            </div>
-          </div>
-
-          {/* MÓDULO EXTRA: REGRAS DE VITÓRIA / RODADAS */}
-          <div className="lg:col-span-2 bg-[#111827] border border-violet-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
-            <div className="flex items-center gap-3 mb-6 shrink-0">
-              <Trophy className="text-violet-400" size={28} />
-              <div>
-                <h2 className="text-xl font-black text-white">Gestão de Rodadas</h2>
-                <p className="text-slate-500 text-xs mt-1">Configure os prêmios (Quina e Cheia)</p>
-              </div>
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <PrizeManager eventId={event.id} initialPrizes={event.prizes} />
-            </div>
-          </div>
-
-          {/* MÓDULO 3: VENDEDORES */}
-          <div className="lg:col-span-2 bg-[#111827] border border-blue-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
-            <div className="flex items-center gap-3 mb-6 shrink-0">
-              <Users className="text-blue-400" size={28} />
-              <div>
-                <h2 className="text-xl font-black text-white">Vendedores & Logística</h2>
-                <p className="text-slate-500 text-xs mt-1">Gestão de lotes físicos e repasses</p>
-              </div>
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <SellerManager eventId={event.id} initialSellers={event.sellers} />
-            </div>
-          </div>
-
-          {/* MÓDULO 4: AUDITORIA DE VENDAS */}
-          <div className="lg:col-span-1 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
-            <div className="flex items-center gap-3 mb-6 shrink-0">
-              <Wallet className="text-emerald-400" size={28} />
-              <h2 className="text-xl font-black text-white">Auditoria</h2>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-              {event.sellers.length === 0 ? (
-                <p className="text-slate-500 text-sm text-center py-4">Nenhum dado financeiro.</p>
-              ) : (
-                event.sellers.map((seller) => {
-                  const sellerPaidCount = seller.cards.filter(c => c.isPaid).length;
-                  
-                  // 🔥 CORREÇÃO NA AUDITORIA (Fallback de preço para cartelas antigas)
-                  const sellerRevenueInCents = seller.cards
-                    .filter(c => c.isPaid)
-                    .reduce((sum, card) => sum + (card.price || event.ticketPrice), 0);
-
-                  return (
-                    <div key={seller.id} className="flex justify-between items-center p-3 bg-black/20 rounded-xl border border-slate-800">
-                      <div>
-                        <p className="text-sm font-bold text-slate-200 truncate max-w-[120px]">{seller.name}</p>
-                        <p className="text-[10px] text-slate-500 uppercase">{sellerPaidCount} pagas</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-emerald-400 font-black text-sm">
-                          R$ {(sellerRevenueInCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          {/* MÓDULO 5: LINKS RÁPIDOS E AÇÕES GLOBAIS */}
-          <div className="lg:col-span-3 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col gap-6 relative overflow-hidden">
-            <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-blue-500/5 blur-[120px] rounded-full pointer-events-none"></div>
-
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <MonitorPlay className="text-slate-300" size={24} />
-                  <h2 className="text-xl font-black text-white">Área de Testes & Links Operacionais</h2>
+        {/* 🔥 A MÁGICA ENTRA AQUI: WIZARD VS DASHBOARD */}
+        {event.status === "DRAFT" && event._count.cards === 0 ? (
+          <EventWizard event={event} prizes={event.prizes} sponsors={event.sponsors} />
+        ) : (
+          <>
+            {/* 📊 ESTATÍSTICAS RÁPIDAS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              <div className="bg-[#111827] border border-emerald-500/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center shrink-0">
+                  <span className="text-2xl font-black">R$</span>
                 </div>
-                <p className="text-slate-400 text-sm max-w-2xl">
-                  Acesse ferramentas externas do evento: mesa de sorteio, painel do telão, validador de cartelas e o fechamento de caixa detalhado.
-                </p>
+                <div>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total em Caixa</p>
+                  <p className="text-2xl font-black text-white">
+                    {totalEmCaixaReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-[#111827] border border-emerald-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-900/40 text-emerald-400 flex items-center justify-center shrink-0">
+                  <Ticket size={28} />
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Cartelas Pagas</p>
+                  <p className="text-2xl font-black text-white">
+                    {totalPaid} <span className="text-sm text-slate-500 font-normal">/ {event._count.cards}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-[#111827] border border-amber-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+                <div className="w-14 h-14 rounded-2xl bg-amber-900/40 text-amber-400 flex items-center justify-center shrink-0">
+                  <Building2 size={28} />
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Patrocinadores</p>
+                  <p className="text-2xl font-black text-white">{event._count.sponsors}</p>
+                </div>
+              </div>
+
+              <div className="bg-[#111827] border border-blue-900/30 p-6 rounded-3xl shadow-xl flex items-center gap-6">
+                <div className="w-14 h-14 rounded-2xl bg-blue-900/40 text-blue-400 flex items-center justify-center shrink-0">
+                  <Users size={28} />
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Vendedores</p>
+                  <p className="text-2xl font-black text-white">{event.sellers.length}</p> 
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full relative z-10">
-              <a 
-                href="/live" 
-                target="_blank"
-                className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-slate-700"
-              >
-                Mesa Locutor
-              </a>
+            {/* 🧩 BENTO GRID */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
-              <a 
-                href={`/projector?eventId=${event.id}`} 
-                target="_blank"
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
-              >
-                Abrir Telão
-              </a>
+              {/* MÓDULO 1: CARTELAS E IMPRESSÃO */}
+              <div className="lg:col-span-2 bg-[#111827] border border-emerald-900/30 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full"></div>
+                <div className="flex items-center gap-3 mb-8">
+                  <Printer className="text-emerald-400" size={28} />
+                  <h2 className="text-2xl font-black text-white">Fábrica de Cartelas</h2>
+                </div>
+                <p className="text-slate-400 mb-8 max-w-xl">
+                  Gere lotes matematicamente seguros e imprima em diferentes formatos.
+                </p>
+                <div className="bg-[#0b0f14] p-6 rounded-2xl border border-slate-800">
+                  <GenerateCardsButton eventId={event.id} eventName={event.name} />
+                </div>
+              </div>
 
-              <a 
-                href={`/verify?event=${event.id}`}
-                target="_blank"
-                className="bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
-              >
-                🔎 Verificador
-              </a>
-              
-             
-              <form action={async () => {
-                "use server";
-                const { activateDemoMode } = await import("@/actions/event");
-                await activateDemoMode(event.id);
-              }}>
-                <button 
-                  type="submit"
-                  className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-pink-900/20 text-center flex items-center justify-center gap-2"
-                >
-                  ✨ Validar Todas (Demo)
-                </button>
-              </form>
+              {/* MÓDULO 2: PATROCINADORES */}
+              <div className="lg:col-span-1 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
+                <div className="flex items-center gap-3 mb-6 shrink-0">
+                  <Megaphone className="text-amber-400" size={28} />
+                  <h2 className="text-xl font-black text-white">Patrocinadores</h2>
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+                  <SponsorManager eventId={event.id} initialSponsors={event.sponsors} />
+                </div>
+              </div>
 
-              <a 
-                href={`/dashboard/${event.id}/relatorio`} 
-                target="_blank"
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
-              >
-                📄 Fechar Caixa
-              </a>
+              {/* MÓDULO EXTRA: REGRAS DE VITÓRIA / RODADAS */}
+              <div className="lg:col-span-2 bg-[#111827] border border-violet-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
+                <div className="flex items-center gap-3 mb-6 shrink-0">
+                  <Trophy className="text-violet-400" size={28} />
+                  <div>
+                    <h2 className="text-xl font-black text-white">Gestão de Rodadas</h2>
+                    <p className="text-slate-500 text-xs mt-1">Configure os prêmios e patrocinadores</p>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  {/* 🔥 CORREÇÃO: Enviando o eventId e a lista de sponsors para cá! */}
+                  <PrizeManager eventId={event.id} initialPrizes={event.prizes} sponsors={event.sponsors} />
+                </div>
+              </div>
+
+              {/* MÓDULO 3: VENDEDORES */}
+              <div className="lg:col-span-2 bg-[#111827] border border-blue-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
+                <div className="flex items-center gap-3 mb-6 shrink-0">
+                  <Users className="text-blue-400" size={28} />
+                  <div>
+                    <h2 className="text-xl font-black text-white">Vendedores & Logística</h2>
+                    <p className="text-slate-500 text-xs mt-1">Gestão de lotes físicos e repasses</p>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <SellerManager eventId={event.id} initialSellers={event.sellers} />
+                </div>
+              </div>
+
+              {/* MÓDULO 4: AUDITORIA DE VENDAS */}
+              <div className="lg:col-span-1 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
+                <div className="flex items-center gap-3 mb-6 shrink-0">
+                  <Wallet className="text-emerald-400" size={28} />
+                  <h2 className="text-xl font-black text-white">Auditoria</h2>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                  {event.sellers.length === 0 ? (
+                    <p className="text-slate-500 text-sm text-center py-4">Nenhum dado financeiro.</p>
+                  ) : (
+                    event.sellers.map((seller) => {
+                      const sellerPaidCount = seller.cards.filter(c => c.isPaid).length;
+                      
+                      const sellerRevenueInCents = seller.cards
+                        .filter(c => c.isPaid)
+                        .reduce((sum, card) => sum + (card.price || event.ticketPrice), 0);
+
+                      return (
+                        <div key={seller.id} className="flex justify-between items-center p-3 bg-black/20 rounded-xl border border-slate-800">
+                          <div>
+                            <p className="text-sm font-bold text-slate-200 truncate max-w-[120px]">{seller.name}</p>
+                            <p className="text-[10px] text-slate-500 uppercase">{sellerPaidCount} pagas</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-emerald-400 font-black text-sm">
+                              R$ {(sellerRevenueInCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* MÓDULO 5: LINKS RÁPIDOS E AÇÕES GLOBAIS */}
+              <div className="lg:col-span-3 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col gap-6 relative overflow-hidden">
+                <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-blue-500/5 blur-[120px] rounded-full pointer-events-none"></div>
+
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+                  <div>
+                    <div className="flex items-center gap-3 mb-2">
+                      <MonitorPlay className="text-slate-300" size={24} />
+                      <h2 className="text-xl font-black text-white">Área de Testes & Links Operacionais</h2>
+                    </div>
+                    <p className="text-slate-400 text-sm max-w-2xl">
+                      Acesse ferramentas externas do evento: mesa de sorteio, painel do telão, validador de cartelas e o fechamento de caixa detalhado.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full relative z-10">
+                  <a 
+                    href="/live" 
+                    target="_blank"
+                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-slate-700"
+                  >
+                    Mesa Locutor
+                  </a>
+                  
+                  <a 
+                    href={`/projector?eventId=${event.id}`} 
+                    target="_blank"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
+                  >
+                    Abrir Telão
+                  </a>
+
+                  <a 
+                    href={`/verify?event=${event.id}`}
+                    target="_blank"
+                    className="bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
+                  >
+                    🔎 Verificador
+                  </a>
+                  
+                  <form action={async () => {
+                    "use server";
+                    const { activateDemoMode } = await import("@/actions/event");
+                    await activateDemoMode(event.id);
+                  }}>
+                    <button 
+                      type="submit"
+                      className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-pink-900/20 text-center flex items-center justify-center gap-2"
+                    >
+                      ✨ Validar Todas (Demo)
+                    </button>
+                  </form>
+
+                  <a 
+                    href={`/dashboard/${event.id}/relatorio`} 
+                    target="_blank"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
+                  >
+                    📄 Fechar Caixa
+                  </a>
+                </div>
+              </div>
+
             </div>
-          </div>
-
-        </div>
+          </>
+        )}
 
         {/* 🌟 FOOTER MEGA BLASTER PREMIUM SAAS */}
         <footer className="mt-20 border-t border-slate-800/50 pt-12 pb-8 flex flex-col items-center justify-center text-center">

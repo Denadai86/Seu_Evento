@@ -353,3 +353,33 @@ export async function toggleBingoCelebration(eventId: string, confirm: boolean) 
   
   return result;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🏁 CONTROLE DE RODADAS (ENCERRAR PRÊMIO E IR PARA O PRÓXIMO)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeId: string) {
+  // 1. Marca o prêmio atual como concluído
+  await prisma.prize.update({
+    where: { id: currentPrizeId },
+    data: { isCompleted: true },
+  });
+
+  // 2. Limpa o globo de sorteio e desliga qualquer sinal de comemoração pendente no evento
+  await prisma.event.update({
+    where: { id: eventId },
+    data: {
+      drawnNumbers: [], // Zera o globo para a próxima rodada!
+      pendingWinnerCard: null,
+      pendingWinnerName: null,
+      bingoConfirmed: false,
+      bingoConfirmedAt: null,
+    },
+  });
+
+  // 3. Força a atualização da tela de todo mundo (Locutor e Telão)
+  const { revalidatePath } = await import("next/cache");
+  revalidatePath("/", "layout");
+
+  return { success: true };
+}
