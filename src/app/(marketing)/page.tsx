@@ -1,6 +1,7 @@
-//src/app/(marketing)/page.tsx
+// src/app/(marketing)/page.tsx
 
 import Sidebar from "./components/Sidebar";
+import Link from "next/link";
 import { CheckCircle2, MonitorPlay, TicketPercent, Users } from "lucide-react";
 
 export default function LandingPage() {
@@ -8,13 +9,9 @@ export default function LandingPage() {
     <>
       <Sidebar />
       
-      {/* 
-        A margem md:ml-80 empurra o conteúdo para a direita no Desktop, 
-        dando espaço para a Sidebar fixa. 
-      */}
-      <main className="flex-1 md:ml-80">
+      <main className="flex-1 md:ml-80 flex flex-col min-h-screen">
         
-        {/* HERO SECTION (A Primeira Impressão) */}
+        {/* HERO SECTION */}
         <section className="relative pt-24 pb-32 px-8 lg:px-16 overflow-hidden">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-100/40 via-slate-50 to-slate-50 -z-10"></div>
           
@@ -37,7 +34,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* FEATURES (As Firulas e SEO Forte) */}
+        {/* FEATURES */}
         <section id="features" className="py-24 px-8 lg:px-16 bg-white border-y border-slate-100">
           <div className="max-w-5xl">
             <h2 className="text-3xl font-black text-slate-900 mb-12">Por que o Seu Evento é diferente?</h2>
@@ -76,8 +73,8 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* PLANOS E PREÇOS (Monetização) */}
-        <section id="planos" className="py-24 px-8 lg:px-16 bg-slate-50">
+        {/* PLANOS E PREÇOS */}
+        <section id="planos" className="py-24 px-8 lg:px-16 bg-slate-50 flex-1">
           <div className="max-w-4xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-4xl font-black text-slate-900 mb-4">Escolha seu Plano</h2>
@@ -85,7 +82,6 @@ export default function LandingPage() {
             </div>
 
             <div className="grid md:grid-cols-2 gap-8">
-              
               {/* PLANO SINGLE */}
               <div className="bg-white p-10 rounded-3xl border border-slate-200 shadow-sm relative hover:shadow-xl transition-all">
                 <h3 className="text-xl font-bold text-slate-800">Evento Único</h3>
@@ -126,10 +122,43 @@ export default function LandingPage() {
                   Contratar Plano Anual
                 </button>
               </div>
-
             </div>
           </div>
         </section>
+
+        {/* 🚀 FOOTER PREMIUM 🚀 */}
+        <footer className="bg-[#0b0f14] text-slate-400 py-16 px-8 lg:px-16 border-t border-slate-900 mt-auto">
+          <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
+            <div className="md:col-span-2">
+              <h4 className="text-2xl font-black text-white mb-4">Seu Evento<span className="text-emerald-500">.</span></h4>
+              <p className="text-sm leading-relaxed max-w-md text-slate-500">
+                A plataforma definitiva para organizar, gerenciar e apresentar bingos e sorteios de forma profissional, antifraude e lucrativa. Esqueça o papel.
+              </p>
+            </div>
+            <div>
+              <h4 className="text-white font-bold mb-6 tracking-wide uppercase text-sm">Produto</h4>
+              <ul className="space-y-3 text-sm font-medium">
+                <li><a href="#features" className="hover:text-emerald-400 transition-colors">Funcionalidades</a></li>
+                <li><a href="#planos" className="hover:text-emerald-400 transition-colors">Planos e Preços</a></li>
+                <li><a href="/entrar" className="hover:text-emerald-400 transition-colors">Acessar Painel</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="text-white font-bold mb-6 tracking-wide uppercase text-sm">Jurídico</h4>
+              <ul className="space-y-3 text-sm font-medium">
+                <li><Link href="/termos" className="hover:text-emerald-400 transition-colors">Termos de Uso</Link></li>
+                <li><Link href="/privacidade" className="hover:text-emerald-400 transition-colors">Políticas de Privacidade</Link></li>
+              </ul>
+            </div>
+          </div>
+          
+          <div className="max-w-5xl mx-auto pt-8 border-t border-slate-800 text-sm flex flex-col md:flex-row justify-between items-center gap-4">
+            <p>© {new Date().getFullYear()} Ação Leve Tecnologia. Todos os direitos reservados.</p>
+            <p className="flex items-center gap-2 font-medium">
+              Feito com <span className="text-emerald-500">💚</span> para eventos do bem.
+            </p>
+          </div>
+        </footer>
 
       </main>
     </>

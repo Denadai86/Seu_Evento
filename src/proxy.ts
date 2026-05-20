@@ -10,20 +10,12 @@ export const config = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: extrai o slug do host
-//
-// Dev:        "localhost"              → "root"
-//             "sjose.localhost"        → "sjose"
-//             "sjose.localhost:3000"   → "sjose"
-//
-// Produção:   "seu-evento.acaoleve.com" → "root"
-//             "sjose.acaoleve.com"      → "sjose"
 // ─────────────────────────────────────────────────────────────────────────────
 function resolveHost(hostname: string): string {
   const host = hostname.split(":")[0];
 
   if (process.env.NODE_ENV === "production") {
-    const rootDomain =
-      process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.acaoleve.com";
+    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.acaoleve.com";
 
     if (host === rootDomain || host === `www.${rootDomain}`) return "root";
 
@@ -37,13 +29,34 @@ function resolveHost(hostname: string): string {
   return host;
 }
 
+// 🔥 LISTA DE ROTAS INSTITUCIONAIS (Não sofrem regras de subdomínio)
+const rotasPublicasMarketing = ["/", "/termos", "/privacidade"];
+
 export default auth((req) => {
   const { pathname } = req.nextUrl;
   const currentHost = resolveHost(req.headers.get("host") || "");
   const session = req.auth;
 
   // ═══════════════════════════════════════════════════════════════
-  // DOMÍNIO PRINCIPAL  (seu-evento.acaoleve.com  /  localhost)
+  // 1. ROTAS INSTITUCIONAIS (Marketing / Global)
+  // ═══════════════════════════════════════════════════════════════
+  if (rotasPublicasMarketing.includes(pathname)) {
+    // Se a pessoa tentar acessar /termos de um subdomínio (ex: sjose.localhost/termos)
+    // Redirecionamos para o domínio principal (root) para manter a URL limpa.
+    if (currentHost !== "root") {
+      const rootUrl = new URL(pathname, req.url);
+      rootUrl.host = process.env.NODE_ENV === "production"
+        ? (process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.acaoleve.com")
+        : "localhost:3000";
+      return NextResponse.redirect(rootUrl);
+    }
+    
+    // Se já estiver no root, só libera o acesso
+    return NextResponse.next();
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 2. DOMÍNIO PRINCIPAL  (seu-evento.acaoleve.com  /  localhost)
   // ═══════════════════════════════════════════════════════════════
   if (currentHost === "root") {
     if (pathname === "/admin/login") {
@@ -64,26 +77,24 @@ export default auth((req) => {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // SUBDOMÍNIOS DE CLIENTES  (sjose.acaoleve.com / sjose.localhost)
+  // 3. SUBDOMÍNIOS DE CLIENTES  (sjose.acaoleve.com / sjose.localhost)
   // ═══════════════════════════════════════════════════════════════
 
-  // 1. ROTAS PÚBLICAS E LOGIN
+  // 3.1 ROTAS PÚBLICAS E LOGIN
   if (
-    pathname === "/entrar" || // 🔥 CORREÇÃO: Liberamos o login do loop infinito!
+    pathname === "/entrar" || 
     pathname.startsWith("/projector") || 
     pathname.startsWith("/cartela") || 
     pathname === "/verify" 
   ) {
-    // Se a pessoa já estiver logada e tentar acessar a tela de login de novo, manda ela pro painel
     if (pathname === "/entrar" && session) {
       if (session.user.role === "OPERATOR") {
         return NextResponse.redirect(new URL("/live", req.url));
       }
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
-    // Caso contrário (deslogada), deixa ela ver a tela de login e renderiza o rewrite final.
   } 
-  // 2. ROTAS PROTEGIDAS (Exigem login)
+  // 3.2 ROTAS PROTEGIDAS (Exigem login)
   else {
     if (!session) {
       return NextResponse.redirect(new URL("/entrar", req.url));
