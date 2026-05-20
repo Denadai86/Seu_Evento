@@ -87,7 +87,7 @@ model Event {
   isActive          Boolean  @default(false)
   showBoard         Boolean  @default(true)
   ticketPrice       Float    @default(10.00)
-  
+  pixKey            String?
   // Celebração em 3 vias
   pendingWinnerCard String?
   pendingWinnerName String?
@@ -179,7 +179,7 @@ model Prize {
   winnerId      String?
   sponsorId     String?
   sponsor       Sponsor?  @relation(fields: [sponsorId], references: [id], onDelete: SetNull)
-  
+ 
   event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
   
   createdAt     DateTime  @default(now())
