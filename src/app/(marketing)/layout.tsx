@@ -1,3 +1,5 @@
+///src/app/(marketing)/layout.tsx
+
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -5,13 +7,13 @@ export const metadata: Metadata = {
   description: "Plataforma completa para Paróquias, ONGs e Empresas. Crie cartelas, gerencie vendas e tenha um telão interativo incrível.",
 };
 
-export default function MarketingLayout({ children }: { children: React.ReactNode }) {
+export default function MarketingLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans selection:bg-emerald-500 selection:text-white">
-      {/* 
-        A barra lateral ficará no topo em celulares (flex-col) 
-        e fixa na esquerda em computadores (w-80 fixed) 
-      */}
+    <div className="min-h-screen bg-[#091510]">
       {children}
     </div>
   );

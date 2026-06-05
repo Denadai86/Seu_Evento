@@ -2,70 +2,81 @@
 "use server";
 
 import prisma from "@/lib/prisma";
+import { requireTenant } from "@/lib/requireTenant";
 import { revalidatePath } from "next/cache";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CRIAR PRÊMIO / RODADA
+// ─────────────────────────────────────────────────────────────────────────────
+export async function createPrize(
+  eventId: string,
+  name: string,
+  type: "QUINA" | "FULL_HOUSE",
+  prizeName: string,
+  order: number,
+  sponsorId?: string | null
+) {
+  const tenantId = await requireTenant();
 
-// Adicionamos o sponsorId como último parâmetro (opcional)
-export async function createPrize(eventId: string, name: string, type: "QUINA" | "FULL_HOUSE", prizeName: string, order: number, sponsorId?: string | null) {
+  // Valida posse do evento
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
+  if (!event) throw new Error("Acesso negado.");
+
   await prisma.prize.create({
     data: {
       eventId,
-      name,
+      name: name.trim(),
       type,
-      prizeName,
+      prizeName: prizeName.trim(),
       order,
-      sponsorId: sponsorId || null, // Salva o patrocinador ou deixa null
-    }
+      sponsorId: sponsorId || null,
+    },
   });
-  
+
   revalidatePath("/", "layout");
   return { success: true };
 }
 
-// Suas outras funções continuam iguais (deletePrize, updatePrizeOrders, etc)...
-
-
-// 🔥 NOVO: Motor de Reordenação em Lote
+// ─────────────────────────────────────────────────────────────────────────────
+// REORDENAR PRÊMIOS EM LOTE (drag-and-drop)
+// ─────────────────────────────────────────────────────────────────────────────
 export async function updatePrizeOrders(orderedIds: string[]) {
   if (!orderedIds.length) return { success: true };
 
-  try {
-    // Executa N atualizações simultâneas no banco de forma atômica
-    await prisma.$transaction(
-      orderedIds.map((id, index) =>
-        prisma.prize.update({
-          where: { id },
-          data: { order: index + 1 }, // A nova ordem passa a ser o índice do array + 1
-        })
-      )
-    );
-    return { success: true };
-  } catch (error) {
-    console.error("Erro ao reordenar prêmios:", error);
-    return { success: false, error: "Falha ao salvar a nova ordem." };
-  }
-}
+  const tenantId = await requireTenant();
 
-export async function addPrize(eventId: string, name: string, type: "QUINA" | "FULL_HOUSE", prizeName: string, sponsorId?: string) {
-  const count = await prisma.prize.count({ where: { eventId } });
-  
-  await prisma.prize.create({
-    data: {
-      eventId,
-      name,
-      type,
-      prizeName,
-      order: count + 1,
-      // Se não vier patrocinador, ele salva como null (Próprio)
-      sponsorId: sponsorId || null, 
-    }
+  // Valida que TODOS os prêmios passados pertencem a eventos deste tenant
+  const prizes = await prisma.prize.findMany({
+    where: { id: { in: orderedIds }, event: { tenantId } },
+    select: { id: true },
   });
-  
+
+  if (prizes.length !== orderedIds.length) {
+    throw new Error("Violação de segurança: prêmios de outro tenant.");
+  }
+
+  await prisma.$transaction(
+    orderedIds.map((id, index) =>
+      prisma.prize.update({ where: { id }, data: { order: index + 1 } })
+    )
+  );
+
   revalidatePath("/", "layout");
   return { success: true };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EXCLUIR PRÊMIO
+// ─────────────────────────────────────────────────────────────────────────────
 export async function deletePrize(prizeId: string) {
+  const tenantId = await requireTenant();
+
+  // Valida posse antes de deletar
+  const prize = await prisma.prize.findFirst({
+    where: { id: prizeId, event: { tenantId } },
+  });
+  if (!prize) throw new Error("Prêmio não encontrado ou acesso negado.");
+
   await prisma.prize.delete({ where: { id: prizeId } });
   revalidatePath("/", "layout");
   return { success: true };

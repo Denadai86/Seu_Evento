@@ -26,3 +26,20 @@ export async function requireTenant() {
 
   return session.user.tenantId;
 }
+
+export async function requireStaffForEvent(eventId: string, capability: 'canSell' | 'canOperate' | 'canVerify') {
+  const tenantId = await requireTenant();
+  const session = await auth();
+
+  const staff = await prisma.eventStaff.findFirst({
+    where: {
+      eventId,
+      userId: session?.user?.id,
+      [capability]: true
+    }
+  });
+
+  if (!staff) throw new Error(`Sem permissão: ${capability}`);
+  return staff;
+}
+

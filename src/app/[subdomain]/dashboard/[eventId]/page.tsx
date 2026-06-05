@@ -1,5 +1,4 @@
 // src/app/[subdomain]/dashboard/[eventId]/page.tsx
-
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -8,14 +7,12 @@ import EventStatusToggle from "./EventStatusToggle";
 import GenerateCardsButton from "./GenerateCardsButton";
 import { 
   Printer, Users, Megaphone, MonitorPlay, 
-  ArrowLeft, Ticket, Building2, Wallet, Trophy, ShieldAlert
+  ArrowLeft, Ticket, Building2, Wallet, Trophy, ShieldAlert, ArrowRight
 } from "lucide-react";
-import SellerManager from "./SellerManager";
 import PrizeManager from "./PrizeManager";
 import SponsorManager from "./SponsorManager";
 import TicketPriceEditor from "./TicketPriceEditor";
 import EventWizard from "./EventWizard";
-
 
 export default async function EventDashboardPage({
   params,
@@ -38,8 +35,15 @@ export default async function EventDashboardPage({
         select: { isPaid: true, isSold: true, price: true }
       },
       prizes: { orderBy: { order: 'asc' } },
-      sellers: {
-        include: { cards: { select: { id: true, isPaid: true, price: true } } },
+      // 🏦 MUDANÇA ARQUITETURAL: Puxamos as transações (O Livro Razão) para auditoria perfeita
+      transactions: {
+        select: { amount: true, eventStaffId: true }
+      },
+      staff: {
+        include: { 
+          user: { select: { name: true, username: true } }, 
+          cards: { select: { id: true, isPaid: true, price: true } } // Isso é o estoque físico dele
+        },
         orderBy: { createdAt: 'desc' }
       }
     },
@@ -47,7 +51,7 @@ export default async function EventDashboardPage({
 
   if (!event) notFound();
 
-  // 💰 CÁLCULOS FINANCEIROS
+  // 💰 CÁLCULOS FINANCEIROS GLOBAIS
   const totalPaid = event.cards.filter(c => c.isPaid).length;
   
   const cardsRevenueCents = event.cards
@@ -65,7 +69,7 @@ export default async function EventDashboardPage({
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-4">
             <Link 
-              href="/dashboard" 
+              href={`/${subdomain}/dashboard`}
               className="p-2 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white"
             >
               <ArrowLeft size={20} />
@@ -84,7 +88,12 @@ export default async function EventDashboardPage({
             
             <div className="hidden sm:block h-6 w-px bg-slate-700"></div>
 
-            <EventStatusToggle eventId={event.id} tenantId={""} subdomain={""} currentStatus={""} />
+            <EventStatusToggle 
+              eventId={event.id} 
+              initialStatus={event.status} 
+              tenantId={event.tenantId} 
+              subdomain={subdomain} 
+            />
             <div className="h-6 w-px bg-slate-800"></div>
             <LogoutButton callbackUrl="/entrar" variant="dark" />
           </div>
@@ -93,7 +102,6 @@ export default async function EventDashboardPage({
 
       <main className="max-w-7xl mx-auto px-6 mt-8">
         
-        {/* 🔥 A MÁGICA ENTRA AQUI: WIZARD VS DASHBOARD */}
         {event.status === "DRAFT" && event._count.cards === 0 ? (
           <EventWizard event={event} prizes={event.prizes} sponsors={event.sponsors} />
         ) : (
@@ -139,8 +147,8 @@ export default async function EventDashboardPage({
                   <Users size={28} />
                 </div>
                 <div>
-                  <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Vendedores</p>
-                  <p className="text-2xl font-black text-white">{event.sellers.length}</p> 
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Equipe na Escala</p>
+                  <p className="text-2xl font-black text-white">{event.staff.length}</p> 
                 </div>
               </div>
             </div>
@@ -148,7 +156,6 @@ export default async function EventDashboardPage({
             {/* 🧩 BENTO GRID */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
-              {/* MÓDULO 1: CARTELAS E IMPRESSÃO */}
               <div className="lg:col-span-2 bg-[#111827] border border-emerald-900/30 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full"></div>
                 <div className="flex items-center gap-3 mb-8">
@@ -163,7 +170,6 @@ export default async function EventDashboardPage({
                 </div>
               </div>
 
-              {/* MÓDULO 2: PATROCINADORES */}
               <div className="lg:col-span-1 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-amber-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
                 <div className="flex items-center gap-3 mb-6 shrink-0">
                   <Megaphone className="text-amber-400" size={28} />
@@ -174,7 +180,6 @@ export default async function EventDashboardPage({
                 </div>
               </div>
 
-              {/* MÓDULO EXTRA: REGRAS DE VITÓRIA / RODADAS */}
               <div className="lg:col-span-2 bg-[#111827] border border-violet-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
                 <div className="flex items-center gap-3 mb-6 shrink-0">
                   <Trophy className="text-violet-400" size={28} />
@@ -184,54 +189,84 @@ export default async function EventDashboardPage({
                   </div>
                 </div>
                 <div className="flex-1 overflow-hidden">
-                  {/* 🔥 CORREÇÃO: Enviando o eventId e a lista de sponsors para cá! */}
                   <PrizeManager eventId={event.id} initialPrizes={event.prizes} sponsors={event.sponsors} />
                 </div>
               </div>
 
-              {/* MÓDULO 3: VENDEDORES */}
-              <div className="lg:col-span-2 bg-[#111827] border border-blue-900/30 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
-                <div className="flex items-center gap-3 mb-6 shrink-0">
-                  <Users className="text-blue-400" size={28} />
-                  <div>
-                    <h2 className="text-xl font-black text-white">Vendedores & Logística</h2>
-                    <p className="text-slate-500 text-xs mt-1">Gestão de lotes físicos e repasses</p>
+              {/* MÓDULO 3: GESTÃO DE EQUIPE */}
+              <div className="lg:col-span-2 bg-gradient-to-br from-[#111827] to-[#0d131a] border border-blue-900/50 rounded-3xl p-8 shadow-2xl flex flex-col justify-center h-[400px] relative overflow-hidden group">
+                <div className="absolute -top-24 -left-24 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full"></div>
+                <div className="relative z-10 text-center flex flex-col items-center">
+                  <div className="w-20 h-20 bg-blue-900/30 text-blue-400 rounded-full flex items-center justify-center mb-6 border border-blue-500/20 group-hover:scale-110 transition-transform duration-500">
+                    <Users size={40} />
                   </div>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <SellerManager eventId={event.id} initialSellers={event.sellers} />
+                  <h2 className="text-3xl font-black text-white mb-4">Central da Equipe</h2>
+                  <p className="text-slate-400 mb-8 max-w-md">
+                    Aloque voluntários, gere PINs de acesso, defina quem pode vender cartelas e quem terá acesso ao palco do locutor.
+                  </p>
+                  <Link 
+                    href={`/${subdomain}/dashboard/${event.id}/equipe`}
+                    className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-xl transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:shadow-[0_0_50px_rgba(37,99,235,0.5)]"
+                  >
+                    Gerenciar Permissões e Escala <ArrowRight size={20} />
+                  </Link>
                 </div>
               </div>
 
-              {/* MÓDULO 4: AUDITORIA DE VENDAS */}
-              <div className="lg:col-span-1 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col h-[500px]">
+              {/* 💵 MÓDULO 4: AUDITORIA DE VENDAS 100% CORRIGIDO */}
+              <div className="lg:col-span-1 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
                 <div className="flex items-center gap-3 mb-6 shrink-0">
                   <Wallet className="text-emerald-400" size={28} />
-                  <h2 className="text-xl font-black text-white">Auditoria</h2>
+                  <div>
+                    <h2 className="text-xl font-black text-white">Auditoria PDV</h2>
+                    <p className="text-slate-500 text-xs mt-1">Vendas reais no caixa</p>
+                  </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                  {event.sellers.length === 0 ? (
-                    <p className="text-slate-500 text-sm text-center py-4">Nenhum dado financeiro.</p>
+                  {event.staff.length === 0 ? (
+                    <p className="text-slate-500 text-sm text-center py-4">Nenhuma equipe alocada.</p>
                   ) : (
-                    event.sellers.map((seller) => {
-                      const sellerPaidCount = seller.cards.filter(c => c.isPaid).length;
+                    event.staff.map((member) => {
+                      // O ESTOQUE FÍSICO (Cartelas que estão no bolso da pessoa, pagas ou não)
+                      const totalAssignedCards = member.cards.length;
                       
-                      const sellerRevenueInCents = seller.cards
-                        .filter(c => c.isPaid)
-                        .reduce((sum, card) => sum + (card.price || event.ticketPrice), 0);
+                      // O LIVRO RAZÃO (Vendas 100% confirmadas através do seu PDV)
+                      const memberTransactions = event.transactions.filter(t => t.eventStaffId === member.id);
+                      const pdvSalesCount = memberTransactions.length;
+                      const pdvRevenueInCents = memberTransactions.reduce((sum, t) => sum + (t.amount || 0), 0);
+
+                      // Se o voluntário não pegou bloco de cartela e não vendeu nada no app, oculta ele pra não poluir.
+                      if (totalAssignedCards === 0 && pdvSalesCount === 0) return null;
+
+                      // Calcula a % de vendas se ele tiver estoque
+                      const salesProgress = totalAssignedCards > 0 
+                        ? Math.min(100, (pdvSalesCount / totalAssignedCards) * 100) 
+                        : 0;
 
                       return (
-                        <div key={seller.id} className="flex justify-between items-center p-3 bg-black/20 rounded-xl border border-slate-800">
-                          <div>
-                            <p className="text-sm font-bold text-slate-200 truncate max-w-[120px]">{seller.name}</p>
-                            <p className="text-[10px] text-slate-500 uppercase">{sellerPaidCount} pagas</p>
-                          </div>
-                          <div className="text-right">
+                        <div key={member.id} className="flex flex-col p-4 bg-black/20 rounded-xl border border-slate-800 gap-3">
+                          <div className="flex justify-between items-center">
+                            <p className="text-sm font-bold text-slate-200 truncate max-w-[120px]">{member.user.name}</p>
                             <p className="text-emerald-400 font-black text-sm">
-                              R$ {(sellerRevenueInCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              R$ {(pdvRevenueInCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
                           </div>
+                          
+                          <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-wider">
+                            <span className="text-slate-500">{totalAssignedCards} no Bolso</span>
+                            <span className="text-emerald-500/70">{pdvSalesCount} Vendas (PDV)</span>
+                          </div>
+                          
+                          {/* Barra de Progresso do Estoque vs Venda */}
+                          {totalAssignedCards > 0 && (
+                            <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+                              <div 
+                                className="bg-emerald-500 h-full rounded-full transition-all duration-1000" 
+                                style={{ width: `${salesProgress}%` }}
+                              ></div>
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -257,7 +292,7 @@ export default async function EventDashboardPage({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full relative z-10">
                   <a 
-                    href="/live" 
+                    href={`/${subdomain}/live`} 
                     target="_blank"
                     className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-slate-700"
                   >
@@ -265,7 +300,7 @@ export default async function EventDashboardPage({
                   </a>
                   
                   <a 
-                    href={`/projector?eventId=${event.id}`} 
+                    href={`/${subdomain}/projector?eventId=${event.id}`} 
                     target="_blank"
                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
                   >
@@ -273,7 +308,7 @@ export default async function EventDashboardPage({
                   </a>
 
                   <a 
-                    href={`/verify?event=${event.id}`}
+                    href={`/${subdomain}/verify?event=${event.id}`}
                     target="_blank"
                     className="bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
                   >
@@ -294,11 +329,11 @@ export default async function EventDashboardPage({
                   </form>
 
                   <a 
-                    href={`/dashboard/${event.id}/relatorio`} 
+                    href={`/${subdomain}/dashboard/${event.id}/relatorio`} 
                     target="_blank"
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
+                    className="col-span-full sm:col-span-2 lg:col-span-4 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20 mt-2"
                   >
-                    📄 Fechar Caixa
+                    📄 Fechar Caixa Definitivo
                   </a>
                 </div>
               </div>

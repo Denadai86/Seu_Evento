@@ -21,11 +21,10 @@ export default async function RelatorioPage({
       sponsors: true,
       transactions: true,
       cards: { select: { isPaid: true, isSold: true, price: true } },
-      sellers: {
-        include: { cards: { select: { isPaid: true, price: true } } }
+      staff: {
+        include: { transactions: true, cards: true } } }
       }
-    }
-  });
+    );
 
   if (!event) notFound();
 
@@ -48,20 +47,21 @@ export default async function RelatorioPage({
   const vendasDinheiroCents = totalVendasCents - vendasPixCents;
 
   // 4. Agrupando por Vendedor (Lendo direto das cartelas atreladas a eles)
-  const sellerStats = event.sellers.map(seller => {
+  const sellerStats = event.staff.map(seller => {
     const sCards = seller.cards.filter(c => c.isPaid);
     const sTotalCents = sCards.reduce((sum, c) => sum + (c.price || event.ticketPrice), 0);
 
     // O que ele vendeu no PIX (Transações rastreáveis)
     const sPixCents = event.transactions
-      .filter(t => t.sellerId === seller.id && t.method === "PIX")
+      .filter(t => t.eventStaffId === seller.id && t.method === "PIX")
       .reduce((sum, t) => sum + t.amount, 0);
 
     // O que ele tem que devolver em Dinheiro Físico
     const sDinheiroCents = sTotalCents - sPixCents;
 
     return {
-      name: seller.name,
+      name: (seller as any).name || "Vendedor",
+      id: seller.id,
       qtd: sCards.length,
       pix: sPixCents,
       dinheiro: sDinheiroCents,

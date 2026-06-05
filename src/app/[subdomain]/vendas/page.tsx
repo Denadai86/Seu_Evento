@@ -17,10 +17,10 @@ export default async function VendasPage({ params }: { params: Promise<{ subdoma
       name: true,
       ticketPrice: true,
       pixKey: true, // Se não tiver essa coluna no Prisma, comente essa linha
-      sellers: {
-        select: { id: true, name: true },
-        orderBy: { name: 'asc' }
-      }
+      staff: {
+      where: { canSell: true },
+      include: { user: { select: { id: true, name: true } } }
+    }
     }
   });
 
@@ -39,6 +39,11 @@ export default async function VendasPage({ params }: { params: Promise<{ subdoma
     ...activeEvent,
     ticketPrice: activeEvent.ticketPrice || 2500,
     pixKey: activeEvent.pixKey || "sua-chave-pix-aqui@email.com",
+    sellers: activeEvent.staff.map(staff => ({
+      id: staff.id,
+      name: staff.user.name || "Vendedor",
+      userId: staff.userId,
+    })),
   };
 
   return (

@@ -1,120 +1,67 @@
-'use server';
+// src/actions/finance.ts
+"use server";
 
-import prisma from '@/lib/prisma';
-import { requireTenant } from '@/lib/requireTenant';
+import prisma from "@/lib/prisma";
+import { requireTenant } from "@/lib/requireTenant";
 
 export interface FinanceStats {
   totalRevenue: number;
-  byMethod: {
-    method: string;
-    total: number;
-  }[];
-  operatorRanking: {
-    name: string;
-    total: number;
-    count: number;
-  }[];
+  byMethod: { method: string; total: number; count: number }[];
+  operatorRanking: { name: string; total: number; count: number }[];
 }
 
-export async function getEventFinanceStats(
-  eventId: string
-): Promise<FinanceStats> {
-  // Segurança do tenant
-  await requireTenant();
+export async function getEventFinanceStats(eventId: string): Promise<FinanceStats> {
+  const tenantId = await requireTenant();
 
-  // ==========================================
-  // RECEITA POR MÉTODO
-  // ==========================================
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
+  if (!event) throw new Error("Evento não encontrado ou acesso negado.");
+
+  // 1. Receita por método
   const methodStats = await prisma.transaction.groupBy({
-    by: ['method'],
-    where: {
-      eventId,
-    },
-    _sum: {
-      amount: true,
-    },
-    _count: {
-      _all: true,
-    },
+    by: ["method"],
+    where: { eventId },
+    _sum: { amount: true },
+    _count: { _all: true },
   });
 
-  // ==========================================
-  // RANKING DE VENDEDORES
-  // ==========================================
-  const operatorStats = await prisma.transaction.groupBy({
-    by: ['sellerId'],
-    where: {
-      eventId,
-      sellerId: {
-        not: null,
-      },
-    },
-    _sum: {
-      amount: true,
-    },
-    _count: {
-      _all: true,
-    },
-    orderBy: {
-      _sum: {
-        amount: 'desc',
-      },
-    },
+  // 2. Ranking de Vendas por Membro da Equipe (Agrupa por eventStaffId)
+  const staffSalesStats = await prisma.transaction.groupBy({
+    by: ["eventStaffId"],
+    where: { eventId, eventStaffId: { not: null } },
+    _sum: { amount: true },
+    _count: { _all: true },
+    orderBy: { _sum: { amount: "desc" } },
     take: 10,
   });
 
-  // ==========================================
-  // BUSCA NOMES DOS SELLERS
-  // ==========================================
-  const sellerIds = operatorStats
-    .map((op) => op.sellerId)
+  const eventStaffIds = staffSalesStats
+    .map((op) => op.eventStaffId)
     .filter((id): id is string => Boolean(id));
 
-  const sellers = await prisma.seller.findMany({
-    where: {
-      id: {
-        in: sellerIds,
-      },
-    },
-    select: {
-      id: true,
-      name: true,
+  // Busca os nomes associados na tabela User através do EventStaff
+  const staffMembers = await prisma.eventStaff.findMany({
+    where: { id: { in: eventStaffIds } },
+    include: {
+      user: { select: { name: true } },
     },
   });
 
-  // ==========================================
-  // TOTAL GERAL
-  // ==========================================
-  const totalRevenue = methodStats.reduce((acc, curr) => {
-    return acc + (curr._sum.amount ?? 0);
-  }, 0);
+  const totalRevenue = methodStats.reduce((acc, curr) => acc + (curr._sum?.amount ?? 0), 0);
 
-  // ==========================================
-  // FORMATA RANKING
-  // ==========================================
-  const formattedOperatorRanking = operatorStats.map((op) => {
-    const seller = sellers.find(
-      (seller) => seller.id === op.sellerId
-    );
-
-    return {
-      name: seller?.name ?? 'Desconhecido',
-      total: op._sum.amount ?? 0,
-      count: op._count._all,
-    };
-  });
-
-  // ==========================================
-  // RETORNO FINAL
-  // ==========================================
   return {
     totalRevenue,
-
-    byMethod: methodStats.map((method) => ({
-      method: method.method,
-      total: method._sum.amount ?? 0,
+    byMethod: methodStats.map((m) => ({
+      method: m.method,
+      total: m._sum?.amount ?? 0,
+      count: m._count?._all ?? 0, // 🔥 Correção do erro de tipagem aplicada aqui
     })),
-
-    operatorRanking: formattedOperatorRanking,
+    operatorRanking: staffSalesStats.map((stat) => {
+      const staff = staffMembers.find((s) => s.id === stat.eventStaffId);
+      return {
+        name: staff?.user?.name ?? "Desconhecido",
+        total: stat._sum?.amount ?? 0,
+        count: stat._count?._all ?? 0, // 🔥 Correção do erro de tipagem aplicada aqui
+      };
+    }),
   };
 }

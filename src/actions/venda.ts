@@ -1,137 +1,70 @@
-// src/actions/vendas.ts
+// src/actions/venda.ts
 "use server";
 
 import prisma from "@/lib/prisma";
 import { PaymentMethod } from "@prisma/client";
+import { requireTenant } from "@/lib/requireTenant";
 
-// 🔥 NOVA FUNÇÃO: Valida se a cartela pode ser vendida
-export async function validateCardForSale(eventId: string, shortId: string) {
-  const card = await prisma.card.findUnique({
-    where: { shortId },
-    select: { id: true, shortId: true, isSold: true, eventId: true }
-  });
-
-  if (!card) throw new Error("Cartela não encontrada no sistema.");
-  if (card.eventId !== eventId) throw new Error("Atenção: Cartela de outro evento!");
-  if (card.isSold) throw new Error("Conflito: Esta cartela já foi vendida!");
-
-  return card;
-}
-
-export async function processCardSale({
-  eventId,
-  shortId,
-  method,
-  sellerId,
-}: {
-  eventId: string;
-  shortId: string;
-  method: PaymentMethod;
-  sellerId?: string;
-}) {
-  try {
-    const event = await prisma.event.findUnique({
-      where: { id: eventId },
-      select: { ticketPrice: true }
-    });
-
-    if (!event) return { success: false, error: "Evento não encontrado." };
-
-    // Executa ambas as operações juntas de forma segura
-    await prisma.$transaction(async (tx) => {
-      // 1. Atualiza o estado da cartela no pátio
-      const card = await tx.card.update({
-        where: { shortId: shortId.toUpperCase() },
-        data: {
-          isSold: true,
-          isPaid: true,
-          sellerId: sellerId || null,
-          price: event.ticketPrice
-        }
-      });
-
-      // 2. Alimenta o Extrato e Gráficos do Dashboard Financeiro
-      await tx.transaction.create({
-        data: {
-          eventId,
-          cardId: card.id,
-          sellerId: sellerId || null,
-          amount: event.ticketPrice,
-          method
-        }
-      });
-    });
-
-    return { success: true };
-  } catch (error: any) {
-    console.error("Erro no PDV:", error);
-    return { success: false, error: "Falha ao registrar venda da cartela." };
-  }
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// PROCESSAR VENDA EM LOTE (PDV — transação atômica)
+// ─────────────────────────────────────────────────────────────────────────────
 export async function processBatchSale(
   eventId: string,
-  shortIds: string[], // Agora recebe um array de cartelas (ex: ["A1B2", "X9Z8"])
-  method: PaymentMethod, // Ou o seu PaymentMethod do Prisma
-  sellerId: string
+  shortIds: string[],
+  method: PaymentMethod,
+  eventStaffId: string // 🔥 Mudou de sellerId para eventStaffId
 ) {
   if (!shortIds || shortIds.length === 0) return { success: false, error: "Carrinho vazio." };
 
+  const tenantId = await requireTenant();
+
   try {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      // Assumindo que você tenha ticketPrice no Prisma. Se não tiver, substitua por um valor fixo por enquanto.
-      select: { ticketPrice: true } 
+      select: { ticketPrice: true, isActive: true, tenantId: true },
     });
 
-    if (!event) return { success: false, error: "Evento não encontrado." };
+    if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido." };
+    if (!event.isActive) return { success: false, error: "Evento não está ativo. O caixa foi encerrado pela administração." };
 
-    const ticketPrice = event.ticketPrice || 2500; // Fallback para R$ 25,00 em centavos
+    const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
 
-    // $transaction garante que ou salva TODAS as cartelas do carrinho, ou nenhuma.
     await prisma.$transaction(async (tx) => {
-      // 1. Verifica se alguma das cartelas do lote já foi vendida (proteção contra duplo bip)
       const existingCards = await tx.card.findMany({
-        where: { shortId: { in: shortIds }, eventId }
+        where: { shortId: { in: shortIds }, eventId },
       });
 
       if (existingCards.length !== shortIds.length) {
-        throw new Error("Uma ou mais cartelas não são válidas para este evento.");
+        throw new Error("Uma ou mais cartelas não pertencem a este evento.");
       }
 
-      const alreadySold = existingCards.filter(c => c.isSold);
+      const alreadySold = existingCards.filter((c) => c.isSold);
       if (alreadySold.length > 0) {
-        throw new Error(`As cartelas a seguir já foram vendidas: ${alreadySold.map(c => c.shortId).join(", ")}`);
+        throw new Error(
+          `Conflito! Cartelas já vendidas: ${alreadySold.map((c) => c.shortId).join(", ")}`
+        );
       }
 
-      // 2. Atualiza todas as cartelas do carrinho
+      // Atualiza cartelas
       await tx.card.updateMany({
         where: { shortId: { in: shortIds } },
-        data: {
-          isSold: true,
-          isPaid: true,
-          sellerId: sellerId,
-          price: ticketPrice
-        }
+        data: { isSold: true, isPaid: true, eventStaffId, price: ticketPrice },
       });
 
-      // 3. Registra as transações financeiras para cada cartela
-      const transactionsData = existingCards.map(card => ({
-        eventId,
-        cardId: card.id,
-        sellerId,
-        amount: ticketPrice,
-        method
-      }));
-
+      // Registra caixa financeiro atrelado à escala do funcionário
       await tx.transaction.createMany({
-        data: transactionsData
+        data: existingCards.map((card) => ({
+          eventId,
+          cardId: card.id,
+          eventStaffId, // 🔥 Mudou aqui
+          amount: ticketPrice,
+          method,
+        })),
       });
     });
 
     return { success: true };
   } catch (error: any) {
-    console.error("Erro no PDV Lote:", error);
-    return { success: false, error: error.message || "Falha ao processar carrinho." };
+    return { success: false, error: error.message || "Falha crítica ao processar carrinho." };
   }
 }

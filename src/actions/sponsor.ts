@@ -1,79 +1,73 @@
 // src/actions/sponsor.ts
 "use server";
 
-import  prisma  from "@/lib/prisma"; // Ajustado para pegar a instância global do seu projeto
-import { auth } from "@/lib/auth";
+import prisma from "@/lib/prisma";
+import { requireTenant } from "@/lib/requireTenant";
 import { revalidatePath } from "next/cache";
 import { put } from "@vercel/blob";
 
-async function requireTenantAccess() {
-  const session = await auth();
-  if (!session?.user?.tenantId) throw new Error("Não autorizado");
-  return session.user.tenantId;
-}
-
-// ✅ UPLOAD PARA VERCEL BLOB (Novo)
+// ─────────────────────────────────────────────────────────────────────────────
+// UPLOAD DE LOGO PARA VERCEL BLOB
+// ─────────────────────────────────────────────────────────────────────────────
 export async function uploadSponsorLogo(formData: FormData) {
-  const tenantId = await requireTenantAccess(); // Segurança: Apenas logados
-  
+  const tenantId = await requireTenant();
+
   const file = formData.get("file") as File;
   if (!file) throw new Error("Nenhum arquivo enviado.");
-
-  // Validação de segurança
   if (file.size > 2 * 1024 * 1024) throw new Error("A imagem deve ter no máximo 2MB.");
   if (!file.type.startsWith("image/")) throw new Error("Apenas imagens são permitidas.");
 
-  // Faz o upload para o Blob organizando por pastas: sponsors/tenantId/timestamp-nomearquivo
   const blob = await put(`sponsors/${tenantId}/${Date.now()}-${file.name}`, file, {
     access: "public",
   });
 
-  return blob.url; // Retorna a URL pública gerada
+  return blob.url;
 }
 
-// ✅ CREATE (Mantido o seu código)
-// ✅ CREATE (Agora suporta criação atômica de Prêmio/Rodada)
+// ─────────────────────────────────────────────────────────────────────────────
+// CRIAR PATROCINADOR
+// Suporta criação atômica de Prêmio/Rodada vinculado ao patrocinador
+// ─────────────────────────────────────────────────────────────────────────────
 export async function addSponsor(
   eventId: string,
   name: string,
   contribution: number = 0,
   logoUrl?: string,
-  prizeData?: { roundName: string; prizeName: string; type: "QUINA" | "FULL_HOUSE" } // Novo parâmetro
+  prizeData?: {
+    roundName: string;
+    prizeName: string;
+    type: "QUINA" | "FULL_HOUSE";
+  }
 ) {
-  const tenantId = await requireTenantAccess();
+  const tenantId = await requireTenant();
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
-    select: { id: true, tenant: { select: { subdomain: true } } }
+    select: { id: true, tenant: { select: { subdomain: true } } },
   });
+  if (!event) throw new Error("Evento não encontrado ou acesso negado.");
 
-  if (!event) throw new Error("Evento não encontrado");
-
-  // SE O PATROCINADOR DOOU PRENDA, CRIA OS DOIS JUNTOS
+  // Se o patrocinador trouxe prenda, cria patrocinador + rodada na mesma transação
   if (prizeData && prizeData.prizeName.trim() !== "") {
-    // 1. Descobre qual a próxima ordem da rodada
     const lastPrize = await prisma.prize.findFirst({
       where: { eventId },
-      orderBy: { order: 'desc' }
+      orderBy: { order: "desc" },
     });
     const nextOrder = lastPrize ? lastPrize.order + 1 : 1;
 
-    // 2. Transação atômica (Ou salva os dois, ou não salva nenhum)
     const result = await prisma.$transaction(async (tx) => {
       const newSponsor = await tx.sponsor.create({
-        data: { name: name.trim(), logoUrl, contribution, eventId }
+        data: { name: name.trim(), logoUrl, contribution, eventId },
       });
-
       await tx.prize.create({
         data: {
           eventId,
-          name: prizeData.roundName.trim() || `Rodada ${name}`, // Ex: Rodada Quitanda
-          prizeName: prizeData.prizeName.trim(),                // Ex: Saco de Laranja
+          name: prizeData.roundName.trim() || `Rodada ${name.trim()}`,
+          prizeName: prizeData.prizeName.trim(),
           type: prizeData.type,
-          order: nextOrder
-        }
+          order: nextOrder,
+        },
       });
-
       return newSponsor;
     });
 
@@ -81,7 +75,7 @@ export async function addSponsor(
     return result;
   }
 
-  // FLUXO NORMAL (Sem prêmio)
+  // Fluxo sem prêmio
   const sponsor = await prisma.sponsor.create({
     data: { name: name.trim(), logoUrl, contribution, eventId },
   });
@@ -90,38 +84,28 @@ export async function addSponsor(
   return sponsor;
 }
 
-// ✅ UPDATE (Mantido o seu código)
+// ─────────────────────────────────────────────────────────────────────────────
+// EDITAR PATROCINADOR
+// ─────────────────────────────────────────────────────────────────────────────
 export async function updateSponsor(
   sponsorId: string,
   name: string,
   contribution: number = 0,
   logoUrl?: string
 ) {
-  const tenantId = await requireTenantAccess();
+  const tenantId = await requireTenant();
 
   const sponsor = await prisma.sponsor.findFirst({
-    where: { 
-      id: sponsorId,
-      event: { tenantId }
-    },
-    include: {
-      event: {
-        select: { 
-          id: true,
-          tenant: { select: { subdomain: true } }
-        }
-      }
-    }
+    where: { id: sponsorId, event: { tenantId } },
+    include: { event: { select: { id: true, tenant: { select: { subdomain: true } } } } },
   });
-
-  if (!sponsor) throw new Error("Patrocinador não encontrado");
+  if (!sponsor) throw new Error("Patrocinador não encontrado ou acesso negado.");
 
   const updated = await prisma.sponsor.update({
     where: { id: sponsorId },
     data: {
       name: name.trim(),
       contribution,
-      // Só atualiza a logo se uma nova URL for enviada
       ...(logoUrl !== undefined && { logoUrl }),
     },
   });
@@ -130,30 +114,20 @@ export async function updateSponsor(
   return updated;
 }
 
-// ✅ DELETE (Mantido o seu código)
+// ─────────────────────────────────────────────────────────────────────────────
+// REMOVER PATROCINADOR
+// ─────────────────────────────────────────────────────────────────────────────
 export async function removeSponsor(sponsorId: string) {
-  const tenantId = await requireTenantAccess();
+  const tenantId = await requireTenant();
 
   const sponsor = await prisma.sponsor.findFirst({
-    where: { 
-      id: sponsorId,
-      event: { tenantId }
-    },
-    include: {
-      event: {
-        select: { 
-          id: true,
-          tenant: { select: { subdomain: true } }
-        }
-      }
-    }
+    where: { id: sponsorId, event: { tenantId } },
+    include: { event: { select: { id: true, tenant: { select: { subdomain: true } } } } },
   });
-
-  if (!sponsor) throw new Error("Patrocinador não encontrado");
+  if (!sponsor) throw new Error("Patrocinador não encontrado ou acesso negado.");
 
   await prisma.sponsor.delete({ where: { id: sponsorId } });
 
   revalidatePath(`/${sponsor.event.tenant.subdomain}/dashboard/${sponsor.event.id}`);
-  
   return { success: true };
 }

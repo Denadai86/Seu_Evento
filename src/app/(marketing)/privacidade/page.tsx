@@ -1,11 +1,11 @@
-import Sidebar from "../components/Sidebar";
+import Navbar from "@/components/marketing/Navbar";
 import Link from "next/link";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 
 export default function PrivacidadePage() {
   return (
     <>
-      <Sidebar />
+      <Navbar />
       <main className="flex-1 md:ml-80 bg-slate-50 min-h-screen py-20 px-8 lg:px-16">
         <div className="max-w-3xl mx-auto bg-white p-10 md:p-16 rounded-3xl border border-slate-200 shadow-sm">
           
