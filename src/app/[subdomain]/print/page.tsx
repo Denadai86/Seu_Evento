@@ -43,9 +43,17 @@ function getLayoutConfig(layout: Layout) {
 }
 
 // --- QR Code Generator ---
-async function generateQRCode(shortId: string, eventId: string): Promise<string> {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://localhost:3000";
-  const verifyUrl = `${baseUrl}/verify?event=${eventId}&id=${shortId}`;
+async function generateQRCode(shortId: string, eventId: string, subdomain: string): Promise<string> {
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br";
+  const protocol = process.env.NEXT_PUBLIC_PROTOCOL || "https://";
+  const isLocal = process.env.NODE_ENV === "development";
+  
+  // Montagem dinâmica e correta do subdomínio
+  const fullDomain = isLocal 
+    ? `${subdomain}.localhost:3000` 
+    : `${subdomain}.${rootDomain}`;
+
+  const verifyUrl = `${protocol}${fullDomain}/verify?event=${eventId}&id=${shortId}`;
 
   return await QRCode.toDataURL(verifyUrl, {
     width: 140,
@@ -128,7 +136,7 @@ export default async function PrintView({ params, searchParams }: PrintPageProps
   const cardsWithQR = await Promise.all(
     event.cards.map(async (card) => ({
       ...card,
-      qrCode: await generateQRCode(card.shortId, eventId),
+      qrCode: await generateQRCode(card.shortId, eventId, subdomain),
     }))
   );
 

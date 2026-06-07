@@ -78,9 +78,9 @@ export default function AdminClient({ session }: { session: Session }) {
     startTransition(async () => {
       const res = await getImpersonationToken(tenantId);
       if (res.success) {
-        // Lida inteligentemente com ambiente local (localhost) ou produção (acaoleve.com)
+        // Lida inteligentemente com ambiente local (localhost) ou produção (seu-evento.social.br)
         const isLocal = window.location.hostname.includes("localhost") || window.location.hostname.includes("192.168");
-        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.acaoleve.com`;
+        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.seu-evento.social.br`;
         const protocol = isLocal ? "http://" : "https://";
         
         // Abre uma nova aba no navegador já logado no cliente!
@@ -166,7 +166,7 @@ export default function AdminClient({ session }: { session: Session }) {
                     <p className="text-xs text-slate-500">Criado em {new Date(tenant.createdAt).toLocaleDateString()}</p>
                   </td>
                   <td className="p-5 font-mono text-emerald-400">
-                    <a href={`https://${tenant.subdomain}.acaoleve.com`} target="_blank" className="hover:underline flex items-center gap-1">
+                    <a href={`https://${tenant.subdomain}.seu-evento.social.br`} target="_blank" className="hover:underline flex items-center gap-1">
                       {tenant.subdomain} <ExternalLink size={12} />
                     </a>
                   </td>
@@ -216,7 +216,7 @@ export default function AdminClient({ session }: { session: Session }) {
         {showModal && (
            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
              <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-lg w-full relative">
-               <button onClick={() => setShowModal(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white"><X size={24} /></button>
+               <button onClick={() => setShowModal(false)} title="Fechar" aria-label="Fechar modal" className="absolute top-4 right-4 text-slate-500 hover:text-white"><X size={24} /></button>
                <h3 className="text-xl font-black text-white mb-4">Novo Cliente (Tenant)</h3>
                
                <form onSubmit={handleCreateTenant} className="space-y-4">
@@ -224,11 +224,11 @@ export default function AdminClient({ session }: { session: Session }) {
                  <input placeholder="Subdomínio (ex: paroquiasaojose)" value={formData.subdomain} onChange={e => setFormData({...formData, subdomain: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
                  
                  <div className="grid grid-cols-2 gap-4">
-                   <select value={formData.planType} onChange={e => setFormData({...formData, planType: e.target.value as any})} className="w-full p-3 bg-slate-800 text-white rounded-xl">
+                   <select value={formData.planType} onChange={e => setFormData({...formData, planType: e.target.value as any})} title="Tipo de Plano" className="w-full p-3 bg-slate-800 text-white rounded-xl">
                      <option value="SINGLE_EVENT">Evento Único</option>
                      <option value="ANNUAL">Plano Anual</option>
                    </select>
-                   <input type="date" value={formData.eventDate} onChange={e => setFormData({...formData, eventDate: e.target.value})} required={formData.planType === 'SINGLE_EVENT'} className="w-full p-3 bg-slate-800 text-slate-400 rounded-xl" />
+                   <input type="date" placeholder="Data do Evento" value={formData.eventDate} onChange={e => setFormData({...formData, eventDate: e.target.value})} required={formData.planType === 'SINGLE_EVENT'} className="w-full p-3 bg-slate-800 text-slate-400 rounded-xl" />
                  </div>
 
                  <input placeholder="Nome do Admin" value={formData.adminName} onChange={e => setFormData({...formData, adminName: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />

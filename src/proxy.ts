@@ -1,4 +1,8 @@
-// src/middleware.ts (ou proxy.ts dependendo de como você nomeou)
+// src/middleware.ts
+// ⚠️  RENOMEADO de proxy.ts → middleware.ts
+// Next.js SÓ reconhece o arquivo se ele se chamar exatamente "middleware.ts"
+// na raiz do projeto ou dentro de /src. Qualquer outro nome é silenciosamente ignorado.
+
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
@@ -14,21 +18,21 @@ export const config = {
 // ─────────────────────────────────────────────────────────────────────────────
 function resolveHost(hostname: string): string {
   if (!hostname) return "root";
-  
+
   // Remove a porta (ex: :3000) caso exista
   const host = hostname.split(":")[0];
 
   if (process.env.NODE_ENV === "production") {
-    // Usamos a nova variável de ambiente com fallback para o .com.br
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.com.br";
-    
+    const rootDomain =
+      process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br";
+
     if (host === rootDomain || host === `www.${rootDomain}`) return "root";
-    
-    // Extrai o subdomínio perfeitamente (ex: seuevento.acaoleve.com.br -> seuevento)
+
+    // Extrai o subdomínio (ex: seuevento.seu-evento.social.br → seuevento)
     if (host.endsWith(`.${rootDomain}`)) {
       return host.replace(`.${rootDomain}`, "");
     }
-    
+
     return host; // Fallback para custom domains futuros
   }
 
@@ -42,7 +46,13 @@ function resolveHost(hostname: string): string {
 const rotasPublicasMarketing = ["/termos", "/privacidade"];
 
 // Rotas públicas dos Tenants (Subdomínios)
-const rotasPublicasPorTenant = ["/", "/entrar", "/projector", "/verify", "/cartela"];
+const rotasPublicasPorTenant = [
+  "/",
+  "/entrar",
+  "/projector",
+  "/verify",
+  "/cartela",
+];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -62,24 +72,27 @@ export default auth((req) => {
 
     // Regra de Admin Central
     if (pathname.startsWith("/admin")) {
-      if (!session) return NextResponse.redirect(new URL("/admin/login", req.url));
-      if (role !== "SUPER_ADMIN") return NextResponse.redirect(new URL("/", req.url));
+      if (!session)
+        return NextResponse.redirect(new URL("/admin/login", req.url));
+      if (role !== "SUPER_ADMIN")
+        return NextResponse.redirect(new URL("/", req.url));
       return NextResponse.next();
     }
-    
+
     return NextResponse.next();
   }
 
   // ==========================================
   // 2. REGRAS DE SUBDOMÍNIOS (Tenants)
   // ==========================================
-  
+
   // Impede que rotas de marketing globais sejam acessadas via tenant
   if (rotasPublicasMarketing.includes(pathname)) {
     const rootUrl = new URL(pathname, req.url);
-    rootUrl.host = process.env.NODE_ENV === "production"
-      ? (process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.com.br")
-      : "localhost:3000";
+    rootUrl.host =
+      process.env.NODE_ENV === "production"
+        ? process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br"
+        : "localhost:3000";
     return NextResponse.redirect(rootUrl);
   }
 
@@ -91,11 +104,13 @@ export default auth((req) => {
   if (isPublicTenantRoute) {
     if (pathname === "/entrar" && session) {
       // Redirecionamento inteligente após login
-      if (role === "OPERATOR") return NextResponse.redirect(new URL("/live", req.url));
-      if (role === "VERIFIER") return NextResponse.redirect(new URL("/vendas", req.url));
+      if (role === "OPERATOR")
+        return NextResponse.redirect(new URL("/live", req.url));
+      if (role === "VERIFIER")
+        return NextResponse.redirect(new URL("/vendas", req.url));
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
-    // Deixa renderizar normalmente e o rewrite cuidará do roteamento de pastas
+    // Deixa renderizar normalmente — o rewrite abaixo cuida do roteamento
   } else {
     // Rotas Protegidas do Tenant (Requer Login)
     if (!session) {
@@ -112,7 +127,11 @@ export default auth((req) => {
       return NextResponse.redirect(new URL("/live", req.url));
     }
 
-    if (role === "VERIFIER" && !pathname.startsWith("/vendas") && !pathname.startsWith("/verify")) {
+    if (
+      role === "VERIFIER" &&
+      !pathname.startsWith("/vendas") &&
+      !pathname.startsWith("/verify")
+    ) {
       return NextResponse.redirect(new URL("/vendas", req.url));
     }
   }
@@ -122,7 +141,8 @@ export default auth((req) => {
   // ==========================================
   const rewriteUrl = req.nextUrl.clone();
 
-  // Mapeia silenciosamente `seuevento.acaoleve.com.br/cartela` para `/app/seuevento/cartela`
+  // Mapeia silenciosamente `seuevento.seu-evento.social.br/cartela`
+  // para `src/app/[subdomain]/cartela/page.tsx`
   if (!pathname.startsWith(`/${currentHost}`)) {
     rewriteUrl.pathname = `/${currentHost}${pathname}`;
   }
