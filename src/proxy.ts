@@ -75,8 +75,8 @@ export default auth((req) => {
   if (isPublicRoute) {
     // Se logado e acessar /entrar, redireciona pelo cargo
     if (url.pathname === "/entrar" && session) {
-      if (role === "OPERATOR") return NextResponse.redirect(new URL("/live", req.url));
-      if (role === "VERIFIER") return NextResponse.redirect(new URL("/vendas", req.url));
+      if (role === "STAFF") return NextResponse.redirect(new URL("/live", req.url));
+      if (role === "STAFF") return NextResponse.redirect(new URL("/vendas", req.url));
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
   } else {
@@ -88,10 +88,10 @@ export default auth((req) => {
       return NextResponse.redirect(new URL("/entrar", req.url));
     }
 
-    if (role === "OPERATOR" && !url.pathname.startsWith("/live")) {
+    if (role === "STAFF" && !url.pathname.startsWith("/live")) {
       return NextResponse.redirect(new URL("/live", req.url));
     }
-    if (role === "VERIFIER" && !url.pathname.startsWith("/vendas") && !url.pathname.startsWith("/verify")) {
+    if (role === "STAFF" && !url.pathname.startsWith("/vendas") && !url.pathname.startsWith("/verify")) {
       return NextResponse.redirect(new URL("/vendas", req.url));
     }
   }
@@ -99,4 +99,5 @@ export default auth((req) => {
   // O Rewrite final exclusivo para tenants!
   // Mapeia `meuevento.seu-evento.../dashboard` para a pasta interna `app/[tenant]/dashboard`
   return NextResponse.rewrite(new URL(`/${tenantSubdomain}${url.pathname}`, req.url));
-});
+}
+);

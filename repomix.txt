@@ -72,6 +72,7 @@ src/actions/finance.ts
 src/actions/prize.ts
 src/actions/sponsor.ts
 src/actions/venda.ts
+src/app/(marketing)/entrar/page.tsx
 src/app/(marketing)/layout.tsx
 src/app/(marketing)/page.tsx
 src/app/(marketing)/privacidade/page.tsx
@@ -255,16 +256,6 @@ const eslintConfig = defineConfig([
 ]);
 
 export default eslintConfig;
-</file>
-
-<file path="next.config.ts">
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
-};
-
-export default nextConfig;
 </file>
 
 <file path="pnpm-workspace.yaml">
@@ -839,6 +830,78 @@ export async function resetStaffPassword(userId: string) {
     name: user.name,
     newPin 
   };
+}
+</file>
+
+<file path="src/app/(marketing)/entrar/page.tsx">
+// src/app/(marketing)/entrar/page.tsx
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+export default function TenantRouter() {
+  const [subdomain, setSubdomain] = useState("");
+  const router = useRouter();
+
+  const handleRedirect = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subdomain) return;
+
+    // Limpa espaços e deixa minúsculo por segurança
+    const cleanSubdomain = subdomain.trim().toLowerCase();
+    
+    // Redireciona para o login específico do subdomínio do cliente
+    window.location.href = `https://${cleanSubdomain}.acaoleve.dev.br/entrar`;
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold text-white mb-2">Acessar meu Evento</h1>
+          <p className="text-slate-400 text-sm">
+            Digite o endereço do seu evento para fazer login.
+          </p>
+        </div>
+
+        <form onSubmit={handleRedirect} className="space-y-6">
+          <div className="flex items-center bg-slate-700 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
+            <input
+              type="text"
+              value={subdomain}
+              onChange={(e) => setSubdomain(e.target.value)}
+              placeholder="nome-do-evento"
+              className="w-full bg-transparent text-white border-0 p-3 outline-none text-right placeholder-slate-500"
+              required
+            />
+            <span className="text-slate-400 pr-4 pl-1 py-3 bg-slate-700 select-none">
+              .acaoleve.dev.br
+            </span>
+          </div>
+
+          <button
+            type="submit"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors"
+          >
+            Continuar para o Login
+          </button>
+        </form>
+
+        <div className="mt-8 text-center border-t border-slate-700 pt-6">
+          <p className="text-sm text-slate-400">
+            É o administrador da plataforma?{" "}
+            <button 
+              onClick={() => router.push("/admin/login")}
+              className="text-blue-500 hover:underline"
+            >
+              Acesse o Hub
+            </button>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 </file>
 
@@ -2475,13 +2538,6 @@ export default function AdminLogin() {
 }
 </file>
 
-<file path="src/app/api/auth/[...nextauth]/route.ts">
-import { handlers } from "@/lib/auth";
-
-// Expõe GET e POST para o next-auth funcionar
-export const { GET, POST } = handlers;
-</file>
-
 <file path="src/components/LogoutButton.tsx">
 // src/components/LogoutButton.tsx
 "use client";
@@ -3686,36 +3742,6 @@ export const plans: Plan[] = [
 ];
 </file>
 
-<file path="src/config/site.ts">
-import link from "next/link";
-
-export const siteConfig = {
-  name: "SeuEvento",
-
-  urls: {
-    home: "/",
-
-    login: "/entrar",
-
-    pricing: "/#planos",
-
-    faq: "/#faq",
-
-    howItWorks: "/#como-funciona",
-
-    whatsapp: "https://wa.me/5514997665374",
-
-    instagram: "https://instagram.com/seuevento",
-
-    sponsors: "/patrocinadores",
-
-    privacy: "/privacidade",
-
-    terms: "/termos",
-  },
-} as const;
-</file>
-
 <file path="src/features/event-settings/actions.ts">
 // src/features/event-settings/actions.ts
 "use server";
@@ -4218,6 +4244,47 @@ Para garantir que o sistema escale sem virar um "código espaguete" e facilitar 
 - Consolidar botões, modais e inputs padrão dentro de `src/components/ui` para garantir consistência visual em todo o SaaS e mudar o design global editando apenas um arquivo.
 
 *Documento atualizado automaticamente conforme o projeto evolui.*
+</file>
+
+<file path="next.config.ts">
+// next.config.ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: [
+      // Vercel Blob Storage (usado por @vercel/blob para logos de tenants)
+      {
+        protocol: "https",
+        hostname: "**.vercel-storage.com",
+      },
+      // Cloudinary (usado por next-cloudinary para uploads de imagem)
+      {
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
+    ],
+  },
+
+  // Necessário para que Server Actions funcionem corretamente em subdomínios
+  // com domínio wildcard no Vercel. O Next.js precisa saber quais origens
+  // são permitidas para Server Actions cross-origin (CSRF protection).
+  experimental: {
+    serverActions: {
+      allowedOrigins: [
+        // Domínio raiz
+        process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br" || "seu-evento.social.br",
+        // Wildcard de subdomínios: *.acaoleve.dev.br
+        `.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br" || "seu-evento.social.br"}`,
+        // Desenvolvimento local
+        "localhost:3000",
+        "*.localhost:3000",
+      ],
+    },
+  },
+};
+
+export default nextConfig;
 </file>
 
 <file path="prisma.config.ts">
@@ -4820,243 +4887,6 @@ export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: 
 }
 </file>
 
-<file path="src/app/[subdomain]/print/page.tsx">
-// src/app/[subdomain]/print/page.tsx
-
-import prisma from "@/lib/prisma";
-import { notFound } from "next/navigation";
-import PrintButton from "./PrintButton";
-import QRCode from "qrcode";
-
-// --- Tipos ---
-type Layout = "a4-4" | "a4-2" | "a4-1" | "a4-6" | "a6";
-
-type SponsorItem = {
-  id: string;
-  name: string;
-  logoUrl: string | null;
-  contribution: number;
-};
-
-type CardWithQR = {
-  id: string;
-  shortId: string;
-  matrix: any;
-};
-
-// --- Configuração de Layouts ---
-const VALID_LAYOUTS: Layout[] = ["a4-4", "a4-2", "a4-1", "a4-6", "a6"];
-
-const LAYOUT_LABELS: Record<Layout, string> = {
-  "a4-4": "A4 — 4 cartelas (2×2)",
-  "a4-2": "A4 — 2 cartelas (1×2)",
-  "a4-1": "A4 — 1 cartela (premium)",
-  "a4-6": "A4 — 6 cartelas (3×2)",
-  "a6":   "A6 — 1 cartela (gráfica)",
-};
-
-function getLayoutConfig(layout: Layout) {
-  switch (layout) {
-    case "a4-4": return { gridClass: "grid grid-cols-2 gap-4",  cardClass: "h-[13.5cm]", perPage: 4, pageSize: "A4" };
-    case "a4-2": return { gridClass: "grid grid-cols-1 gap-6",  cardClass: "h-[19cm]",   perPage: 2, pageSize: "A4" };
-    case "a4-1": return { gridClass: "grid grid-cols-1",         cardClass: "h-[26cm]",   perPage: 1, pageSize: "A4" };
-    case "a4-6": return { gridClass: "grid grid-cols-3 gap-3",  cardClass: "h-[9cm]",    perPage: 6, pageSize: "A4" };
-    case "a6":   return { gridClass: "grid grid-cols-1",         cardClass: "h-[14cm] w-[10cm] mx-auto", perPage: 1, pageSize: "A6" };
-  }
-}
-
-// --- QR Code Generator ---
-async function generateQRCode(shortId: string, eventId: string, subdomain: string): Promise<string> {
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
-  const protocol = process.env.NEXT_PUBLIC_PROTOCOL || "https://";
-  const isLocal = process.env.NODE_ENV === "development";
-  
-  // Montagem dinâmica e correta do subdomínio
-  const fullDomain = isLocal 
-    ? `${subdomain}.localhost:3000` 
-    : `${subdomain}.${rootDomain}`;
-
-  const verifyUrl = `${protocol}${fullDomain}/verify?event=${eventId}&id=${shortId}`;
-
-  return await QRCode.toDataURL(verifyUrl, {
-    width: 140,
-    margin: 1,
-    color: { dark: "#000000", light: "#ffffff" },
-  });
-}
-
-// --- Componentes ---
-function SponsorBar({ sponsors }: { sponsors: SponsorItem[] }) {
-  if (sponsors.length === 0) {
-    return (
-      <div className="mt-3 pt-2 border-t border-slate-300 text-center">
-        <p className="text-[7px] uppercase tracking-widest text-slate-500">Apoio Cultural</p>
-        <span className="text-[8px] text-slate-400 italic">Espaço para Patrocinador</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-3 pt-2 border-t border-slate-300 shrink-0">
-      <p className="text-[7px] uppercase tracking-widest text-center text-slate-500 mb-1 font-bold">
-        Apoio Cultural
-      </p>
-      <div className="flex justify-center items-center gap-3 h-6 overflow-hidden">
-        {sponsors.map((s) => (
-          <div key={s.id} className="flex-shrink-0">
-            {s.logoUrl ? (
-              <img src={s.logoUrl} className="h-5 object-contain grayscale" alt={s.name} />
-            ) : (
-              <span className="text-[8px] font-bold uppercase">{s.name}</span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function QRCodeSection({ qrCodeDataUrl, shortId }: { qrCodeDataUrl: string; shortId: string }) {
-  return (
-    <div className="absolute top-2 right-2 flex flex-col items-end">
-      <img src={qrCodeDataUrl} alt="QR Code" className="w-16 h-16 border border-black bg-white p-0.5" />
-      <span className="text-[7px] font-mono text-black mt-0.5">{shortId}</span>
-    </div>
-  );
-}
-
-// --- Página Principal ---
-interface PrintPageProps {
-  params: Promise<{ subdomain: string }>;
-  searchParams: Promise<{ eventId?: string; layout?: string }>;
-}
-
-export default async function PrintView({ params, searchParams }: PrintPageProps) {
-  const { subdomain } = await params;
-  const { eventId, layout: rawLayout = "a4-4" } = await searchParams;
-
-  if (!eventId) notFound();
-
-  const layout: Layout = VALID_LAYOUTS.includes(rawLayout as Layout) ? (rawLayout as Layout) : "a4-4";
-
-  const event = await prisma.event.findFirst({
-    where: { id: eventId, tenant: { subdomain } },
-    include: {
-      tenant: true,
-      cards: { orderBy: { shortId: "asc" } },
-      sponsors: true,
-    },
-  });
-
-  if (!event || event.cards.length === 0) {
-    return <div className="p-10 text-center text-red-500">Nenhuma cartela encontrada.</div>;
-  }
-
-  const { gridClass, cardClass, perPage, pageSize } = getLayoutConfig(layout);
-  const pages = chunk(event.cards, perPage);
-
-  // Gera QR Codes para todas as cartelas
-  const cardsWithQR = await Promise.all(
-    event.cards.map(async (card) => ({
-      ...card,
-      qrCode: await generateQRCode(card.shortId, eventId, subdomain),
-    }))
-  );
-
-  return (
-    <div className="min-h-screen bg-slate-200 print:bg-white text-black font-sans">
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          @page { margin: 10mm; size: ${pageSize}; }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        }
-      `}} />
-
-      {/* Barra de Controle */}
-      <div className="print:hidden sticky top-0 bg-slate-900 text-white p-4 shadow-xl z-50 flex justify-between items-center">
-        <div>
-          <h1 className="font-bold">Impressão: {LAYOUT_LABELS[layout]}</h1>
-          <p className="text-xs text-slate-400">
-            {event.cards.length} cartelas • {pages.length} página{pages.length > 1 ? "s" : ""}
-          </p>
-        </div>
-        <PrintButton />
-      </div>
-
-      <div className="p-4 md:p-8 print:p-0">
-        {pages.map((pageCards, pageIndex) => (
-          <div
-            key={pageIndex}
-            className={`${gridClass} ${pageIndex < pages.length - 1 ? "break-after-page" : ""}`}
-          >
-            {pageCards.map((card) => {
-              const cardWithQR = cardsWithQR.find(c => c.id === card.id)!;
-
-              return (
-                <div
-                  key={card.id}
-                  className={`relative border-2 border-dashed border-slate-300 print:border-black p-4 bg-white flex flex-col ${cardClass}`}
-                >
-                  {/* QR Code no canto superior direito */}
-                  <QRCodeSection qrCodeDataUrl={cardWithQR.qrCode} shortId={card.shortId} />
-
-                  {/* Cabeçalho */}
-                  <div className="flex justify-between items-start border-b-2 border-black pb-2 mb-3">
-                    <div>
-                      <h2 className="text-lg font-black uppercase tracking-tight leading-none">
-                        {event.name}
-                      </h2>
-                      <p className="text-[9px] text-slate-600 font-bold tracking-widest mt-1">
-                        ID: {card.shortId}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Grade do Bingo */}
-                  <div className="flex-1 flex flex-col border-2 border-black rounded-lg overflow-hidden">
-                    <div className="grid grid-cols-5 bg-black text-white text-center font-black text-xl py-1">
-                      {["B", "I", "N", "G", "O"].map((l) => <div key={l}>{l}</div>)}
-                    </div>
-
-                    <div className="flex-1 grid grid-cols-5 grid-rows-5 text-2xl font-black">
-                      {([0,1,2,3,4] as const).map((row) =>
-                        (["B","I","N","G","O"] as const).map((letter) => {
-                          const isCenter = letter === "N" && row === 2;
-                          const number = isCenter ? null : (card.matrix as any)[letter][row];
-
-                          return (
-                            <div
-                              key={`${letter}-${row}`}
-                              className={`border border-black flex items-center justify-center ${isCenter ? "bg-slate-200" : "bg-white"}`}
-                            >
-                              {isCenter ? "★" : number}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Patrocinadores */}
-                  <SponsorBar sponsors={event.sponsors} />
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Helper chunk
-function chunk<T>(arr: T[], size: number): T[][] {
-  return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
-    arr.slice(i * size, i * size + size)
-  );
-}
-</file>
-
 <file path="src/app/[subdomain]/vendas/PDVClient.tsx">
 // src/app/[subdomain]/vendas/PDVClient.tsx
 "use client";
@@ -5415,6 +5245,15 @@ export default function VerifyClient({ eventId, shortId, validation, verifierNam
 }
 </file>
 
+<file path="src/app/api/auth/[...nextauth]/route.ts">
+//src/app/api/auth/[...nextauth]/route.ts
+
+import { handlers } from "@/lib/auth";
+
+// Expõe GET e POST para o next-auth funcionar
+export const { GET, POST } = handlers;
+</file>
+
 <file path="src/app/api/get-print-data/route.ts">
 // src/app/api/get-print-data/route.ts
 import { NextResponse } from "next/server";
@@ -5474,6 +5313,36 @@ body {
   background-color: #0b0f14; 
   color: #ffffff;
 }
+</file>
+
+<file path="src/config/site.ts">
+import link from "next/link";
+
+export const siteConfig = {
+  name: "Seu-Evento",
+
+  urls: {
+    home: "/",
+
+    login: "/entrar",
+
+    pricing: "/#planos",
+
+    faq: "/#faq",
+
+    howItWorks: "/#como-funciona",
+
+    whatsapp: "https://wa.me/5514997665374",
+
+    instagram: "https://instagram.com/seuevento",
+
+    sponsors: "/patrocinadores",
+
+    privacy: "/privacidade",
+
+    terms: "/termos",
+  },
+} as const;
 </file>
 
 <file path="src/actions/venda.ts">
@@ -5979,6 +5848,243 @@ export default function TenantLoginForm() {
         Entrar com Google
       </button>
     </>
+  );
+}
+</file>
+
+<file path="src/app/[subdomain]/print/page.tsx">
+// src/app/[subdomain]/print/page.tsx
+
+import prisma from "@/lib/prisma";
+import { notFound } from "next/navigation";
+import PrintButton from "./PrintButton";
+import QRCode from "qrcode";
+
+// --- Tipos ---
+type Layout = "a4-4" | "a4-2" | "a4-1" | "a4-6" | "a6";
+
+type SponsorItem = {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  contribution: number;
+};
+
+type CardWithQR = {
+  id: string;
+  shortId: string;
+  matrix: any;
+};
+
+// --- Configuração de Layouts ---
+const VALID_LAYOUTS: Layout[] = ["a4-4", "a4-2", "a4-1", "a4-6", "a6"];
+
+const LAYOUT_LABELS: Record<Layout, string> = {
+  "a4-4": "A4 — 4 cartelas (2×2)",
+  "a4-2": "A4 — 2 cartelas (1×2)",
+  "a4-1": "A4 — 1 cartela (premium)",
+  "a4-6": "A4 — 6 cartelas (3×2)",
+  "a6":   "A6 — 1 cartela (gráfica)",
+};
+
+function getLayoutConfig(layout: Layout) {
+  switch (layout) {
+    case "a4-4": return { gridClass: "grid grid-cols-2 gap-4",  cardClass: "h-[13.5cm]", perPage: 4, pageSize: "A4" };
+    case "a4-2": return { gridClass: "grid grid-cols-1 gap-6",  cardClass: "h-[19cm]",   perPage: 2, pageSize: "A4" };
+    case "a4-1": return { gridClass: "grid grid-cols-1",         cardClass: "h-[26cm]",   perPage: 1, pageSize: "A4" };
+    case "a4-6": return { gridClass: "grid grid-cols-3 gap-3",  cardClass: "h-[9cm]",    perPage: 6, pageSize: "A4" };
+    case "a6":   return { gridClass: "grid grid-cols-1",         cardClass: "h-[14cm] w-[10cm] mx-auto", perPage: 1, pageSize: "A6" };
+  }
+}
+
+// --- QR Code Generator ---
+async function generateQRCode(shortId: string, eventId: string, subdomain: string): Promise<string> {
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+  const protocol = process.env.NEXT_PUBLIC_PROTOCOL || "https://";
+  const isLocal = process.env.NODE_ENV === "development";
+  
+  // Montagem dinâmica e correta do subdomínio
+  const fullDomain = isLocal 
+    ? `${subdomain}.localhost:3000` 
+    : `${subdomain}.${rootDomain}`;
+
+  const verifyUrl = `${protocol}${fullDomain}/verify?event=${eventId}&id=${shortId}`;
+
+  return await QRCode.toDataURL(verifyUrl, {
+    width: 140,
+    margin: 1,
+    color: { dark: "#000000", light: "#ffffff" },
+  });
+}
+
+// --- Componentes ---
+function SponsorBar({ sponsors }: { sponsors: SponsorItem[] }) {
+  if (sponsors.length === 0) {
+    return (
+      <div className="mt-3 pt-2 border-t border-slate-300 text-center">
+        <p className="text-[7px] uppercase tracking-widest text-slate-500">Apoio Cultural</p>
+        <span className="text-[8px] text-slate-400 italic">Espaço para Patrocinador</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 pt-2 border-t border-slate-300 shrink-0">
+      <p className="text-[7px] uppercase tracking-widest text-center text-slate-500 mb-1 font-bold">
+        Apoio Cultural
+      </p>
+      <div className="flex justify-center items-center gap-3 h-6 overflow-hidden">
+        {sponsors.map((s) => (
+          <div key={s.id} className="flex-shrink-0">
+            {s.logoUrl ? (
+              <img src={s.logoUrl} className="h-5 object-contain grayscale" alt={s.name} />
+            ) : (
+              <span className="text-[8px] font-bold uppercase">{s.name}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QRCodeSection({ qrCodeDataUrl, shortId }: { qrCodeDataUrl: string; shortId: string }) {
+  return (
+    <div className="absolute top-2 right-2 flex flex-col items-end">
+      <img src={qrCodeDataUrl} alt="QR Code" className="w-16 h-16 border border-black bg-white p-0.5" />
+      <span className="text-[7px] font-mono text-black mt-0.5">{shortId}</span>
+    </div>
+  );
+}
+
+// --- Página Principal ---
+interface PrintPageProps {
+  params: Promise<{ subdomain: string }>;
+  searchParams: Promise<{ eventId?: string; layout?: string }>;
+}
+
+export default async function PrintView({ params, searchParams }: PrintPageProps) {
+  const { subdomain } = await params;
+  const { eventId, layout: rawLayout = "a4-4" } = await searchParams;
+
+  if (!eventId) notFound();
+
+  const layout: Layout = VALID_LAYOUTS.includes(rawLayout as Layout) ? (rawLayout as Layout) : "a4-4";
+
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenant: { subdomain } },
+    include: {
+      tenant: true,
+      cards: { orderBy: { shortId: "asc" } },
+      sponsors: true,
+    },
+  });
+
+  if (!event || event.cards.length === 0) {
+    return <div className="p-10 text-center text-red-500">Nenhuma cartela encontrada.</div>;
+  }
+
+  const { gridClass, cardClass, perPage, pageSize } = getLayoutConfig(layout);
+  const pages = chunk(event.cards, perPage);
+
+  // Gera QR Codes para todas as cartelas
+  const cardsWithQR = await Promise.all(
+    event.cards.map(async (card) => ({
+      ...card,
+      qrCode: await generateQRCode(card.shortId, eventId, subdomain),
+    }))
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-200 print:bg-white text-black font-sans">
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          @page { margin: 10mm; size: ${pageSize}; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+      `}} />
+
+      {/* Barra de Controle */}
+      <div className="print:hidden sticky top-0 bg-slate-900 text-white p-4 shadow-xl z-50 flex justify-between items-center">
+        <div>
+          <h1 className="font-bold">Impressão: {LAYOUT_LABELS[layout]}</h1>
+          <p className="text-xs text-slate-400">
+            {event.cards.length} cartelas • {pages.length} página{pages.length > 1 ? "s" : ""}
+          </p>
+        </div>
+        <PrintButton />
+      </div>
+
+      <div className="p-4 md:p-8 print:p-0">
+        {pages.map((pageCards, pageIndex) => (
+          <div
+            key={pageIndex}
+            className={`${gridClass} ${pageIndex < pages.length - 1 ? "break-after-page" : ""}`}
+          >
+            {pageCards.map((card) => {
+              const cardWithQR = cardsWithQR.find(c => c.id === card.id)!;
+
+              return (
+                <div
+                  key={card.id}
+                  className={`relative border-2 border-dashed border-slate-300 print:border-black p-4 bg-white flex flex-col ${cardClass}`}
+                >
+                  {/* QR Code no canto superior direito */}
+                  <QRCodeSection qrCodeDataUrl={cardWithQR.qrCode} shortId={card.shortId} />
+
+                  {/* Cabeçalho */}
+                  <div className="flex justify-between items-start border-b-2 border-black pb-2 mb-3">
+                    <div>
+                      <h2 className="text-lg font-black uppercase tracking-tight leading-none">
+                        {event.name}
+                      </h2>
+                      <p className="text-[9px] text-slate-600 font-bold tracking-widest mt-1">
+                        ID: {card.shortId}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Grade do Bingo */}
+                  <div className="flex-1 flex flex-col border-2 border-black rounded-lg overflow-hidden">
+                    <div className="grid grid-cols-5 bg-black text-white text-center font-black text-xl py-1">
+                      {["B", "I", "N", "G", "O"].map((l) => <div key={l}>{l}</div>)}
+                    </div>
+
+                    <div className="flex-1 grid grid-cols-5 grid-rows-5 text-2xl font-black">
+                      {([0,1,2,3,4] as const).map((row) =>
+                        (["B","I","N","G","O"] as const).map((letter) => {
+                          const isCenter = letter === "N" && row === 2;
+                          const number = isCenter ? null : (card.matrix as any)[letter][row];
+
+                          return (
+                            <div
+                              key={`${letter}-${row}`}
+                              className={`border border-black flex items-center justify-center ${isCenter ? "bg-slate-200" : "bg-white"}`}
+                            >
+                              {isCenter ? "★" : number}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Patrocinadores */}
+                  <SponsorBar sponsors={event.sponsors} />
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Helper chunk
+function chunk<T>(arr: T[], size: number): T[][] {
+  return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+    arr.slice(i * size, i * size + size)
   );
 }
 </file>
@@ -7622,167 +7728,6 @@ export default function GenerateCardsButton({
 }
 </file>
 
-<file path="src/lib/auth.ts">
-// src/lib/auth.ts
-import NextAuth, { DefaultSession } from "next-auth";
-import GoogleProvider from "next-auth/providers/google";
-import CredentialsProvider from "next-auth/providers/credentials";
-import bcrypt from "bcryptjs";
-import prisma from "@/lib/prisma";
-import { loginRateLimit } from "@/lib/ratelimit";
-import { headers } from "next/headers";
-
-/**
- * 1. MODULE AUGMENTATION
- * Ampliamos as tipagens nativas do NextAuth para entenderem
- * os nossos campos customizados de Multi-tenant (SaaS).
- */
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id: string;
-      role?: string;
-      tenantId?: string | null;
-      subdomain?: string | null;
-    } & DefaultSession["user"];
-  }
-
-  // 🔥 Adicionado para evitar o uso de "as any" nos callbacks
-  interface User {
-    role?: string;
-    tenantId?: string | null;
-    subdomain?: string | null;
-  }
-}
-
-declare module "next-auth/jwt" {
-  interface JWT {
-    role?: string;
-    tenantId?: string | null;
-    subdomain?: string | null;
-  }
-}
-
-/**
- * 2. CONFIGURAÇÃO DO NEXTAUTH
- */
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  session: { strategy: "jwt" },
-  pages: {
-    signIn: '/entrar',
-  },
-  providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
-    CredentialsProvider({
-      name: "Credenciais",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Senha", type: "password" },
-        impersonateToken: { label: "Token Magico", type: "text" }
-      },
-      async authorize(credentials) {
-        
-        // 🚀 FLUXO 1: ASSISTÊNCIA REMOTA (SUPER ADMIN)
-        if (credentials?.impersonateToken) {
-          const tenant = await prisma.tenant.findFirst({
-            where: { token: credentials.impersonateToken as string }
-          });
-          
-          if (!tenant) throw new Error("Link de assistência expirado ou inválido.");
-
-          // Segurança: Apaga o token na hora para garantir o Uso Único!
-          await prisma.tenant.update({
-            where: { id: tenant.id },
-            data: { token: null }
-          });
-
-          const user = await prisma.user.findFirst({
-            where: { tenantId: tenant.id, role: "ORG_ADMIN" },
-            include: { tenant: true }
-          });
-
-          if (!user) throw new Error("Administrador não encontrado neste cliente.");
-
-          return {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-            tenantId: user.tenantId,
-            subdomain: user.tenant?.subdomain
-          };
-        }
-
-        // 🧑‍💻 FLUXO 2: LOGIN NORMAL (Vendedor, Locutor, Cliente)
-        if (!credentials?.email || !credentials?.password) return null;
-
-        const headersList = headers();
-        const ip = (await headersList).get("x-forwarded-for") || "127.0.0.1";
-
-        if (loginRateLimit.limit) {
-          const { success } = await loginRateLimit.limit(`login_${ip}`);
-          if (!success) {
-            throw new Error("Muitas tentativas. Aguarde 15 minutos.");
-          }
-        }
-
-        const rawIdentifier = credentials.email as string; 
-        const isEmail = rawIdentifier.includes("@");
-        
-        const user = await prisma.user.findFirst({
-          where: { 
-            OR: [
-              { email: isEmail ? rawIdentifier.toLowerCase() : undefined },
-              { username: !isEmail ? rawIdentifier.toUpperCase() : undefined }
-            ]
-          },
-          include: { tenant: true } 
-        });
-
-        if (!user || !user.password) return null;
-
-        const isValid = await bcrypt.compare(credentials.password as string, user.password);
-        if (!isValid) return null;
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          tenantId: user.tenantId,
-          subdomain: user.tenant?.subdomain
-        };
-      }
-    })
-  ],
-  // ⚙️ FLUXO 3: CALLBACKS (Transfere dados do User -> JWT -> Session)
-  callbacks: {
-    async jwt({ token, user }) {
-      // O objeto 'user' só está disponível na primeira vez que o usuário faz login
-      if (user) {
-        token.role      = user.role;
-        token.tenantId  = user.tenantId ?? null;
-        token.subdomain = user.subdomain ?? null;
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      // Passa os dados do token (criptografado nos cookies) para a sessão exposta no client/server
-      if (token && session.user) {
-        session.user.id        = token.sub!;
-        session.user.role      = token.role as string;
-        session.user.tenantId  = token.tenantId as string | null;
-        session.user.subdomain = token.subdomain as string | null;
-      }
-      return session;
-    },
-  },
-});
-</file>
-
 <file path="src/app/[subdomain]/dashboard/[eventId]/SponsorManager.tsx">
 // src/app/[subdomain]/dashboard/[eventId]/SponsorManager.tsx
 "use client";
@@ -8000,6 +7945,52 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+</file>
+
+<file path="src/lib/auth.ts">
+// src/lib/auth.ts
+import NextAuth from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  providers: [
+    // ... seus provedores atuais
+  ],
+  // 🔥 A MÁGICA ACONTECE AQUI: Configuração de Cookies Cross-Domain
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === "production" 
+        ? "__Secure-authjs.session-token" 
+        : "authjs.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        // O ponto inicial é VITAL: permite que o cookie seja lido em TODOS os subdomínios
+        domain: process.env.NODE_ENV === "production" ? ".acaoleve.dev.br" : "localhost",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+  },
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.role = user.role;
+        // 👇 Garanta que seu banco de dados retorna o subdomain do usuário no momento do login
+        token.subdomain = user.subdomain; 
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.role = token.role as string;
+        session.user.subdomain = token.subdomain as string; // Passa para a sessão front-end
+      }
+      return session;
+    },
+  },
+  // ... resto das suas configurações (pages, secret, etc)
+});
 </file>
 
 <file path="src/app/[subdomain]/entrar/page.tsx">
@@ -8554,320 +8545,6 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
 }
 </file>
 
-<file path="src/app/admin/AdminClient.tsx">
-// src/app/admin/AdminClient.tsx
-"use client";
-
-import { useEffect, useState, useTransition } from "react";
-import Link from "next/link"; // 🔥 Adicionado o import do Link
-import { 
-  getGodModeStats, 
-  getTenantsList, 
-  toggleTenantSuspension, 
-  createTenantExpress,
-  resetTenantAdminPassword,
-  getImpersonationToken
-} from "@/actions/admin";
-import { 
-  Building, Users, Ticket, BadgeDollarSign, Target, 
-  RefreshCcw, Power, Plus, ShieldCheck, ExternalLink, X, CalendarDays,
-  Key, Copy, Eye, AlertOctagon // 🔥 Adicionado o AlertOctagon
-} from "lucide-react";
-import { Session } from "next-auth";
-
-export default function AdminClient({ session }: { session: Session }) {
-  const [stats, setStats] = useState<any>(null);
-  const [tenants, setTenants] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isPending, startTransition] = useTransition();
-
-  // Estado do Modal de Onboarding Expandido com Planos
-  const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ 
-    name: "", subdomain: "", adminName: "", adminEmail: "", adminPass: "",
-    planType: "SINGLE_EVENT" as "SINGLE_EVENT" | "ANNUAL", eventDate: "" 
-  });
-
-  // Estado do Modal de Nova Senha Gerada
-  const [passwordModal, setPasswordModal] = useState<{name: string, email: string, pass: string} | null>(null);
-
-  const loadData = () => {
-    setLoading(true);
-    Promise.all([getGodModeStats(), getTenantsList()])
-      .then(([statsData, tenantsData]) => {
-        setStats(statsData);
-        setTenants(tenantsData);
-        setLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const handleToggle = (id: string, currentStatus: boolean) => {
-    if (!confirm(currentStatus ? "Suspender este cliente?" : "Reativar este cliente?")) return;
-    startTransition(async () => {
-      await toggleTenantSuspension(id, currentStatus);
-      loadData();
-    });
-  };
-
-  // Dispara a redefinição de senha
-  const handleResetPassword = (tenantId: string, tenantName: string) => {
-    if (!confirm(`Gerar nova palavra-passe para o administrador de ${tenantName}?`)) return;
-
-    startTransition(async () => {
-      const res = await resetTenantAdminPassword(tenantId);
-      if (res.success && res.newPassword) {
-        setPasswordModal({
-          name: tenantName,
-          email: res.email!,
-          pass: res.newPassword
-        });
-      } else {
-        alert((res as any).error || "Erro ao resetar senha.");
-      }
-    });
-  };
-
-  const handleImpersonate = (tenantId: string) => {
-    startTransition(async () => {
-      const res = await getImpersonationToken(tenantId);
-      if (res.success) {
-        // Lida inteligentemente com ambiente local (localhost) ou produção (acaoleve.dev.br)
-        const isLocal = window.location.hostname.includes("localhost") || window.location.hostname.includes("192.168");
-        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.acaoleve.dev.br`;
-        const protocol = isLocal ? "http://" : "https://";
-        
-        // Abre uma nova aba no navegador já logado no cliente!
-        window.open(`${protocol}${domain}/entrar/magico?t=${res.token}`, "_blank");
-      } else {
-        alert((res as any).error || "Erro ao gerar token.");
-      }
-    });
-  };
-
-  const handleCreateTenant = async (e: React.FormEvent) => {
-    e.preventDefault();
-    startTransition(async () => {
-      const res = await createTenantExpress(formData);
-      if (res.success) {
-        setShowModal(false);
-        loadData();
-        setFormData({ name: "", subdomain: "", adminName: "", adminEmail: "", adminPass: "", planType: "SINGLE_EVENT", eventDate: "" });
-      } else {
-        alert((res as any).error || "Erro ao criar cliente.");
-      }
-    });
-  };
-
-  if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Carregando Hub...</div>;
-
-  return (
-    <div className="min-h-screen bg-slate-900 p-8 font-sans text-slate-200">
-      <div className="max-w-7xl mx-auto">
-        
-        {/* HEADER */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-black text-white">Ação Leve <span className="text-emerald-500">Hub</span></h1>
-            <p className="text-slate-400">Visão Global e Administração (God Mode)</p>
-          </div>
-          <div className="flex gap-4">
-            
-            {/* 🔥 NOVO: BOTÃO DA DANGER ZONE */}
-            <Link 
-              href="/admin/danger" 
-              className="flex items-center gap-2 bg-red-900/20 hover:bg-red-800 text-red-400 hover:text-white border border-red-900/50 px-4 py-2 rounded-xl transition font-bold shadow-[0_0_15px_rgba(220,38,38,0.15)] hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
-            >
-              <AlertOctagon size={18} /> Danger Zone
-            </Link>
-
-            <button onClick={loadData} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl transition">
-              <RefreshCcw size={18} /> Atualizar
-            </button>
-            <button onClick={() => setShowModal(true)} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl font-bold transition shadow-lg shadow-emerald-900/20">
-              <Plus size={18} /> Novo Cliente
-            </button>
-          </div>
-        </div>
-
-        {/* STATS GLOBAIS */}
-        {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <StatCard icon={<Building />} label="Total Inquilinos" value={stats.tenants} color="blue" />
-            <StatCard icon={<BadgeDollarSign />} label="Faturamento (GMV)" value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((stats.totalGMV || 0) / 100)} color="emerald" highlight />
-            <StatCard icon={<Ticket />} label="Eventos Criados" value={stats.events} color="purple" />
-            <StatCard icon={<Users />} label="Voluntários/PDVs" value={stats.roles.verifiers} color="amber" />
-          </div>
-        )}
-
-        {/* LISTAGEM DE CLIENTES */}
-        <div className="bg-slate-800/50 border border-slate-700 rounded-3xl overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-widest text-[10px] font-bold">
-              <tr>
-                <th className="p-5">Inquilino</th>
-                <th className="p-5">Subdomínio</th>
-                <th className="p-5">Plano / Expiração</th>
-                <th className="p-5">Status</th>
-                <th className="p-5 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700/50">
-              {tenants.map(tenant => (
-                <tr key={tenant.id} className="hover:bg-slate-800/80 transition group">
-                  <td className="p-5">
-                    <p className="font-bold text-white text-base">{tenant.name}</p>
-                    <p className="text-xs text-slate-500">Criado em {new Date(tenant.createdAt).toLocaleDateString()}</p>
-                  </td>
-                  <td className="p-5 font-mono text-emerald-400">
-                    <a href={`https://${tenant.subdomain}.acaoleve.dev.br`} target="_blank" className="hover:underline flex items-center gap-1">
-                      {tenant.subdomain} <ExternalLink size={12} />
-                    </a>
-                  </td>
-                  <td className="p-5">
-                    <span className="bg-slate-900 text-slate-300 px-2 py-1 rounded text-xs font-bold mr-2">
-                      {tenant.planType === "ANNUAL" ? "ANUAL" : "EVENTO ÚNICO"}
-                    </span>
-                    <p className="text-xs text-slate-400 mt-1">
-                      {tenant.expiresAt ? `Expira: ${new Date(tenant.expiresAt).toLocaleDateString()}` : 'Vitalício'}
-                    </p>
-                  </td>
-                  <td className="p-5">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${tenant.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                      {tenant.active ? "ATIVO" : "SUSPENSO"}
-                    </span>
-                  </td>
-                  <td className="p-5 text-right space-x-2">
-                    <button 
-                      onClick={() => handleImpersonate(tenant.id)}
-                      className="p-2 bg-slate-700 hover:bg-emerald-600 text-slate-300 hover:text-white rounded-lg transition tooltip"
-                      title="Entrar no Painel do Cliente"
-                    >
-                      <Eye size={16} />
-                    </button>
-                    <button 
-                      onClick={() => handleResetPassword(tenant.id, tenant.name)}
-                      className="p-2 bg-slate-700 hover:bg-blue-600 text-slate-300 hover:text-white rounded-lg transition tooltip"
-                      title="Resetar Senha do Administrador"
-                    >
-                      <Key size={16} />
-                    </button>
-                    <button 
-                      onClick={() => handleToggle(tenant.id, tenant.active)}
-                      className={`p-2 rounded-lg transition ${tenant.active ? 'bg-slate-700 hover:bg-red-600 text-slate-300 hover:text-white' : 'bg-red-600 text-white hover:bg-emerald-600'}`}
-                      title={tenant.active ? "Suspender Cliente" : "Reativar Cliente"}
-                    >
-                      <Power size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* MODAL DE ONBOARDING */}
-        {showModal && (
-           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-             <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-lg w-full relative">
-               <button onClick={() => setShowModal(false)} title="Fechar" aria-label="Fechar modal" className="absolute top-4 right-4 text-slate-500 hover:text-white"><X size={24} /></button>
-               <h3 className="text-xl font-black text-white mb-4">Novo Cliente (Tenant)</h3>
-               
-               <form onSubmit={handleCreateTenant} className="space-y-4">
-                 <input placeholder="Nome da Igreja/ONG" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 <input placeholder="Subdomínio (ex: paroquiasaojose)" value={formData.subdomain} onChange={e => setFormData({...formData, subdomain: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 
-                 <div className="grid grid-cols-2 gap-4">
-                   <select value={formData.planType} onChange={e => setFormData({...formData, planType: e.target.value as any})} title="Tipo de Plano" className="w-full p-3 bg-slate-800 text-white rounded-xl">
-                     <option value="SINGLE_EVENT">Evento Único</option>
-                     <option value="ANNUAL">Plano Anual</option>
-                   </select>
-                   <input type="date" placeholder="Data do Evento" value={formData.eventDate} onChange={e => setFormData({...formData, eventDate: e.target.value})} required={formData.planType === 'SINGLE_EVENT'} className="w-full p-3 bg-slate-800 text-slate-400 rounded-xl" />
-                 </div>
-
-                 <input placeholder="Nome do Admin" value={formData.adminName} onChange={e => setFormData({...formData, adminName: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 <input type="email" placeholder="E-mail do Admin" value={formData.adminEmail} onChange={e => setFormData({...formData, adminEmail: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 <input placeholder="Senha Inicial" value={formData.adminPass} onChange={e => setFormData({...formData, adminPass: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 
-                 <button type="submit" disabled={isPending} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl disabled:opacity-50">
-                   {isPending ? "Criando..." : "Provisionar Ambiente"}
-                 </button>
-               </form>
-             </div>
-           </div>
-        )}
-
-        {/* MODAL DE SENHA RESETADA */}
-        {passwordModal && (
-          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-8 max-w-sm w-full shadow-2xl relative flex flex-col items-center text-center">
-              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-6 border-8 border-white shadow-sm">
-                <ShieldCheck size={32} />
-              </div>
-              
-              <h3 className="text-2xl font-black text-slate-900 mb-2">Acesso Recuperado!</h3>
-              <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-                A palavra-passe do administrador principal de <strong className="text-slate-800">{passwordModal.name}</strong> foi redefinida.
-              </p>
-
-              <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 mb-8 relative group">
-                <div className="flex flex-col gap-4">
-                  <div className="flex justify-between items-center border-b border-slate-200 pb-4">
-                    <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">E-mail (Login)</span>
-                    <span className="text-sm font-black text-indigo-600">{passwordModal.email}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-1">
-                    <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Nova Senha</span>
-                    <span className="text-xl font-black text-slate-900 tracking-widest">{passwordModal.pass}</span>
-                  </div>
-                </div>
-
-                <button 
-                  onClick={() => {
-                    const text = `*Recuperação de Acesso - Ação Leve*\n\nOlá, a sua palavra-passe foi redefinida pela Administração.\n\n*E-mail:* ${passwordModal.email}\n*Nova Senha:* ${passwordModal.pass}\n\nRecomendamos alterar esta senha no painel após o login.`;
-                    navigator.clipboard.writeText(text);
-                    alert("Copiado para a área de transferência!");
-                  }}
-                  className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 hover:bg-slate-800 text-white text-xs px-5 py-2.5 rounded-full flex items-center gap-2 font-bold shadow-lg transition-transform hover:scale-105"
-                >
-                  <Copy size={14} /> Copiar Dados
-                </button>
-              </div>
-              <button onClick={() => setPasswordModal(null)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-4 rounded-xl transition-colors">
-                Fechar e Concluir
-              </button>
-            </div>
-          </div>
-        )}
-
-      </div>
-    </div>
-  );
-}
-
-// Seu componente original de StatCard continua igual
-function StatCard({ icon, label, value, color, highlight = false }: any) {
-  const colors: any = {
-    emerald: "text-emerald-400 bg-emerald-900/20 border-emerald-900/30",
-    blue: "text-blue-400 bg-blue-900/20 border-blue-900/30",
-    amber: "text-amber-400 bg-amber-900/20 border-amber-900/30",
-    purple: "text-purple-400 bg-purple-900/20 border-purple-900/30",
-  };
-  return (
-    <div className={`p-6 rounded-3xl border flex items-center gap-4 ${colors[color]}`}>
-      <div className="p-3 rounded-2xl bg-black/20">{icon}</div>
-      <div>
-        <p className="text-xs uppercase tracking-widest font-bold opacity-70 mb-1">{label}</p>
-        <p className="text-2xl font-black">{value}</p>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="src/app/[subdomain]/live/BingoGame.tsx">
 // src/app/[subdomain]/live/BingoGame.tsx
 "use client";
@@ -9189,6 +8866,320 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/admin/AdminClient.tsx">
+// src/app/admin/AdminClient.tsx
+"use client";
+
+import { useEffect, useState, useTransition } from "react";
+import Link from "next/link"; // 🔥 Adicionado o import do Link
+import { 
+  getGodModeStats, 
+  getTenantsList, 
+  toggleTenantSuspension, 
+  createTenantExpress,
+  resetTenantAdminPassword,
+  getImpersonationToken
+} from "@/actions/admin";
+import { 
+  Building, Users, Ticket, BadgeDollarSign, Target, 
+  RefreshCcw, Power, Plus, ShieldCheck, ExternalLink, X, CalendarDays,
+  Key, Copy, Eye, AlertOctagon // 🔥 Adicionado o AlertOctagon
+} from "lucide-react";
+import { Session } from "next-auth";
+
+export default function AdminClient({ session }: { session: Session }) {
+  const [stats, setStats] = useState<any>(null);
+  const [tenants, setTenants] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isPending, startTransition] = useTransition();
+
+  // Estado do Modal de Onboarding Expandido com Planos
+  const [showModal, setShowModal] = useState(false);
+  const [formData, setFormData] = useState({ 
+    name: "", subdomain: "", adminName: "", adminEmail: "", adminPass: "",
+    planType: "SINGLE_EVENT" as "SINGLE_EVENT" | "ANNUAL", eventDate: "" 
+  });
+
+  // Estado do Modal de Nova Senha Gerada
+  const [passwordModal, setPasswordModal] = useState<{name: string, email: string, pass: string} | null>(null);
+
+  const loadData = () => {
+    setLoading(true);
+    Promise.all([getGodModeStats(), getTenantsList()])
+      .then(([statsData, tenantsData]) => {
+        setStats(statsData);
+        setTenants(tenantsData);
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const handleToggle = (id: string, currentStatus: boolean) => {
+    if (!confirm(currentStatus ? "Suspender este cliente?" : "Reativar este cliente?")) return;
+    startTransition(async () => {
+      await toggleTenantSuspension(id, currentStatus);
+      loadData();
+    });
+  };
+
+  // Dispara a redefinição de senha
+  const handleResetPassword = (tenantId: string, tenantName: string) => {
+    if (!confirm(`Gerar nova palavra-passe para o administrador de ${tenantName}?`)) return;
+
+    startTransition(async () => {
+      const res = await resetTenantAdminPassword(tenantId);
+      if (res.success && res.newPassword) {
+        setPasswordModal({
+          name: tenantName,
+          email: res.email!,
+          pass: res.newPassword
+        });
+      } else {
+        alert((res as any).error || "Erro ao resetar senha.");
+      }
+    });
+  };
+
+  const handleImpersonate = (tenantId: string) => {
+    startTransition(async () => {
+      const res = await getImpersonationToken(tenantId);
+      if (res.success) {
+        // Lida inteligentemente com ambiente local (localhost) ou produção (acaoleve.dev.br)
+        const isLocal = window.location.hostname.includes("localhost") || window.location.hostname.includes("192.168");
+        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.acaoleve.dev.br`;
+        const protocol = isLocal ? "http://" : "https://";
+        
+        // Abre uma nova aba no navegador já logado no cliente!
+        window.open(`${protocol}${domain}/entrar/magico?t=${res.token}`, "_blank");
+      } else {
+        alert((res as any).error || "Erro ao gerar token.");
+      }
+    });
+  };
+
+  const handleCreateTenant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    startTransition(async () => {
+      const res = await createTenantExpress(formData);
+      if (res.success) {
+        setShowModal(false);
+        loadData();
+        setFormData({ name: "", subdomain: "", adminName: "", adminEmail: "", adminPass: "", planType: "SINGLE_EVENT", eventDate: "" });
+      } else {
+        alert((res as any).error || "Erro ao criar cliente.");
+      }
+    });
+  };
+
+  if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Carregando Hub...</div>;
+
+  return (
+    <div className="min-h-screen bg-slate-900 p-8 font-sans text-slate-200">
+      <div className="max-w-7xl mx-auto">
+        
+        {/* HEADER */}
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-3xl font-black text-white">Ação Leve <span className="text-emerald-500">Hub</span></h1>
+            <p className="text-slate-400">Visão Global e Administração (God Mode)</p>
+          </div>
+          <div className="flex gap-4">
+            
+            {/* 🔥 NOVO: BOTÃO DA DANGER ZONE */}
+            <Link 
+              href="/admin/danger" 
+              className="flex items-center gap-2 bg-red-900/20 hover:bg-red-800 text-red-400 hover:text-white border border-red-900/50 px-4 py-2 rounded-xl transition font-bold shadow-[0_0_15px_rgba(220,38,38,0.15)] hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
+            >
+              <AlertOctagon size={18} /> Danger Zone
+            </Link>
+
+            <button onClick={loadData} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl transition">
+              <RefreshCcw size={18} /> Atualizar
+            </button>
+            <button onClick={() => setShowModal(true)} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl font-bold transition shadow-lg shadow-emerald-900/20">
+              <Plus size={18} /> Novo Cliente
+            </button>
+          </div>
+        </div>
+
+        {/* STATS GLOBAIS */}
+        {stats && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <StatCard icon={<Building />} label="Total Inquilinos" value={stats.tenants} color="blue" />
+            <StatCard icon={<BadgeDollarSign />} label="Faturamento (GMV)" value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((stats.totalGMV || 0) / 100)} color="emerald" highlight />
+            <StatCard icon={<Ticket />} label="Eventos Criados" value={stats.events} color="purple" />
+            <StatCard icon={<Users />} label="Voluntários/PDVs" value={stats.roles.verifiers} color="amber" />
+          </div>
+        )}
+
+        {/* LISTAGEM DE CLIENTES */}
+        <div className="bg-slate-800/50 border border-slate-700 rounded-3xl overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-widest text-[10px] font-bold">
+              <tr>
+                <th className="p-5">Inquilino</th>
+                <th className="p-5">Subdomínio</th>
+                <th className="p-5">Plano / Expiração</th>
+                <th className="p-5">Status</th>
+                <th className="p-5 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700/50">
+              {tenants.map(tenant => (
+                <tr key={tenant.id} className="hover:bg-slate-800/80 transition group">
+                  <td className="p-5">
+                    <p className="font-bold text-white text-base">{tenant.name}</p>
+                    <p className="text-xs text-slate-500">Criado em {new Date(tenant.createdAt).toLocaleDateString()}</p>
+                  </td>
+                  <td className="p-5 font-mono text-emerald-400">
+                    <a href={`https://${tenant.subdomain}.acaoleve.dev.br`} target="_blank" className="hover:underline flex items-center gap-1">
+                      {tenant.subdomain} <ExternalLink size={12} />
+                    </a>
+                  </td>
+                  <td className="p-5">
+                    <span className="bg-slate-900 text-slate-300 px-2 py-1 rounded text-xs font-bold mr-2">
+                      {tenant.planType === "ANNUAL" ? "ANUAL" : "EVENTO ÚNICO"}
+                    </span>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {tenant.expiresAt ? `Expira: ${new Date(tenant.expiresAt).toLocaleDateString()}` : 'Vitalício'}
+                    </p>
+                  </td>
+                  <td className="p-5">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${tenant.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                      {tenant.active ? "ATIVO" : "SUSPENSO"}
+                    </span>
+                  </td>
+                  <td className="p-5 text-right space-x-2">
+                    <button 
+                      onClick={() => handleImpersonate(tenant.id)}
+                      className="p-2 bg-slate-700 hover:bg-emerald-600 text-slate-300 hover:text-white rounded-lg transition tooltip"
+                      title="Entrar no Painel do Cliente"
+                    >
+                      <Eye size={16} />
+                    </button>
+                    <button 
+                      onClick={() => handleResetPassword(tenant.id, tenant.name)}
+                      className="p-2 bg-slate-700 hover:bg-blue-600 text-slate-300 hover:text-white rounded-lg transition tooltip"
+                      title="Resetar Senha do Administrador"
+                    >
+                      <Key size={16} />
+                    </button>
+                    <button 
+                      onClick={() => handleToggle(tenant.id, tenant.active)}
+                      className={`p-2 rounded-lg transition ${tenant.active ? 'bg-slate-700 hover:bg-red-600 text-slate-300 hover:text-white' : 'bg-red-600 text-white hover:bg-emerald-600'}`}
+                      title={tenant.active ? "Suspender Cliente" : "Reativar Cliente"}
+                    >
+                      <Power size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* MODAL DE ONBOARDING */}
+        {showModal && (
+           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+             <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-lg w-full relative">
+               <button onClick={() => setShowModal(false)} title="Fechar" aria-label="Fechar modal" className="absolute top-4 right-4 text-slate-500 hover:text-white"><X size={24} /></button>
+               <h3 className="text-xl font-black text-white mb-4">Novo Cliente (Tenant)</h3>
+               
+               <form onSubmit={handleCreateTenant} className="space-y-4">
+                 <input placeholder="Nome da Igreja/ONG" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
+                 <input placeholder="Subdomínio (ex: paroquiasaojose)" value={formData.subdomain} onChange={e => setFormData({...formData, subdomain: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
+                 
+                 <div className="grid grid-cols-2 gap-4">
+                   <select value={formData.planType} onChange={e => setFormData({...formData, planType: e.target.value as any})} title="Tipo de Plano" className="w-full p-3 bg-slate-800 text-white rounded-xl">
+                     <option value="SINGLE_EVENT">Evento Único</option>
+                     <option value="ANNUAL">Plano Anual</option>
+                   </select>
+                   <input type="date" placeholder="Data do Evento" value={formData.eventDate} onChange={e => setFormData({...formData, eventDate: e.target.value})} required={formData.planType === 'SINGLE_EVENT'} className="w-full p-3 bg-slate-800 text-slate-400 rounded-xl" />
+                 </div>
+
+                 <input placeholder="Nome do Admin" value={formData.adminName} onChange={e => setFormData({...formData, adminName: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
+                 <input type="email" placeholder="E-mail do Admin" value={formData.adminEmail} onChange={e => setFormData({...formData, adminEmail: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
+                 <input placeholder="Senha Inicial" value={formData.adminPass} onChange={e => setFormData({...formData, adminPass: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
+                 
+                 <button type="submit" disabled={isPending} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl disabled:opacity-50">
+                   {isPending ? "Criando..." : "Provisionar Ambiente"}
+                 </button>
+               </form>
+             </div>
+           </div>
+        )}
+
+        {/* MODAL DE SENHA RESETADA */}
+        {passwordModal && (
+          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+            <div className="bg-white border border-slate-200 rounded-[2rem] p-8 max-w-sm w-full shadow-2xl relative flex flex-col items-center text-center">
+              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-6 border-8 border-white shadow-sm">
+                <ShieldCheck size={32} />
+              </div>
+              
+              <h3 className="text-2xl font-black text-slate-900 mb-2">Acesso Recuperado!</h3>
+              <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+                A palavra-passe do administrador principal de <strong className="text-slate-800">{passwordModal.name}</strong> foi redefinida.
+              </p>
+
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 mb-8 relative group">
+                <div className="flex flex-col gap-4">
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-4">
+                    <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">E-mail (Login)</span>
+                    <span className="text-sm font-black text-indigo-600">{passwordModal.email}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Nova Senha</span>
+                    <span className="text-xl font-black text-slate-900 tracking-widest">{passwordModal.pass}</span>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    const text = `*Recuperação de Acesso - Ação Leve*\n\nOlá, a sua palavra-passe foi redefinida pela Administração.\n\n*E-mail:* ${passwordModal.email}\n*Nova Senha:* ${passwordModal.pass}\n\nRecomendamos alterar esta senha no painel após o login.`;
+                    navigator.clipboard.writeText(text);
+                    alert("Copiado para a área de transferência!");
+                  }}
+                  className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 hover:bg-slate-800 text-white text-xs px-5 py-2.5 rounded-full flex items-center gap-2 font-bold shadow-lg transition-transform hover:scale-105"
+                >
+                  <Copy size={14} /> Copiar Dados
+                </button>
+              </div>
+              <button onClick={() => setPasswordModal(null)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-4 rounded-xl transition-colors">
+                Fechar e Concluir
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+// Seu componente original de StatCard continua igual
+function StatCard({ icon, label, value, color, highlight = false }: any) {
+  const colors: any = {
+    emerald: "text-emerald-400 bg-emerald-900/20 border-emerald-900/30",
+    blue: "text-blue-400 bg-blue-900/20 border-blue-900/30",
+    amber: "text-amber-400 bg-amber-900/20 border-amber-900/30",
+    purple: "text-purple-400 bg-purple-900/20 border-purple-900/30",
+  };
+  return (
+    <div className={`p-6 rounded-3xl border flex items-center gap-4 ${colors[color]}`}>
+      <div className="p-3 rounded-2xl bg-black/20">{icon}</div>
+      <div>
+        <p className="text-xs uppercase tracking-widest font-bold opacity-70 mb-1">{label}</p>
+        <p className="text-2xl font-black">{value}</p>
       </div>
     </div>
   );
@@ -10217,156 +10208,107 @@ model AuditLog {
 </file>
 
 <file path="src/proxy.ts">
-// src/middleware.ts
-// ⚠️  RENOMEADO de proxy.ts → middleware.ts
-// Next.js SÓ reconhece o arquivo se ele se chamar exatamente "middleware.ts"
-// na raiz do projeto ou dentro de /src. Qualquer outro nome é silenciosamente ignorado.
-
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth } from "@/lib/auth"; // Ajuste o caminho se necessário
 
 export const config = {
   matcher: [
-    // Pula rotas internas do Next.js, arquivos estáticos e imagens
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg).*)",
+    // Ignora rotas internas, estáticos, imagens e API
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg|.*\\.png|.*\\.jpg).*)",
   ],
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Resolve subdomínio com segurança cirúrgica
-// ─────────────────────────────────────────────────────────────────────────────
-function resolveHost(hostname: string): string {
-  if (!hostname) return "root";
+export default auth((req) => {
+  const url = req.nextUrl;
+  const hostname = req.headers.get("host") || "";
 
-  // Remove a porta (ex: :3000) caso exista
-  const host = hostname.split(":")[0];
+  // 1. Definição do Domínio Principal com base no ambiente
+  const rootDomain =
+    process.env.NODE_ENV === "production"
+      ? process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br" || "seu-evento.social.br"
+      : "localhost:3000";
 
-  if (process.env.NODE_ENV === "production") {
-    const rootDomain =
-      process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+  // 2. Descoberta de Contexto: É o domínio principal ou um subdomínio?
+  let isMainDomain = false;
+  let tenantSubdomain = "";
 
-    if (host === rootDomain || host === `www.${rootDomain}`) return "root";
-
-    // Extrai o subdomínio (ex: seuevento.acaoleve.dev.br → seuevento)
-    if (host.endsWith(`.${rootDomain}`)) {
-      return host.replace(`.${rootDomain}`, "");
-    }
-
-    return host; // Fallback para custom domains futuros
+  if (hostname === rootDomain || hostname === `www.${rootDomain}`) {
+    isMainDomain = true;
+  } else if (hostname.endsWith(`.${rootDomain}`)) {
+    // Extrai "meuevento" de "meuevento.acaoleve.dev.br"
+    tenantSubdomain = hostname.replace(`.${rootDomain}`, "");
+  } else {
+    // Fallback de segurança: trata domínios não reconhecidos como principal
+    isMainDomain = true;
   }
 
-  // Ambiente de Desenvolvimento (Localhost)
-  if (host === "localhost") return "root";
-  if (host.endsWith(".localhost")) return host.replace(".localhost", "");
-  return host;
-}
-
-// Rotas públicas institucionais (Só existem no domínio raiz)
-const rotasPublicasMarketing = ["/termos", "/privacidade"];
-
-// Rotas públicas dos Tenants (Subdomínios)
-const rotasPublicasPorTenant = [
-  "/",
-  "/entrar",
-  "/projector",
-  "/verify",
-  "/cartela",
-];
-
-export default auth((req) => {
-  const { pathname } = req.nextUrl;
-  const currentHost = resolveHost(req.headers.get("host") || "");
-  const session = req.auth;
-  const role = session?.user?.role ?? "";
-  const userSubdomain = session?.user?.subdomain;
-
   // ==========================================
-  // 1. REGRAS DO DOMÍNIO PRINCIPAL (root)
+  // FLUXO A: DOMÍNIO PRINCIPAL (acaoleve.dev.br)
   // ==========================================
-  if (currentHost === "root") {
-    // Se for a página inicial do portal ou rotas de marketing
-    if (pathname === "/" || rotasPublicasMarketing.includes(pathname)) {
-      return NextResponse.next();
-    }
-
-    // Regra de Admin Central
-    if (pathname.startsWith("/admin")) {
-      if (!session)
-        return NextResponse.redirect(new URL("/admin/login", req.url));
-      if (role !== "SUPER_ADMIN")
-        return NextResponse.redirect(new URL("/", req.url));
-      return NextResponse.next();
+  if (isMainDomain) {
+    // Aqui está o segredo: NÃO fazemos rewrite. 
+    // Usamos NextResponse.next() para deixar o Next.js rotear nativamente.
+    // Isso fará a rota "/" bater perfeitamente em `app/(marketing)/page.tsx`
+    
+    // (Opcional) Regras exclusivas do portal principal, como Admin:
+    if (url.pathname.startsWith("/admin")) {
+      const session = req.auth;
+      const role = session?.user?.role;
+      
+      if (!session) return NextResponse.redirect(new URL("/admin/login", req.url));
+      if (role !== "SUPER_ADMIN") return NextResponse.redirect(new URL("/", req.url));
     }
 
     return NextResponse.next();
   }
 
   // ==========================================
-  // 2. REGRAS DE SUBDOMÍNIOS (Tenants)
+  // FLUXO B: SUBDOMÍNIOS / TENANTS (*.acaoleve.dev.br)
   // ==========================================
-
-  // Impede que rotas de marketing globais sejam acessadas via tenant
-  if (rotasPublicasMarketing.includes(pathname)) {
-    const rootUrl = new URL(pathname, req.url);
-    rootUrl.host =
-      process.env.NODE_ENV === "production"
-        ? process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br"
-        : "localhost:3000";
-    return NextResponse.redirect(rootUrl);
+  
+  // Impede que as páginas institucionais sejam acessadas pelo subdomínio
+  const marketingRoutes = ["/termos", "/privacidade"];
+  if (marketingRoutes.includes(url.pathname)) {
+    return NextResponse.redirect(new URL(`${url.protocol}//${rootDomain}${url.pathname}`));
   }
 
-  // Permite acesso às rotas públicas do tenant (incluindo a página raiz "/" dele)
-  const isPublicTenantRoute = rotasPublicasPorTenant.some(
-    (route) => pathname === route || pathname.startsWith(route)
+  // Regras de Autenticação do Tenant
+  const session = req.auth;
+  const role = session?.user?.role;
+  const userSubdomain = session?.user?.subdomain;
+
+  const publicTenantRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
+  const isPublicRoute = publicTenantRoutes.some(
+    (route) => url.pathname === route || url.pathname.startsWith(`${route}/`)
   );
 
-  if (isPublicTenantRoute) {
-    if (pathname === "/entrar" && session) {
-      // Redirecionamento inteligente após login
-      if (role === "OPERATOR")
-        return NextResponse.redirect(new URL("/live", req.url));
-      if (role === "VERIFIER")
-        return NextResponse.redirect(new URL("/vendas", req.url));
+  if (isPublicRoute) {
+    // Se logado e acessar /entrar, redireciona pelo cargo
+    if (url.pathname === "/entrar" && session) {
+      if (role === "OPERATOR") return NextResponse.redirect(new URL("/live", req.url));
+      if (role === "VERIFIER") return NextResponse.redirect(new URL("/vendas", req.url));
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
-    // Deixa renderizar normalmente — o rewrite abaixo cuida do roteamento
   } else {
-    // Rotas Protegidas do Tenant (Requer Login)
-    if (!session) {
+    // Rotas protegidas (Dashboard, etc)
+    if (!session) return NextResponse.redirect(new URL("/entrar", req.url));
+
+    // Trava de segurança cruzada
+    if (userSubdomain !== tenantSubdomain && role !== "SUPER_ADMIN") {
       return NextResponse.redirect(new URL("/entrar", req.url));
     }
 
-    // Trava de Tenant: Bloqueia usuário logado tentando acessar evento de outro tenant
-    if (userSubdomain !== currentHost && role !== "SUPER_ADMIN") {
-      return NextResponse.redirect(new URL("/entrar", req.url));
-    }
-
-    // === REGRAS DE AUTORIZAÇÃO POR ROLE ===
-    if (role === "OPERATOR" && !pathname.startsWith("/live")) {
+    if (role === "OPERATOR" && !url.pathname.startsWith("/live")) {
       return NextResponse.redirect(new URL("/live", req.url));
     }
-
-    if (
-      role === "VERIFIER" &&
-      !pathname.startsWith("/vendas") &&
-      !pathname.startsWith("/verify")
-    ) {
+    if (role === "VERIFIER" && !url.pathname.startsWith("/vendas") && !url.pathname.startsWith("/verify")) {
       return NextResponse.redirect(new URL("/vendas", req.url));
     }
   }
 
-  // ==========================================
-  // 3. REESCRITA INTERNA (App Router)
-  // ==========================================
-  const rewriteUrl = req.nextUrl.clone();
-
-  // Mapeia silenciosamente `seuevento.acaoleve.dev.br/cartela`
-  // para `src/app/[subdomain]/cartela/page.tsx`
-  if (!pathname.startsWith(`/${currentHost}`)) {
-    rewriteUrl.pathname = `/${currentHost}${pathname}`;
-  }
-
-  return NextResponse.rewrite(rewriteUrl);
+  // O Rewrite final exclusivo para tenants!
+  // Mapeia `meuevento.seu-evento.../dashboard` para a pasta interna `app/[tenant]/dashboard`
+  return NextResponse.rewrite(new URL(`/${tenantSubdomain}${url.pathname}`, req.url));
 });
 </file>
 
