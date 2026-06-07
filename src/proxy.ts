@@ -15,7 +15,7 @@ export default auth((req) => {
   // 1. Definição do Domínio Principal com base no ambiente
   const rootDomain =
     process.env.NODE_ENV === "production"
-      ? process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br"
+      ? process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br" || "seu-evento.social.br"
       : "localhost:3000";
 
   // 2. Descoberta de Contexto: É o domínio principal ou um subdomínio?
@@ -25,7 +25,7 @@ export default auth((req) => {
   if (hostname === rootDomain || hostname === `www.${rootDomain}`) {
     isMainDomain = true;
   } else if (hostname.endsWith(`.${rootDomain}`)) {
-    // Extrai "meuevento" de "meuevento.seu-evento.social.br"
+    // Extrai "meuevento" de "meuevento.acaoleve.dev.br"
     tenantSubdomain = hostname.replace(`.${rootDomain}`, "");
   } else {
     // Fallback de segurança: trata domínios não reconhecidos como principal
@@ -33,7 +33,7 @@ export default auth((req) => {
   }
 
   // ==========================================
-  // FLUXO A: DOMÍNIO PRINCIPAL (seu-evento.social.br)
+  // FLUXO A: DOMÍNIO PRINCIPAL (acaoleve.dev.br)
   // ==========================================
   if (isMainDomain) {
     // Aqui está o segredo: NÃO fazemos rewrite. 
@@ -53,7 +53,7 @@ export default auth((req) => {
   }
 
   // ==========================================
-  // FLUXO B: SUBDOMÍNIOS / TENANTS (*.seu-evento.social.br)
+  // FLUXO B: SUBDOMÍNIOS / TENANTS (*.acaoleve.dev.br)
   // ==========================================
   
   // Impede que as páginas institucionais sejam acessadas pelo subdomínio

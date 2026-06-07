@@ -1,3 +1,5 @@
+//src/app/api/auth/[...nextauth]/route.ts
+
 import { handlers } from "@/lib/auth";
 
 // Expõe GET e POST para o next-auth funcionar

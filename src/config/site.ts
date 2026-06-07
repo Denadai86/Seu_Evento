@@ -1,7 +1,7 @@
 import link from "next/link";
 
 export const siteConfig = {
-  name: "SeuEvento",
+  name: "Seu-Evento",
 
   urls: {
     home: "/",

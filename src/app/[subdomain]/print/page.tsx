@@ -44,7 +44,7 @@ function getLayoutConfig(layout: Layout) {
 
 // --- QR Code Generator ---
 async function generateQRCode(shortId: string, eventId: string, subdomain: string): Promise<string> {
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br";
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
   const protocol = process.env.NEXT_PUBLIC_PROTOCOL || "https://";
   const isLocal = process.env.NODE_ENV === "development";
   

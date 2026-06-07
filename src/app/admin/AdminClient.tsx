@@ -78,9 +78,9 @@ export default function AdminClient({ session }: { session: Session }) {
     startTransition(async () => {
       const res = await getImpersonationToken(tenantId);
       if (res.success) {
-        // Lida inteligentemente com ambiente local (localhost) ou produção (seu-evento.social.br)
+        // Lida inteligentemente com ambiente local (localhost) ou produção (acaoleve.dev.br)
         const isLocal = window.location.hostname.includes("localhost") || window.location.hostname.includes("192.168");
-        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.seu-evento.social.br`;
+        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.acaoleve.dev.br`;
         const protocol = isLocal ? "http://" : "https://";
         
         // Abre uma nova aba no navegador já logado no cliente!
@@ -166,7 +166,7 @@ export default function AdminClient({ session }: { session: Session }) {
                     <p className="text-xs text-slate-500">Criado em {new Date(tenant.createdAt).toLocaleDateString()}</p>
                   </td>
                   <td className="p-5 font-mono text-emerald-400">
-                    <a href={`https://${tenant.subdomain}.seu-evento.social.br`} target="_blank" className="hover:underline flex items-center gap-1">
+                    <a href={`https://${tenant.subdomain}.acaoleve.dev.br`} target="_blank" className="hover:underline flex items-center gap-1">
                       {tenant.subdomain} <ExternalLink size={12} />
                     </a>
                   </td>

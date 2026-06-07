@@ -4867,7 +4867,7 @@ function getLayoutConfig(layout: Layout) {
 
 // --- QR Code Generator ---
 async function generateQRCode(shortId: string, eventId: string, subdomain: string): Promise<string> {
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br";
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
   const protocol = process.env.NEXT_PUBLIC_PROTOCOL || "https://";
   const isLocal = process.env.NODE_ENV === "development";
   
@@ -8635,9 +8635,9 @@ export default function AdminClient({ session }: { session: Session }) {
     startTransition(async () => {
       const res = await getImpersonationToken(tenantId);
       if (res.success) {
-        // Lida inteligentemente com ambiente local (localhost) ou produção (seu-evento.social.br)
+        // Lida inteligentemente com ambiente local (localhost) ou produção (acaoleve.dev.br)
         const isLocal = window.location.hostname.includes("localhost") || window.location.hostname.includes("192.168");
-        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.seu-evento.social.br`;
+        const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.acaoleve.dev.br`;
         const protocol = isLocal ? "http://" : "https://";
         
         // Abre uma nova aba no navegador já logado no cliente!
@@ -8723,7 +8723,7 @@ export default function AdminClient({ session }: { session: Session }) {
                     <p className="text-xs text-slate-500">Criado em {new Date(tenant.createdAt).toLocaleDateString()}</p>
                   </td>
                   <td className="p-5 font-mono text-emerald-400">
-                    <a href={`https://${tenant.subdomain}.seu-evento.social.br`} target="_blank" className="hover:underline flex items-center gap-1">
+                    <a href={`https://${tenant.subdomain}.acaoleve.dev.br`} target="_blank" className="hover:underline flex items-center gap-1">
                       {tenant.subdomain} <ExternalLink size={12} />
                     </a>
                   </td>
@@ -10243,11 +10243,11 @@ function resolveHost(hostname: string): string {
 
   if (process.env.NODE_ENV === "production") {
     const rootDomain =
-      process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br";
+      process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
 
     if (host === rootDomain || host === `www.${rootDomain}`) return "root";
 
-    // Extrai o subdomínio (ex: seuevento.seu-evento.social.br → seuevento)
+    // Extrai o subdomínio (ex: seuevento.acaoleve.dev.br → seuevento)
     if (host.endsWith(`.${rootDomain}`)) {
       return host.replace(`.${rootDomain}`, "");
     }
@@ -10310,7 +10310,7 @@ export default auth((req) => {
     const rootUrl = new URL(pathname, req.url);
     rootUrl.host =
       process.env.NODE_ENV === "production"
-        ? process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br"
+        ? process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br"
         : "localhost:3000";
     return NextResponse.redirect(rootUrl);
   }
@@ -10360,7 +10360,7 @@ export default auth((req) => {
   // ==========================================
   const rewriteUrl = req.nextUrl.clone();
 
-  // Mapeia silenciosamente `seuevento.seu-evento.social.br/cartela`
+  // Mapeia silenciosamente `seuevento.acaoleve.dev.br/cartela`
   // para `src/app/[subdomain]/cartela/page.tsx`
   if (!pathname.startsWith(`/${currentHost}`)) {
     rewriteUrl.pathname = `/${currentHost}${pathname}`;
