@@ -1,8 +1,4 @@
 // src/middleware.ts
-// ⚠️  RENOMEADO de proxy.ts → middleware.ts
-// Next.js SÓ reconhece o arquivo se ele se chamar exatamente "middleware.ts"
-// na raiz do projeto ou dentro de /src. Qualquer outro nome é silenciosamente ignorado.
-
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
@@ -19,13 +15,14 @@ export const config = {
 function resolveHost(hostname: string): string {
   if (!hostname) return "root";
 
-  // Remove a porta (ex: :3000) caso exista
+  // Remove a porta (ex: :3000) caso exista no localhost
   const host = hostname.split(":")[0];
 
   if (process.env.NODE_ENV === "production") {
     const rootDomain =
       process.env.NEXT_PUBLIC_ROOT_DOMAIN || "seu-evento.social.br";
 
+    // Domínio principal
     if (host === rootDomain || host === `www.${rootDomain}`) return "root";
 
     // Extrai o subdomínio (ex: seuevento.seu-evento.social.br → seuevento)
@@ -56,7 +53,11 @@ const rotasPublicasPorTenant = [
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
-  const currentHost = resolveHost(req.headers.get("host") || "");
+  const hostHeader = req.headers.get("host") || "";
+  
+  // Aqui descobrimos se é "root" ou o nome do subdomínio (ex: "seuevento")
+  const tenantOrRoot = resolveHost(hostHeader);
+  
   const session = req.auth;
   const role = session?.user?.role ?? "";
   const userSubdomain = session?.user?.subdomain;
@@ -64,27 +65,27 @@ export default auth((req) => {
   // ==========================================
   // 1. REGRAS DO DOMÍNIO PRINCIPAL (root)
   // ==========================================
-  if (currentHost === "root") {
-    // Se for a página inicial do portal ou rotas de marketing
-    if (pathname === "/" || rotasPublicasMarketing.includes(pathname)) {
-      return NextResponse.next();
-    }
-
+  if (tenantOrRoot === "root") {
     // Regra de Admin Central
     if (pathname.startsWith("/admin")) {
-      if (!session)
+      if (!session) {
         return NextResponse.redirect(new URL("/admin/login", req.url));
-      if (role !== "SUPER_ADMIN")
+      }
+      if (role !== "SUPER_ADMIN") {
         return NextResponse.redirect(new URL("/", req.url));
+      }
       return NextResponse.next();
     }
 
+    // Se for a página inicial ("/") ou marketing, o Next.js roteia naturalmente 
+    // para as pastas app/(marketing) ou similares.
     return NextResponse.next();
   }
 
   // ==========================================
   // 2. REGRAS DE SUBDOMÍNIOS (Tenants)
   // ==========================================
+  const tenant = tenantOrRoot; // Renomeado por clareza semântica nesta etapa
 
   // Impede que rotas de marketing globais sejam acessadas via tenant
   if (rotasPublicasMarketing.includes(pathname)) {
@@ -96,21 +97,19 @@ export default auth((req) => {
     return NextResponse.redirect(rootUrl);
   }
 
-  // Permite acesso às rotas públicas do tenant (incluindo a página raiz "/" dele)
+  // Permite acesso às rotas públicas do tenant
   const isPublicTenantRoute = rotasPublicasPorTenant.some(
-    (route) => pathname === route || pathname.startsWith(route)
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
 
   if (isPublicTenantRoute) {
     if (pathname === "/entrar" && session) {
       // Redirecionamento inteligente após login
-      if (role === "OPERATOR")
-        return NextResponse.redirect(new URL("/live", req.url));
-      if (role === "VERIFIER")
-        return NextResponse.redirect(new URL("/vendas", req.url));
+      if (role === "OPERATOR") return NextResponse.redirect(new URL("/live", req.url));
+      if (role === "VERIFIER") return NextResponse.redirect(new URL("/vendas", req.url));
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
-    // Deixa renderizar normalmente — o rewrite abaixo cuida do roteamento
+    // Se for rota pública e o usuário não estiver tentando ir pro /entrar logado, continua.
   } else {
     // Rotas Protegidas do Tenant (Requer Login)
     if (!session) {
@@ -118,7 +117,7 @@ export default auth((req) => {
     }
 
     // Trava de Tenant: Bloqueia usuário logado tentando acessar evento de outro tenant
-    if (userSubdomain !== currentHost && role !== "SUPER_ADMIN") {
+    if (userSubdomain !== tenant && role !== "SUPER_ADMIN") {
       return NextResponse.redirect(new URL("/entrar", req.url));
     }
 
@@ -139,13 +138,10 @@ export default auth((req) => {
   // ==========================================
   // 3. REESCRITA INTERNA (App Router)
   // ==========================================
+  // O código só chega aqui se for um subdomínio válido e o usuário tiver permissão.
+  // Mapeia silenciosamente: seuevento.seu-evento.social.br/dashboard -> /seuevento/dashboard
   const rewriteUrl = req.nextUrl.clone();
-
-  // Mapeia silenciosamente `seuevento.seu-evento.social.br/cartela`
-  // para `src/app/[subdomain]/cartela/page.tsx`
-  if (!pathname.startsWith(`/${currentHost}`)) {
-    rewriteUrl.pathname = `/${currentHost}${pathname}`;
-  }
-
+  rewriteUrl.pathname = `/${tenant}${pathname}`;
+  
   return NextResponse.rewrite(rewriteUrl);
 });
