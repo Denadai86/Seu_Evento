@@ -3,6 +3,7 @@
 
 import { useState, useTransition, useMemo, useEffect } from "react";
 import useSWR from "swr";
+import { signOut } from "next-auth/react"; // 🔥 Importação do Client-side Logout
 import { 
   drawNextNumber, 
   resetGame, 
@@ -10,10 +11,9 @@ import {
   toggleBoardVisibility, 
   getEventCards, 
   toggleBingoCelebration,
-  completeCurrentPrizeAndNext // 🔥 Nova ação importada
+  completeCurrentPrizeAndNext 
 } from "@/actions/bingo";
-import LogoutButton from "@/components/LogoutButton";
-import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy, Send } from "lucide-react";
+import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy, LogOut } from "lucide-react";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -37,6 +37,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
   const [isPending, startTransition] = useTransition();
   const [spinning, setSpinning] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false); // 🔥 Estado para o botão de sair
   const [displayNumber, setDisplayNumber] = useState<number | null>(initialDrawn[initialDrawn.length - 1] || null);
 
   const [auditCode, setAuditCode] = useState("");
@@ -49,9 +50,8 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
     getEventCards(eventId).then(res => setCards(res.cards)).catch(console.error);
   }, [eventId]);
 
-  // Polling via API blindada contra cache
   const { data, mutate } = useSWR(`/api/bingo/state?eventId=${eventId}`, fetcher, {
-    refreshInterval: 1500, // Diminuído para 1.5s para maior agilidade
+    refreshInterval: 1500, 
   });
 
   const drawnNumbers: number[] = data?.drawnNumbers || [];
@@ -131,6 +131,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
   };
 
   const handleCopyLink = () => {
+    // 🔥 Atualizado para utilizar o novo domínio da aplicação em produção de forma dinâmica
     navigator.clipboard.writeText(`${window.location.origin}/projector?event=${eventId}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -159,11 +160,31 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
         <div className="flex flex-wrap items-center justify-center gap-4 xl:gap-6 bg-black/40 px-6 py-3 rounded-2xl border border-emerald-900/50 shadow-xl backdrop-blur-sm">
           <div className="flex gap-4">{sponsors.slice(0, 3).map((s) => s.logoUrl ? <img key={s.id} src={s.logoUrl} className="h-8 opacity-80 object-contain" alt={s.name} /> : null)}</div>
           <div className="hidden sm:block h-6 w-px bg-emerald-900/50"></div>
-          <button onClick={() => window.open(`/projector?event=${eventId}`, 'Telao_Bingo', 'width=1280,height=720,toolbar=no,location=no,status=no,menubar=no,scrollbars=no')} className="flex items-center gap-2 text-sm font-bold text-emerald-200/70 hover:text-[#fef08a] transition-colors"><MonitorPlay size={18} /> <span className="hidden sm:inline">Telão Pop-up</span></button>
+          
+          <button onClick={() => window.open(`/projector?event=${eventId}`, 'Telao_Bingo', 'width=1280,height=720,toolbar=no,location=no,status=no,menubar=no,scrollbars=no')} className="flex items-center gap-2 text-sm font-bold text-emerald-200/70 hover:text-[#fef08a] transition-colors">
+            <MonitorPlay size={18} /> <span className="hidden sm:inline">Telão Pop-up</span>
+          </button>
+          
           <div className="hidden sm:block h-6 w-px bg-emerald-900/50"></div>
-          <button onClick={handleCopyLink} className={`flex items-center gap-2 text-sm font-bold transition-colors ${copied ? "text-[#fef08a]" : "text-emerald-200/70 hover:text-[#fef08a]"}`}>{copied ? <CheckCircle2 size={18} /> : <Copy size={18} />} <span className="hidden sm:inline">{copied ? "Copiado!" : "Link do Telão"}</span></button>
+          
+          <button onClick={handleCopyLink} className={`flex items-center gap-2 text-sm font-bold transition-colors ${copied ? "text-[#fef08a]" : "text-emerald-200/70 hover:text-[#fef08a]"}`}>
+            {copied ? <CheckCircle2 size={18} /> : <Copy size={18} />} <span className="hidden sm:inline">{copied ? "Copiado!" : "Link do Telão"}</span>
+          </button>
+          
           <div className="hidden sm:block h-6 w-px bg-emerald-900/50"></div>
-          <LogoutButton callbackUrl="/entrar" variant="dark" />
+          
+          {/* 🔥 BOTÃO DE LOGOUT CORRIGIDO PARA CLIENT COMPONENT */}
+          <button 
+            onClick={async () => {
+              setIsLoggingOut(true);
+              await signOut({ callbackUrl: "/entrar" });
+            }}
+            disabled={isLoggingOut}
+            className="flex items-center gap-2 text-sm font-bold text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+          >
+            <LogOut size={18} /> <span className="hidden sm:inline">{isLoggingOut ? "Saindo..." : "Sair do Sistema"}</span>
+          </button>
+
         </div>
       </div>
 
@@ -252,7 +273,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
              <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-4">Auditoria de Mesa</h2>
              <form onSubmit={handleAudit} className="flex gap-2">
                <input type="text" placeholder="Código. Ex: A9B2X1" value={auditCode} onChange={(e) => setAuditCode(e.target.value.toUpperCase())} className="flex-1 w-full min-w-0 bg-black/50 border border-emerald-900/50 rounded-xl px-3 text-[#fef08a] font-mono uppercase outline-none focus:border-[#ca8a04] placeholder:text-emerald-900" maxLength={6}/>
-               <button type="submit" disabled={auditLoading || !auditCode} className="bg-emerald-800 hover:bg-emerald-700 text-white p-3 rounded-xl shrink-0"><Search size={20} /></button>
+              <button type="submit" disabled={auditLoading || !auditCode} aria-label="Buscar auditoria" title="Buscar auditoria" className="bg-emerald-800 hover:bg-emerald-700 text-white p-3 rounded-xl shrink-0"><Search size={20} /></button>
              </form>
              {auditError && <div className="mt-4 p-3 bg-red-950/50 border border-red-900/50 text-red-400 text-xs rounded-xl flex items-center gap-2"><XCircle size={16} /> {auditError}</div>}
              {auditResult && (

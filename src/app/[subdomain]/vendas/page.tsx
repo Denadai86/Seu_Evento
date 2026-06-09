@@ -1,6 +1,6 @@
 // src/app/[subdomain]/vendas/page.tsx
 import prisma from "@/lib/prisma";
-import LogoutButton from "@/components/LogoutButton";
+import LogoutButton from "@/components/auth/LogoutButton";
 import PDVClient from "./PDVClient";
 
 export default async function VendasPage({ params }: { params: Promise<{ subdomain: string }> }) {

@@ -833,78 +833,6 @@ export async function resetStaffPassword(userId: string) {
 }
 </file>
 
-<file path="src/app/(marketing)/entrar/page.tsx">
-// src/app/(marketing)/entrar/page.tsx
-"use client";
-
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-
-export default function TenantRouter() {
-  const [subdomain, setSubdomain] = useState("");
-  const router = useRouter();
-
-  const handleRedirect = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!subdomain) return;
-
-    // Limpa espaços e deixa minúsculo por segurança
-    const cleanSubdomain = subdomain.trim().toLowerCase();
-    
-    // Redireciona para o login específico do subdomínio do cliente
-    window.location.href = `https://${cleanSubdomain}.acaoleve.dev.br/entrar`;
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
-      <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-white mb-2">Acessar meu Evento</h1>
-          <p className="text-slate-400 text-sm">
-            Digite o endereço do seu evento para fazer login.
-          </p>
-        </div>
-
-        <form onSubmit={handleRedirect} className="space-y-6">
-          <div className="flex items-center bg-slate-700 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
-            <input
-              type="text"
-              value={subdomain}
-              onChange={(e) => setSubdomain(e.target.value)}
-              placeholder="nome-do-evento"
-              className="w-full bg-transparent text-white border-0 p-3 outline-none text-right placeholder-slate-500"
-              required
-            />
-            <span className="text-slate-400 pr-4 pl-1 py-3 bg-slate-700 select-none">
-              .acaoleve.dev.br
-            </span>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors"
-          >
-            Continuar para o Login
-          </button>
-        </form>
-
-        <div className="mt-8 text-center border-t border-slate-700 pt-6">
-          <p className="text-sm text-slate-400">
-            É o administrador da plataforma?{" "}
-            <button 
-              onClick={() => router.push("/admin/login")}
-              className="text-blue-500 hover:underline"
-            >
-              Acesse o Hub
-            </button>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="src/app/[subdomain]/cartela/[shortId]/InteractiveCard.tsx">
 // src/app/[subdomain]/cartela/[shortId]/InteractiveCard.tsx
 "use client";
@@ -4375,6 +4303,158 @@ export async function getEventFinanceStats(eventId: string): Promise<FinanceStat
       };
     }),
   };
+}
+</file>
+
+<file path="src/app/(marketing)/entrar/page.tsx">
+// src/app/(marketing)/entrar/page.tsx
+// Login unificado do domínio raiz (acaoleve.dev.br/entrar).
+// Aceita SUPER_ADMIN e ORG_ADMIN. Staff usa o login do próprio subdomínio.
+"use client";
+
+import { useState } from "react";
+import { signIn, getSession } from "next-auth/react";
+
+const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+const PROTOCOL = process.env.NEXT_PUBLIC_PROTOCOL || "https://";
+
+export default function LoginPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const result = await signIn("credentials", {
+        redirect: false,
+        email: email.trim(),
+        password: password.trim(),
+      });
+
+      if (result?.error) {
+        // Mensagem genérica — não expõe se o e-mail existe ou não
+        setError("E-mail ou senha incorretos.");
+        setIsLoading(false);
+        return;
+      }
+
+      // Login OK. Lemos a sessão para decidir para onde redirecionar.
+      const session = await getSession();
+      const role = session?.user?.role;
+      const subdomain = session?.user?.subdomain;
+
+      if (role === "SUPER_ADMIN") {
+        // Super Admin vai para o painel central de gestão da plataforma
+        window.location.href = "/admin";
+        return;
+      }
+
+      if (role === "ORG_ADMIN" && subdomain) {
+        // Org Admin vai direto para o dashboard do seu tenant.
+        // Usamos window.location.href para cruzar o subdomínio (cross-origin).
+        // O cookie já está setado em .acaoleve.dev.br, então a sessão chega junto.
+        window.location.href = `${PROTOCOL}${subdomain}.${ROOT_DOMAIN}/dashboard`;
+        return;
+      }
+
+      if (role === "STAFF" && subdomain) {
+        window.location.href = `${PROTOCOL}${subdomain}.${ROOT_DOMAIN}/`;
+        return;
+      }
+
+      // Fallback: qualquer outro perfil vai para a raiz
+      window.location.href = "/";
+
+    } catch {
+      setError("Ocorreu um erro inesperado. Tente novamente.");
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
+      <div className="w-full max-w-md">
+
+        {/* Cabeçalho */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-black text-white tracking-tight">
+            Ação Leve
+          </h1>
+          <p className="text-slate-400 text-sm mt-2">
+            Painel de controle da plataforma
+          </p>
+        </div>
+
+        {/* Card de login */}
+        <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl p-8">
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                E-mail
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="seu@email.com.br"
+                required
+                disabled={isLoading}
+                autoComplete="email"
+                className="w-full bg-slate-700 text-white border border-slate-600 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none placeholder-slate-500 transition disabled:opacity-60"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                Senha
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                disabled={isLoading}
+                autoComplete="current-password"
+                className="w-full bg-slate-700 text-white border border-slate-600 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none placeholder-slate-500 tracking-widest transition disabled:opacity-60"
+              />
+            </div>
+
+            {error && (
+              <p className="text-red-400 text-sm text-center font-medium bg-red-950/40 border border-red-800/50 rounded-lg py-2 px-3">
+                {error}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+            >
+              {isLoading ? "Autenticando..." : "Entrar"}
+            </button>
+          </form>
+        </div>
+
+        {/* Link discreto para o acesso de eventos (tenants) */}
+        <p className="text-center text-slate-600 text-xs mt-6">
+          Organizador de evento?{" "}
+          <a
+            href={`${PROTOCOL}app.${ROOT_DOMAIN}/entrar`}
+            className="text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2"
+          >
+            Acesse pelo link do seu evento
+          </a>
+        </p>
+
+      </div>
+    </div>
+  );
 }
 </file>
 
@@ -7947,52 +8027,6 @@ export async function GET(request: Request) {
 }
 </file>
 
-<file path="src/lib/auth.ts">
-// src/lib/auth.ts
-import NextAuth from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
-
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  providers: [
-    // ... seus provedores atuais
-  ],
-  // 🔥 A MÁGICA ACONTECE AQUI: Configuração de Cookies Cross-Domain
-  cookies: {
-    sessionToken: {
-      name: process.env.NODE_ENV === "production" 
-        ? "__Secure-authjs.session-token" 
-        : "authjs.session-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        // O ponto inicial é VITAL: permite que o cookie seja lido em TODOS os subdomínios
-        domain: process.env.NODE_ENV === "production" ? ".acaoleve.dev.br" : "localhost",
-        secure: process.env.NODE_ENV === "production",
-      },
-    },
-  },
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.role = user.role;
-        // 👇 Garanta que seu banco de dados retorna o subdomain do usuário no momento do login
-        token.subdomain = user.subdomain; 
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.role = token.role as string;
-        session.user.subdomain = token.subdomain as string; // Passa para a sessão front-end
-      }
-      return session;
-    },
-  },
-  // ... resto das suas configurações (pages, secret, etc)
-});
-</file>
-
 <file path="src/app/[subdomain]/entrar/page.tsx">
 // src/app/[subdomain]/entrar/page.tsx
 import { notFound } from "next/navigation";
@@ -8137,6 +8171,222 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+</file>
+
+<file path="src/lib/auth.ts">
+// src/lib/auth.ts
+import NextAuth, { DefaultSession } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
+import prisma from "@/lib/prisma";
+import { loginRateLimit } from "@/lib/ratelimit";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULE AUGMENTATION — Ensina o TypeScript sobre os campos custom do SaaS
+// ─────────────────────────────────────────────────────────────────────────────
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+      role: string;
+      tenantId: string | null;
+      subdomain: string | null;
+    } & DefaultSession["user"];
+  }
+
+  interface User {
+    role?: string;
+    tenantId?: string | null;
+    subdomain?: string | null;
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    role?: string;
+    tenantId?: string | null;
+    subdomain?: string | null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIGURAÇÃO NEXTAUTH
+// ─────────────────────────────────────────────────────────────────────────────
+const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+const isProd = process.env.NODE_ENV === "production";
+
+export const { handlers, signIn, signOut, auth } = NextAuth({
+  // OBRIGATÓRIO para Vercel com domínio customizado e subdomínios wildcard.
+  // Sem isso, NextAuth v5 rejeita tokens de qualquer host diferente de AUTH_URL.
+  trustHost: true,
+
+  session: { strategy: "jwt" },
+
+  // Quando alguém não autenticado tenta acessar uma rota protegida,
+  // o proxy.ts já cuida do redirect. Mas se o NextAuth precisar redirecionar
+  // (ex: fallback), ele vai para /entrar no domínio atual.
+  pages: {
+    signIn: "/entrar",
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Cookies com domain=".acaoleve.dev.br" para que o mesmo token de sessão
+  // seja válido em TODOS os subdomínios (tenant.acaoleve.dev.br, etc.)
+  // O ponto inicial antes do domínio é obrigatório para o wildcard funcionar.
+  // ─────────────────────────────────────────────────────────────────────────
+  cookies: {
+    sessionToken: {
+      name: isProd ? "__Secure-authjs.session-token" : "authjs.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: isProd,
+        domain: isProd ? `.${rootDomain}` : undefined,
+      },
+    },
+    callbackUrl: {
+      name: isProd ? "__Secure-authjs.callback-url" : "authjs.callback-url",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: isProd,
+        domain: isProd ? `.${rootDomain}` : undefined,
+      },
+    },
+    csrfToken: {
+      name: isProd ? "__Host-authjs.csrf-token" : "authjs.csrf-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: isProd,
+        // __Host- cookies não aceitam domain explícito — correto omitir.
+      },
+    },
+  },
+
+  providers: [
+    CredentialsProvider({
+      name: "Credenciais",
+      credentials: {
+        // "email" aqui é o identificador geral — pode ser e-mail ou username (JOADENAD)
+        email: { label: "Email ou ID", type: "text" },
+        password: { label: "Senha", type: "password" },
+        // Token especial para o Super Admin acessar o tenant de um cliente
+        impersonateToken: { label: "Token Mágico", type: "text" },
+      },
+
+      async authorize(credentials) {
+        // ══════════════════════════════════════════════════════════════════
+        // FLUXO 1 — ACESSO ASSISTIDO (Super Admin entrando como um tenant)
+        // Usado via link mágico de suporte, nunca exposto ao usuário final.
+        // ══════════════════════════════════════════════════════════════════
+        if (credentials?.impersonateToken) {
+          const token = credentials.impersonateToken as string;
+
+          const tenant = await prisma.tenant.findFirst({
+            where: { token },
+          });
+
+          if (!tenant) {
+            throw new Error("Link de assistência expirado ou inválido.");
+          }
+
+          // Token de uso único: apaga imediatamente após validação.
+          await prisma.tenant.update({
+            where: { id: tenant.id },
+            data: { token: null },
+          });
+
+          const adminUser = await prisma.user.findFirst({
+            where: { tenantId: tenant.id, role: "ORG_ADMIN" },
+            include: { tenant: true },
+          });
+
+          if (!adminUser) {
+            throw new Error("Administrador do tenant não encontrado.");
+          }
+
+          return {
+            id: adminUser.id,
+            email: adminUser.email,
+            name: adminUser.name,
+            role: adminUser.role,
+            tenantId: adminUser.tenantId,
+            subdomain: adminUser.tenant?.subdomain ?? null,
+          };
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // FLUXO 2 — LOGIN NORMAL (Super Admin, Org Admin ou Staff)
+        // ══════════════════════════════════════════════════════════════════
+        if (!credentials?.email || !credentials?.password) return null;
+
+        const rawIdentifier = (credentials.email as string).trim();
+        const rawPassword = credentials.password as string;
+
+        // Rate limit por identificador (e-mail ou username).
+        // O loginRateLimit já tem fallback de dev que sempre aprova.
+        const { success } = await loginRateLimit.limit(`login_${rawIdentifier.toLowerCase()}`);
+        if (!success) {
+          throw new Error("Muitas tentativas. Aguarde 15 minutos e tente novamente.");
+        }
+
+        // Aceita e-mail (contém @) ou username em caixa alta (JOADENAD)
+        const isEmail = rawIdentifier.includes("@");
+
+        const user = await prisma.user.findFirst({
+          where: isEmail
+            ? { email: rawIdentifier.toLowerCase() }
+            : { username: rawIdentifier.toUpperCase() },
+          include: { tenant: true },
+        });
+
+        // Usuário não encontrado ou sem senha cadastrada
+        if (!user || !user.password) return null;
+
+        const senhaCorreta = await bcrypt.compare(rawPassword, user.password);
+        if (!senhaCorreta) return null;
+
+        // Retorna os campos que vão compor o token JWT
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          tenantId: user.tenantId ?? null,
+          subdomain: user.tenant?.subdomain ?? null,
+        };
+      },
+    }),
+  ],
+
+  callbacks: {
+    // jwt: roda toda vez que um token é criado ou atualizado.
+    // O objeto 'user' só existe no primeiro login — nas demais chamadas é undefined.
+    async jwt({ token, user }) {
+      if (user) {
+        token.role = user.role;
+        token.tenantId = user.tenantId ?? null;    // ← CRÍTICO: requireTenant() depende disso
+        token.subdomain = user.subdomain ?? null;
+      }
+      return token;
+    },
+
+    // session: roda toda vez que a sessão é lida (server components, middleware, etc.)
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.id = token.sub!;
+        session.user.role = (token.role as string) ?? "";
+        session.user.tenantId = (token.tenantId as string | null) ?? null;
+        session.user.subdomain = (token.subdomain as string | null) ?? null;
+      }
+      return session;
+    },
+  },
+});
 </file>
 
 <file path="src/app/[subdomain]/dashboard/page.tsx">
@@ -10285,8 +10535,8 @@ export default auth((req) => {
   if (isPublicRoute) {
     // Se logado e acessar /entrar, redireciona pelo cargo
     if (url.pathname === "/entrar" && session) {
-      if (role === "OPERATOR") return NextResponse.redirect(new URL("/live", req.url));
-      if (role === "VERIFIER") return NextResponse.redirect(new URL("/vendas", req.url));
+      if (role === "STAFF") return NextResponse.redirect(new URL("/live", req.url));
+      if (role === "STAFF") return NextResponse.redirect(new URL("/vendas", req.url));
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
   } else {
@@ -10298,10 +10548,10 @@ export default auth((req) => {
       return NextResponse.redirect(new URL("/entrar", req.url));
     }
 
-    if (role === "OPERATOR" && !url.pathname.startsWith("/live")) {
+    if (role === "STAFF" && !url.pathname.startsWith("/live")) {
       return NextResponse.redirect(new URL("/live", req.url));
     }
-    if (role === "VERIFIER" && !url.pathname.startsWith("/vendas") && !url.pathname.startsWith("/verify")) {
+    if (role === "STAFF" && !url.pathname.startsWith("/vendas") && !url.pathname.startsWith("/verify")) {
       return NextResponse.redirect(new URL("/vendas", req.url));
     }
   }
@@ -10309,7 +10559,8 @@ export default auth((req) => {
   // O Rewrite final exclusivo para tenants!
   // Mapeia `meuevento.seu-evento.../dashboard` para a pasta interna `app/[tenant]/dashboard`
   return NextResponse.rewrite(new URL(`/${tenantSubdomain}${url.pathname}`, req.url));
-});
+}
+);
 </file>
 
 </files>

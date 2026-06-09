@@ -2,7 +2,7 @@
 import prisma from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import EventList from "./EventList";
-import LogoutButton from "@/components/LogoutButton";
+import LogoutButton from "@/components/auth/LogoutButton";
 import Link from "next/link";
 import { Calendar, Users, Activity, UserCheck, ArrowRight, Plus, XCircle } from "lucide-react";
 import { closeEventAndGenerateReport } from "@/actions/closeEvent";

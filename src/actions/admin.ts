@@ -9,6 +9,7 @@ import { randomBytes } from "crypto";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔐 GUARD: Apenas Super Admin passa
+// O throw aqui é esperado, pois é uma barreira de segurança bruta (retorna 500/403).
 // ─────────────────────────────────────────────────────────────────────────────
 async function requireGodMode() {
   const session = await auth();
@@ -70,138 +71,166 @@ export async function getTenantsList() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. ONBOARDING EXPRESS
+// 3. ONBOARDING EXPRESS (Atualizado com Documento, Telefone e Graceful Error)
 // ─────────────────────────────────────────────────────────────────────────────
 export async function createTenantExpress(data: {
   name: string;
   subdomain: string;
+  document?: string;  // Novo
+  phone?: string;     // Novo
   adminName: string;
   adminEmail: string;
   adminPass: string;
   planType: "SINGLE_EVENT" | "ANNUAL";
   eventDate?: string;
 }) {
-  await requireGodMode();
+  try {
+    await requireGodMode();
 
-  const [existingSubdomain, existingEmail] = await Promise.all([
-    prisma.tenant.findUnique({ where: { subdomain: data.subdomain } }),
-    prisma.user.findUnique({ where: { email: data.adminEmail } }),
-  ]);
+    const [existingSubdomain, existingEmail] = await Promise.all([
+      prisma.tenant.findUnique({ where: { subdomain: data.subdomain } }),
+      prisma.user.findUnique({ where: { email: data.adminEmail } }),
+    ]);
 
-  if (existingSubdomain) throw new Error("Subdomínio já está em uso.");
-  if (existingEmail) throw new Error("E-mail já cadastrado na plataforma.");
+    // 🔥 Graceful Error Handling: Retorna o erro limpo pro UI
+    if (existingSubdomain) return { success: false, error: "Subdomínio já está em uso." };
+    if (existingEmail) return { success: false, error: "E-mail já cadastrado na plataforma." };
 
-  const hashedPassword = await hash(data.adminPass, 12);
+    const hashedPassword = await hash(data.adminPass, 12);
 
-  let calculatedExpiration: Date | null = null;
-  if (data.planType === "ANNUAL") {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() + 1);
-    calculatedExpiration = d;
-  } else if (data.planType === "SINGLE_EVENT" && data.eventDate) {
-    const d = new Date(data.eventDate);
-    d.setDate(d.getDate() + 7);
-    d.setHours(23, 59, 59, 999);
-    calculatedExpiration = d;
+    // Calculando a validade do ambiente
+    let calculatedExpiration: Date | null = null;
+    if (data.planType === "ANNUAL") {
+      const d = new Date();
+      d.setFullYear(d.getFullYear() + 1);
+      calculatedExpiration = d;
+    } else if (data.planType === "SINGLE_EVENT" && data.eventDate) {
+      const d = new Date(data.eventDate);
+      d.setDate(d.getDate() + 7); // Libera o sistema por 7 dias após o evento
+      d.setHours(23, 59, 59, 999);
+      calculatedExpiration = d;
+    }
+
+    // Transação: Garante que Tenant e User sejam criados juntos
+    await prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.create({
+        data: {
+          name: data.name,
+          subdomain: data.subdomain.toLowerCase().trim(),
+          document: data.document, // Novo
+          phone: data.phone,       // Novo
+          active: true,
+          planType: data.planType,
+          expiresAt: calculatedExpiration,
+        },
+      });
+
+      await tx.user.create({
+        data: {
+          name: data.adminName,
+          email: data.adminEmail.toLowerCase().trim(),
+          password: hashedPassword,
+          role: "ORG_ADMIN",
+          tenantId: tenant.id,
+        },
+      });
+    });
+
+    revalidatePath("/admin");
+    return { success: true };
+
+  } catch (error: any) {
+    console.error("[CREATE_TENANT_ERROR]", error);
+    return { success: false, error: error.message || "Erro interno ao provisionar o cliente." };
   }
-
-  await prisma.$transaction(async (tx) => {
-    const tenant = await tx.tenant.create({
-      data: {
-        name: data.name,
-        subdomain: data.subdomain.toLowerCase().trim(),
-        active: true,
-        planType: data.planType,
-        expiresAt: calculatedExpiration,
-      },
-    });
-
-    await tx.user.create({
-      data: {
-        name: data.adminName,
-        email: data.adminEmail.toLowerCase().trim(),
-        password: hashedPassword,
-        role: "ORG_ADMIN",
-        tenantId: tenant.id,
-      },
-    });
-  });
-
-  revalidatePath("/admin");
-  return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. SUSPENSÃO DE TENANT (Soft Delete)
-// Nota: toggleTenantStatus (versão legada) foi removida — use apenas esta.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function toggleTenantSuspension(tenantId: string, currentStatus: boolean) {
-  await requireGodMode();
+  try {
+    await requireGodMode();
 
-  const updated = await prisma.tenant.update({
-    where: { id: tenantId },
-    data: { active: !currentStatus },
-  });
+    const updated = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { active: !currentStatus },
+    });
 
-  revalidatePath("/admin");
-  return { success: true, newStatus: updated.active };
+    revalidatePath("/admin");
+    return { success: true, newStatus: updated.active };
+  } catch (error) {
+    return { success: false, error: "Falha ao alterar status do cliente." };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. RESET DE SENHA — qualquer usuário da plataforma
+// 5. RESET DE SENHA — Qualquer usuário da plataforma
 // ─────────────────────────────────────────────────────────────────────────────
 export async function resetUserPassword(userId: string) {
-  await requireGodMode();
+  try {
+    await requireGodMode();
 
-  const newTemporaryPassword = randomBytes(4).toString("hex") + "!";
-  const hashedPassword = await hash(newTemporaryPassword, 12);
+    const newTemporaryPassword = randomBytes(4).toString("hex") + "!";
+    const hashedPassword = await hash(newTemporaryPassword, 12);
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { password: hashedPassword },
-  });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
 
-  return { success: true, temporaryPassword: newTemporaryPassword };
+    return { success: true, temporaryPassword: newTemporaryPassword };
+  } catch (error) {
+    return { success: false, error: "Erro ao resetar a senha deste usuário." };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. RESET DE SENHA DO ADMIN DE UM TENANT ESPECÍFICO
 // ─────────────────────────────────────────────────────────────────────────────
 export async function resetTenantAdminPassword(tenantId: string) {
-  await requireGodMode();
+  try {
+    await requireGodMode();
 
-  const adminUser = await prisma.user.findFirst({
-    where: { tenantId, role: "ORG_ADMIN" },
-  });
+    const adminUser = await prisma.user.findFirst({
+      where: { tenantId, role: "ORG_ADMIN" },
+    });
 
-  if (!adminUser) {
-    return { success: false, error: "Administrador não encontrado para este cliente." };
+    if (!adminUser) {
+      return { success: false, error: "Administrador principal não encontrado." };
+    }
+
+    const newPassword = randomBytes(4).toString("hex") + "!";
+    const hashedPassword = await hash(newPassword, 12);
+
+    await prisma.user.update({
+      where: { id: adminUser.id },
+      data: { password: hashedPassword },
+    });
+
+    return { success: true, email: adminUser.email, newPassword };
+  } catch (error) {
+    return { success: false, error: "Falha catastrófica ao redefinir a senha do admin." };
   }
-
-  const newPassword = randomBytes(4).toString("hex") + "!";
-  const hashedPassword = await hash(newPassword, 12);
-
-  await prisma.user.update({
-    where: { id: adminUser.id },
-    data: { password: hashedPassword },
-  });
-
-  return { success: true, email: adminUser.email, newPassword };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. TOKEN DE ACESSO REMOTO (Impersonation — uso único)
 // ─────────────────────────────────────────────────────────────────────────────
 export async function getImpersonationToken(tenantId: string) {
-  await requireGodMode();
+  try {
+    await requireGodMode();
 
-  // 64 caracteres hex — criptograficamente seguro
-  const magicToken = randomBytes(32).toString("hex");
+    // 64 caracteres hex — criptograficamente seguro
+    const magicToken = randomBytes(32).toString("hex");
 
-  const tenant = await prisma.tenant.update({
-    where: { id: tenantId },
-    data: { token: magicToken },
-  });
+    const tenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { token: magicToken },
+    });
 
-  return { success: true, token: magicToken, subdomain: tenant.subdomain };
+    return { success: true, token: magicToken, subdomain: tenant.subdomain };
+  } catch (error) {
+    return { success: false, error: "Erro ao gerar chave de acesso remoto." };
+  }
 }

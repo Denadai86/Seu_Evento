@@ -2,7 +2,7 @@
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import LogoutButton from "@/components/LogoutButton";
+import LogoutButton from "@/components/auth/LogoutButton";
 import EventStatusToggle from "./EventStatusToggle";
 import GenerateCardsButton from "./GenerateCardsButton";
 import { 

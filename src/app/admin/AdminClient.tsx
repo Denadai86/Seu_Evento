@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import Link from "next/link"; // 🔥 Adicionado o import do Link
+import Link from "next/link";
 import { 
   getGodModeStats, 
   getTenantsList, 
@@ -12,28 +12,38 @@ import {
   getImpersonationToken
 } from "@/actions/admin";
 import { 
-  Building, Users, Ticket, BadgeDollarSign, Target, 
-  RefreshCcw, Power, Plus, ShieldCheck, ExternalLink, X, CalendarDays,
-  Key, Copy, Eye, AlertOctagon // 🔥 Adicionado o AlertOctagon
+  Building, Users, Ticket, BadgeDollarSign, 
+  RefreshCcw, Power, Plus, ShieldCheck, ExternalLink, X,
+  Key, Copy, Eye, AlertOctagon 
 } from "lucide-react";
-import { Session } from "next-auth";
 
-export default function AdminClient({ session }: { session: Session }) {
+export default function AdminClient() {
+  // ==========================================
+  // ESTADOS DA APLICAÇÃO
+  // ==========================================
   const [stats, setStats] = useState<any>(null);
   const [tenants, setTenants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
 
-  // Estado do Modal de Onboarding Expandido com Planos
+  // Estados dos Modais
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ 
-    name: "", subdomain: "", adminName: "", adminEmail: "", adminPass: "",
-    planType: "SINGLE_EVENT" as "SINGLE_EVENT" | "ANNUAL", eventDate: "" 
-  });
-
-  // Estado do Modal de Nova Senha Gerada
+      name: "", 
+      subdomain: "", 
+      document: "", 
+      phone: "",    
+      adminName: "", 
+      adminEmail: "", 
+      adminPass: "",
+      planType: "SINGLE_EVENT" as "SINGLE_EVENT" | "ANNUAL", 
+      eventDate: "" 
+    });
   const [passwordModal, setPasswordModal] = useState<{name: string, email: string, pass: string} | null>(null);
 
+  // ==========================================
+  // FUNÇÕES DE DADOS (DATA FETCHING)
+  // ==========================================
   const loadData = () => {
     setLoading(true);
     Promise.all([getGodModeStats(), getTenantsList()])
@@ -48,6 +58,9 @@ export default function AdminClient({ session }: { session: Session }) {
     loadData();
   }, []);
 
+  // ==========================================
+  // ACTIONS (MUTATIONS)
+  // ==========================================
   const handleToggle = (id: string, currentStatus: boolean) => {
     if (!confirm(currentStatus ? "Suspender este cliente?" : "Reativar este cliente?")) return;
     startTransition(async () => {
@@ -56,7 +69,6 @@ export default function AdminClient({ session }: { session: Session }) {
     });
   };
 
-  // Dispara a redefinição de senha
   const handleResetPassword = (tenantId: string, tenantName: string) => {
     if (!confirm(`Gerar nova palavra-passe para o administrador de ${tenantName}?`)) return;
 
@@ -78,15 +90,13 @@ export default function AdminClient({ session }: { session: Session }) {
     startTransition(async () => {
       const res = await getImpersonationToken(tenantId);
       if (res.success) {
-        // Lida inteligentemente com ambiente local (localhost) ou produção (acaoleve.dev.br)
         const isLocal = window.location.hostname.includes("localhost") || window.location.hostname.includes("192.168");
         const domain = isLocal ? `${res.subdomain}.localhost:3000` : `${res.subdomain}.acaoleve.dev.br`;
         const protocol = isLocal ? "http://" : "https://";
         
-        // Abre uma nova aba no navegador já logado no cliente!
         window.open(`${protocol}${domain}/entrar/magico?t=${res.token}`, "_blank");
       } else {
-        alert((res as any).error || "Erro ao gerar token.");
+        alert((res as any).error || "Erro ao gerar token de acesso.");
       }
     });
   };
@@ -98,57 +108,75 @@ export default function AdminClient({ session }: { session: Session }) {
       if (res.success) {
         setShowModal(false);
         loadData();
-        setFormData({ name: "", subdomain: "", adminName: "", adminEmail: "", adminPass: "", planType: "SINGLE_EVENT", eventDate: "" });
+        setFormData({ name: "", subdomain: "", document: "", phone: "", adminName: "", adminEmail: "", adminPass: "", planType: "SINGLE_EVENT", eventDate: "" });
       } else {
         alert((res as any).error || "Erro ao criar cliente.");
       }
     });
   };
 
-  if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Carregando Hub...</div>;
+  // ==========================================
+  // RENDERIZAÇÃO
+  // ==========================================
+  if (loading) return (
+    <div className="min-h-[80vh] flex items-center justify-center text-emerald-500 font-bold animate-pulse">
+      Carregando Dados do Ecossistema...
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-900 p-8 font-sans text-slate-200">
-      <div className="max-w-7xl mx-auto">
+    <div className="p-8 text-slate-200 max-w-7xl mx-auto">
         
-        {/* HEADER */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-black text-white">Ação Leve <span className="text-emerald-500">Hub</span></h1>
-            <p className="text-slate-400">Visão Global e Administração (God Mode)</p>
-          </div>
-          <div className="flex gap-4">
-            
-            {/* 🔥 NOVO: BOTÃO DA DANGER ZONE */}
-            <Link 
-              href="/admin/danger" 
-              className="flex items-center gap-2 bg-red-900/20 hover:bg-red-800 text-red-400 hover:text-white border border-red-900/50 px-4 py-2 rounded-xl transition font-bold shadow-[0_0_15px_rgba(220,38,38,0.15)] hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
-            >
-              <AlertOctagon size={18} /> Danger Zone
-            </Link>
-
-            <button onClick={loadData} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl transition">
-              <RefreshCcw size={18} /> Atualizar
-            </button>
-            <button onClick={() => setShowModal(true)} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl font-bold transition shadow-lg shadow-emerald-900/20">
-              <Plus size={18} /> Novo Cliente
-            </button>
-          </div>
+      {/* 1. PAGE HEADER: Ações específicas do Hub */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 bg-slate-800/30 p-6 rounded-3xl border border-slate-800">
+        <div>
+          <h2 className="text-2xl font-black text-white">Hub de Inquilinos</h2>
+          <p className="text-slate-400 text-sm mt-1">Gerencie clientes, planos e acessos à plataforma.</p>
         </div>
+        
+        <div className="flex flex-wrap gap-3">
+          <Link 
+            href="/admin/danger" 
+            className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-4 py-2.5 rounded-xl transition font-bold text-sm"
+          >
+            <AlertOctagon size={16} /> Danger Zone
+          </Link>
 
-        {/* STATS GLOBAIS */}
-        {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <StatCard icon={<Building />} label="Total Inquilinos" value={stats.tenants} color="blue" />
-            <StatCard icon={<BadgeDollarSign />} label="Faturamento (GMV)" value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((stats.totalGMV || 0) / 100)} color="emerald" highlight />
-            <StatCard icon={<Ticket />} label="Eventos Criados" value={stats.events} color="purple" />
-            <StatCard icon={<Users />} label="Voluntários/PDVs" value={stats.roles.verifiers} color="amber" />
-          </div>
-        )}
+          <button 
+            type="button"
+            aria-label="Atualizar lista de clientes"
+            onClick={loadData} 
+            disabled={isPending}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 rounded-xl transition font-bold text-sm border border-slate-700 disabled:opacity-50"
+          >
+            <RefreshCcw size={16} className={isPending ? "animate-spin" : ""} /> Atualizar
+          </button>
+          
+          <button 
+            type="button"
+            aria-label="Abrir modal de novo cliente"
+            onClick={() => setShowModal(true)} 
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-bold transition shadow-lg shadow-emerald-900/20 text-sm"
+          >
+            <Plus size={18} /> Criar Tenant
+          </button>
+        </div>
+      </div>
 
-        {/* LISTAGEM DE CLIENTES */}
-        <div className="bg-slate-800/50 border border-slate-700 rounded-3xl overflow-hidden">
-          <table className="w-full text-left text-sm">
+      {/* 2. STATS GLOBAIS */}
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatCard icon={<Building />} label="Total Inquilinos" value={stats.tenants} color="blue" />
+          <StatCard icon={<BadgeDollarSign />} label="Faturamento (GMV)" value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((stats.totalGMV || 0) / 100)} color="emerald" highlight />
+          <StatCard icon={<Ticket />} label="Eventos Criados" value={stats.events} color="purple" />
+          <StatCard icon={<Users />} label="Voluntários/PDVs" value={stats.roles?.verifiers || 0} color="amber" />
+        </div>
+      )}
+
+      {/* 3. LISTAGEM DE CLIENTES */}
+      <div className="bg-slate-800/50 border border-slate-700 rounded-3xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-800/80 text-slate-400 uppercase tracking-widest text-[10px] font-bold">
               <tr>
                 <th className="p-5">Inquilino</th>
@@ -166,7 +194,7 @@ export default function AdminClient({ session }: { session: Session }) {
                     <p className="text-xs text-slate-500">Criado em {new Date(tenant.createdAt).toLocaleDateString()}</p>
                   </td>
                   <td className="p-5 font-mono text-emerald-400">
-                    <a href={`https://${tenant.subdomain}.acaoleve.dev.br`} target="_blank" className="hover:underline flex items-center gap-1">
+                    <a href={`https://${tenant.subdomain}.acaoleve.dev.br`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1 w-fit">
                       {tenant.subdomain} <ExternalLink size={12} />
                     </a>
                   </td>
@@ -174,7 +202,7 @@ export default function AdminClient({ session }: { session: Session }) {
                     <span className="bg-slate-900 text-slate-300 px-2 py-1 rounded text-xs font-bold mr-2">
                       {tenant.planType === "ANNUAL" ? "ANUAL" : "EVENTO ÚNICO"}
                     </span>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="text-xs text-slate-400 mt-2">
                       {tenant.expiresAt ? `Expira: ${new Date(tenant.expiresAt).toLocaleDateString()}` : 'Vitalício'}
                     </p>
                   </td>
@@ -183,124 +211,308 @@ export default function AdminClient({ session }: { session: Session }) {
                       {tenant.active ? "ATIVO" : "SUSPENSO"}
                     </span>
                   </td>
-                  <td className="p-5 text-right space-x-2">
-                    <button 
-                      onClick={() => handleImpersonate(tenant.id)}
-                      className="p-2 bg-slate-700 hover:bg-emerald-600 text-slate-300 hover:text-white rounded-lg transition tooltip"
-                      title="Entrar no Painel do Cliente"
-                    >
-                      <Eye size={16} />
-                    </button>
-                    <button 
-                      onClick={() => handleResetPassword(tenant.id, tenant.name)}
-                      className="p-2 bg-slate-700 hover:bg-blue-600 text-slate-300 hover:text-white rounded-lg transition tooltip"
-                      title="Resetar Senha do Administrador"
-                    >
-                      <Key size={16} />
-                    </button>
-                    <button 
-                      onClick={() => handleToggle(tenant.id, tenant.active)}
-                      className={`p-2 rounded-lg transition ${tenant.active ? 'bg-slate-700 hover:bg-red-600 text-slate-300 hover:text-white' : 'bg-red-600 text-white hover:bg-emerald-600'}`}
-                      title={tenant.active ? "Suspender Cliente" : "Reativar Cliente"}
-                    >
-                      <Power size={16} />
-                    </button>
+                  <td className="p-5 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button 
+                        type="button"
+                        aria-label={`Entrar no painel de ${tenant.name}`}
+                        onClick={() => handleImpersonate(tenant.id)}
+                        className="p-2 bg-slate-700 hover:bg-emerald-600 text-slate-300 hover:text-white rounded-lg transition"
+                        title="Entrar no Painel do Cliente (God Mode)"
+                      >
+                        <Eye size={16} />
+                      </button>
+                      <button 
+                        type="button"
+                        aria-label={`Resetar senha de ${tenant.name}`}
+                        onClick={() => handleResetPassword(tenant.id, tenant.name)}
+                        className="p-2 bg-slate-700 hover:bg-blue-600 text-slate-300 hover:text-white rounded-lg transition"
+                        title="Resetar Senha do Administrador"
+                      >
+                        <Key size={16} />
+                      </button>
+                      <button 
+                        type="button"
+                        aria-label={tenant.active ? `Suspender ${tenant.name}` : `Reativar ${tenant.name}`}
+                        onClick={() => handleToggle(tenant.id, tenant.active)}
+                        className={`p-2 rounded-lg transition ${tenant.active ? 'bg-slate-700 hover:bg-red-600 text-slate-300 hover:text-white' : 'bg-red-600 text-white hover:bg-emerald-600'}`}
+                        title={tenant.active ? "Suspender Cliente" : "Reativar Cliente"}
+                      >
+                        <Power size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
+              {tenants.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-slate-500">
+                    Nenhum cliente cadastrado ainda. Crie seu primeiro Tenant!
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+      </div>
 
-        {/* MODAL DE ONBOARDING */}
-        {showModal && (
-           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-             <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-lg w-full relative">
-               <button onClick={() => setShowModal(false)} title="Fechar" aria-label="Fechar modal" className="absolute top-4 right-4 text-slate-500 hover:text-white"><X size={24} /></button>
-               <h3 className="text-xl font-black text-white mb-4">Novo Cliente (Tenant)</h3>
-               
-               <form onSubmit={handleCreateTenant} className="space-y-4">
-                 <input placeholder="Nome da Igreja/ONG" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 <input placeholder="Subdomínio (ex: paroquiasaojose)" value={formData.subdomain} onChange={e => setFormData({...formData, subdomain: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 
-                 <div className="grid grid-cols-2 gap-4">
-                   <select value={formData.planType} onChange={e => setFormData({...formData, planType: e.target.value as any})} title="Tipo de Plano" className="w-full p-3 bg-slate-800 text-white rounded-xl">
-                     <option value="SINGLE_EVENT">Evento Único</option>
-                     <option value="ANNUAL">Plano Anual</option>
-                   </select>
-                   <input type="date" placeholder="Data do Evento" value={formData.eventDate} onChange={e => setFormData({...formData, eventDate: e.target.value})} required={formData.planType === 'SINGLE_EVENT'} className="w-full p-3 bg-slate-800 text-slate-400 rounded-xl" />
-                 </div>
-
-                 <input placeholder="Nome do Admin" value={formData.adminName} onChange={e => setFormData({...formData, adminName: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 <input type="email" placeholder="E-mail do Admin" value={formData.adminEmail} onChange={e => setFormData({...formData, adminEmail: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 <input placeholder="Senha Inicial" value={formData.adminPass} onChange={e => setFormData({...formData, adminPass: e.target.value})} required className="w-full p-3 bg-slate-800 text-white rounded-xl" />
-                 
-                 <button type="submit" disabled={isPending} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl disabled:opacity-50">
-                   {isPending ? "Criando..." : "Provisionar Ambiente"}
-                 </button>
-               </form>
-             </div>
-           </div>
-        )}
-
-        {/* MODAL DE SENHA RESETADA */}
-        {passwordModal && (
-          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
-            <div className="bg-white border border-slate-200 rounded-[2rem] p-8 max-w-sm w-full shadow-2xl relative flex flex-col items-center text-center">
-              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-6 border-8 border-white shadow-sm">
-                <ShieldCheck size={32} />
-              </div>
-              
-              <h3 className="text-2xl font-black text-slate-900 mb-2">Acesso Recuperado!</h3>
-              <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-                A palavra-passe do administrador principal de <strong className="text-slate-800">{passwordModal.name}</strong> foi redefinida.
-              </p>
-
-              <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 mb-8 relative group">
-                <div className="flex flex-col gap-4">
-                  <div className="flex justify-between items-center border-b border-slate-200 pb-4">
-                    <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">E-mail (Login)</span>
-                    <span className="text-sm font-black text-indigo-600">{passwordModal.email}</span>
+      {/* ========================================== */}
+      {/* MODAL: NOVO CLIENTE (ONBOARDING)             */}
+      {/* ========================================== */}
+      {showModal && (
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+                <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-2xl relative my-8 shadow-2xl">
+                  
+                  {/* Header do Modal */}
+                  <div className="flex items-center justify-between p-6 border-b border-slate-800">
+                    <div>
+                      <h3 className="text-xl font-black text-white">Novo Cliente (Tenant)</h3>
+                      <p className="text-sm text-slate-400 mt-1">Provisionamento de um novo ambiente isolado.</p>
+                    </div>
+                    <button 
+                      type="button"
+                      aria-label="Fechar modal"
+                      title="Fechar modal"
+                      onClick={() => setShowModal(false)} 
+                      className="text-slate-500 hover:text-white transition-colors bg-slate-800/50 hover:bg-slate-800 p-2 rounded-full"
+                    >
+                      <X size={20} />
+                    </button>
                   </div>
-                  <div className="flex justify-between items-center pt-1">
-                    <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Nova Senha</span>
-                    <span className="text-xl font-black text-slate-900 tracking-widest">{passwordModal.pass}</span>
-                  </div>
+                  
+                  {/* Corpo do Formulário */}
+                  <form onSubmit={handleCreateTenant} className="p-6 space-y-8">
+                    
+                    {/* SESSÃO 1: Dados da Organização */}
+                    <section className="space-y-4">
+                      <h4 className="text-xs font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-2">
+                        <Building size={14} /> Dados da Organização
+                      </h4>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="col-span-1 md:col-span-2">
+                          <label className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">Nome da Igreja/ONG</label>
+                          <input 
+                            placeholder="Ex: Paróquia São José" 
+                            value={formData.name} 
+                            onChange={e => {
+                              const newName = e.target.value;
+                              setFormData({
+                                ...formData, 
+                                name: newName,
+                                subdomain: generateSubdomain(newName) 
+                              });
+                            }} 
+                            required 
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors" 
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">Subdomínio Gerado</label>
+                          <div className="flex items-center">
+                            <input 
+                              placeholder="seu-subdominio" 
+                              title="Subdomínio Gerado"
+                              value={formData.subdomain} 
+                              onChange={e => setFormData({...formData, subdomain: generateSubdomain(e.target.value)})} 
+                              required 
+                              className="w-full p-3.5 bg-slate-800/50 border border-slate-700 border-r-0 text-emerald-400 font-mono rounded-l-xl outline-none focus:border-emerald-500 transition-colors" 
+                            />
+                            <div className="p-3.5 bg-slate-800 border border-slate-700 border-l-0 text-slate-500 rounded-r-xl font-mono text-sm">
+                              .acaoleve.com
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">CNPJ ou CPF</label>
+                          <input 
+                            placeholder="00.000.000/0000-00" 
+                            value={formData.document} 
+                            onChange={e => setFormData({...formData, document: maskDocument(e.target.value)})} 
+                            required 
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors" 
+                          />
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* SESSÃO 2: Administrador e Contato */}
+                    <section className="space-y-4">
+                      <h4 className="text-xs font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-2">
+                        <Users size={14} /> Contato e Acesso Mestre
+                      </h4>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">Nome do Responsável</label>
+                          <input 
+                            placeholder="Nome do Admin" 
+                            value={formData.adminName} 
+                            onChange={e => setFormData({...formData, adminName: e.target.value})} 
+                            required 
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors" 
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">Telefone / WhatsApp</label>
+                          <input 
+                            placeholder="(11) 99999-9999" 
+                            value={formData.phone} 
+                            onChange={e => setFormData({...formData, phone: maskPhone(e.target.value)})} 
+                            required 
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors" 
+                          />
+                        </div>
+                        <div className="col-span-1 md:col-span-2">
+                          <label className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">E-mail de Acesso</label>
+                          <input 
+                            type="email" 
+                            placeholder="admin@igreja.com" 
+                            value={formData.adminEmail} 
+                            onChange={e => setFormData({...formData, adminEmail: e.target.value})} 
+                            required 
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors" 
+                          />
+                        </div>
+                        <div className="col-span-1 md:col-span-2">
+                          <label className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">Senha Inicial Provisória</label>
+                          <input 
+                            placeholder="Senha segura" 
+                            value={formData.adminPass} 
+                            onChange={e => setFormData({...formData, adminPass: e.target.value})} 
+                            required 
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors" 
+                          />
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* SESSÃO 3: Regras de Negócio (Plano) */}
+                    <section className="space-y-4 pt-4 border-t border-slate-800">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label htmlFor="planType" className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">Modelo de Plano</label>
+                          <select 
+                            id="planType"
+                            value={formData.planType} 
+                            onChange={e => setFormData({...formData, planType: e.target.value as any})} 
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors appearance-none"
+                          >
+                            <option value="SINGLE_EVENT">Evento Único (Data Fixa)</option>
+                            <option value="ANNUAL">Licença Anual (Múltiplos)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label htmlFor="eventDate" className="text-[10px] text-slate-400 uppercase tracking-widest font-bold ml-1 mb-1 block">Data Base (Encerramento)</label>
+                          <input 
+                            id="eventDate"
+                            type="date" 
+                            title="Data Base de Encerramento"
+                            placeholder="Selecione a data"
+                            value={formData.eventDate} 
+                            onChange={e => setFormData({...formData, eventDate: e.target.value})} 
+                            required={formData.planType === 'SINGLE_EVENT'} 
+                            disabled={formData.planType === 'ANNUAL'}
+                            className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors disabled:opacity-50" 
+                          />
+                        </div>
+                      </div>
+                    </section>
+                    
+                    {/* Rodapé e Botões */}
+                    <div className="pt-6 border-t border-slate-800 flex justify-end gap-3">
+                      <button 
+                        type="button"
+                        aria-label="Cancelar criação"
+                        onClick={() => setShowModal(false)}
+                        className="px-6 py-3.5 text-slate-400 hover:text-white font-bold transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button 
+                        type="submit" 
+                        disabled={isPending} 
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-black px-8 py-3.5 rounded-xl disabled:opacity-50 transition-all shadow-lg shadow-emerald-900/20"
+                      >
+                        {isPending ? "Provisionando..." : "Criar Tenant e Liberar Acesso"}
+                      </button>
+                    </div>
+
+                  </form>
                 </div>
-
-                <button 
-                  onClick={() => {
-                    const text = `*Recuperação de Acesso - Ação Leve*\n\nOlá, a sua palavra-passe foi redefinida pela Administração.\n\n*E-mail:* ${passwordModal.email}\n*Nova Senha:* ${passwordModal.pass}\n\nRecomendamos alterar esta senha no painel após o login.`;
-                    navigator.clipboard.writeText(text);
-                    alert("Copiado para a área de transferência!");
-                  }}
-                  className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 hover:bg-slate-800 text-white text-xs px-5 py-2.5 rounded-full flex items-center gap-2 font-bold shadow-lg transition-transform hover:scale-105"
-                >
-                  <Copy size={14} /> Copiar Dados
-                </button>
               </div>
-              <button onClick={() => setPasswordModal(null)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-4 rounded-xl transition-colors">
-                Fechar e Concluir
+            )}
+
+      {/* ========================================== */}
+      {/* MODAL: SENHA RESETADA                        */}
+      {/* ========================================== */}
+      {passwordModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+          <div className="bg-white border border-slate-200 rounded-[2rem] p-8 max-w-sm w-full shadow-2xl relative flex flex-col items-center text-center">
+            <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-6 border-8 border-white shadow-sm">
+              <ShieldCheck size={32} />
+            </div>
+            
+            <h3 className="text-2xl font-black text-slate-900 mb-2">Acesso Recuperado!</h3>
+            <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+              A palavra-passe do administrador principal de <strong className="text-slate-800">{passwordModal.name}</strong> foi redefinida.
+            </p>
+
+            <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 mb-8 relative group">
+              <div className="flex flex-col gap-4">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-4">
+                  <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">E-mail (Login)</span>
+                  <span className="text-sm font-black text-indigo-600">{passwordModal.email}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1">
+                  <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Nova Senha</span>
+                  <span className="text-xl font-black text-slate-900 tracking-widest">{passwordModal.pass}</span>
+                </div>
+              </div>
+
+              <button 
+                type="button"
+                aria-label="Copiar dados para a área de transferência"
+                onClick={() => {
+                  const text = `*Recuperação de Acesso - Ação Leve*\n\nOlá, a sua palavra-passe foi redefinida pela Administração.\n\n*E-mail:* ${passwordModal.email}\n*Nova Senha:* ${passwordModal.pass}\n\nRecomendamos alterar esta senha no painel após o login.`;
+                  navigator.clipboard.writeText(text);
+                  alert("Copiado para a área de transferência!");
+                }}
+                className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 hover:bg-slate-800 text-white text-xs px-5 py-2.5 rounded-full flex items-center gap-2 font-bold shadow-lg transition-transform hover:scale-105"
+              >
+                <Copy size={14} /> Copiar Dados
               </button>
             </div>
+            <button 
+              type="button"
+              onClick={() => setPasswordModal(null)} 
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-4 rounded-xl transition-colors"
+            >
+              Fechar e Concluir
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-      </div>
     </div>
   );
 }
 
-// Seu componente original de StatCard continua igual
+// ==========================================
+// COMPONENTES AUXILIARES
+// ==========================================
 function StatCard({ icon, label, value, color, highlight = false }: any) {
-  const colors: any = {
+  const colors: Record<string, string> = {
     emerald: "text-emerald-400 bg-emerald-900/20 border-emerald-900/30",
     blue: "text-blue-400 bg-blue-900/20 border-blue-900/30",
     amber: "text-amber-400 bg-amber-900/20 border-amber-900/30",
     purple: "text-purple-400 bg-purple-900/20 border-purple-900/30",
   };
+  
   return (
-    <div className={`p-6 rounded-3xl border flex items-center gap-4 ${colors[color]}`}>
+    <div className={`p-6 rounded-3xl border flex items-center gap-4 ${colors[color]} ${highlight ? 'shadow-lg shadow-emerald-900/10 ring-1 ring-emerald-500/20' : ''}`}>
       <div className="p-3 rounded-2xl bg-black/20">{icon}</div>
       <div>
         <p className="text-xs uppercase tracking-widest font-bold opacity-70 mb-1">{label}</p>
@@ -309,3 +521,42 @@ function StatCard({ icon, label, value, color, highlight = false }: any) {
     </div>
   );
 }
+
+// Converte "Paróquia São José" para "paroquiasaojose"
+const generateSubdomain = (text: string) => {
+  return text
+    .normalize("NFD") // Separa os acentos das letras
+    .replace(/[\u0300-\u036f]/g, "") // Remove os acentos
+    .toLowerCase() // Tudo minúsculo
+    .replace(/[^a-z0-9]/g, ""); // Remove espaços e caracteres especiais
+};
+
+// Formata Telefone: (11) 99999-9999
+const maskPhone = (value: string) => {
+  return value
+    .replace(/\D/g, "")
+    .replace(/^(\d{2})(\d)/g, "($1) $2")
+    .replace(/(\d)(\d{4})$/, "$1-$2")
+    .slice(0, 15); // Limita o tamanho
+};
+
+// Formata CPF ou CNPJ dinamicamente
+const maskDocument = (value: string) => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length <= 11) {
+    // CPF: 000.000.000-00
+    return digits
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})/, "$1-$2")
+      .slice(0, 14);
+  } else {
+    // CNPJ: 00.000.000/0000-00
+    return digits
+      .replace(/^(\d{2})(\d)/, "$1.$2")
+      .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/\.(\d{3})(\d)/, ".$1/$2")
+      .replace(/(\d{4})(\d)/, "$1-$2")
+      .slice(0, 18);
+  }
+};
