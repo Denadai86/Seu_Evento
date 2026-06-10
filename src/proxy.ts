@@ -2,95 +2,63 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
+// 1. Configuração do matcher para definir em quais rotas este proxy atua
 export const config = {
-  matcher: [
-    "/((?!api/|_next/|_static/|_vercel|[\\w-]+\\.\\w+).*)",
-  ],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$).*)"],
 };
 
-export async function middleware(req: NextRequest) {
+/**
+ * Função principal de proxy/middleware.
+ * O Next.js requer este export nomeado 'proxy' ou 'default'.
+ */
+export async function proxy(req: NextRequest) {
   const url = req.nextUrl;
   const hostname = req.headers.get("host") || "";
+  
+  // Extração do subdomínio
+  const currentHost = process.env.NODE_ENV === "production" 
+    ? hostname.replace(`.seuevento.com.br`, "") 
+    : hostname.replace(`.localhost:3000`, "");
 
-  // ==========================================
-  // 1. IDENTIFICAÇÃO SÓLIDA DO DOMÍNIO (O fim do erro 404!)
-  // ==========================================
-  let isMainDomain = false;
-  let subdomain: string | null = null;
-
-  if (
-    hostname === "localhost:3000" || 
-    hostname === "acaoleve.dev.br" || 
-    hostname === "www.acaoleve.dev.br" ||
-    hostname.startsWith("192.168.") // Para funcionar no Wi-Fi local via celular
-  ) {
-    isMainDomain = true;
-  } else {
-    // Pega tudo antes do primeiro ponto. Ex: "igreja.acaoleve.dev.br" -> "igreja"
-    subdomain = hostname.split(".")[0];
-  }
-
-  // ==========================================
-  // 2. OBTENDO A SESSÃO DO USUÁRIO
-  // ==========================================
   const session = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
   const role = session?.role as string | undefined;
+  const userSubdomain = session?.subdomain as string | undefined;
+  const tenantSubdomain = currentHost === "localhost" || currentHost === "seuevento.com.br" ? null : currentHost;
 
-  // ==========================================
-  // REGRAS: DOMÍNIO PRINCIPAL (Ação Leve / God Mode)
-  // ==========================================
-  if (isMainDomain) {
-    // A. Acabou de fazer Login -> Vai direto pro Admin
+  // Definição de rotas públicas
+  const publicTenantRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
+  const isPublicRoute = publicTenantRoutes.some(
+    (route) => url.pathname === route || url.pathname.startsWith(`${route}/`)
+  );
+
+  // Lógica de Redirecionamento
+  if (isPublicRoute) {
     if (url.pathname === "/entrar" && session) {
-      if (role === "SUPER_ADMIN") {
-        return NextResponse.redirect(new URL("/admin", req.url));
-      }
-      // Se um usuário perdido logar no painel principal, expulsa
-      return NextResponse.redirect(new URL("/", req.url));
+      if (role === "STAFF") return NextResponse.redirect(new URL("/live", req.url));
+      return NextResponse.redirect(new URL("/dashboard", req.url));
     }
-
-    // B. Proteção Bruta da Rota /admin
-    if (url.pathname.startsWith("/admin")) {
-      if (!session) return NextResponse.redirect(new URL("/entrar", req.url));
-      if (role !== "SUPER_ADMIN") return NextResponse.redirect(new URL("/", req.url));
-      
-      // Deixa acessar a pasta nativa src/app/admin e ignora reescrita
-      return NextResponse.next(); 
-    }
-
-    // C. Deixa Home, Termos, etc. passarem limpos
     return NextResponse.next();
   }
 
-  // ==========================================
-  // REGRAS: SUBDOMÍNIOS (Tenants / Inquilinos)
-  // ==========================================
-  if (subdomain) {
-    // A. Redirecionamento correto após o Login no Tenant
-    if (url.pathname === "/entrar" && session) {
-      // O Voluntário vai para as vendas
-      if (role === "STAFF") return NextResponse.redirect(new URL("/vendas", req.url));
-      // O Org Admin vai para o dashboard
-      return NextResponse.redirect(new URL("/dashboard", req.url));
-    }
-
-    // B. Proteção das Rotas do Inquilino
-    const publicTenantRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
-    const isPublicRoute = publicTenantRoutes.some(
-      (route) => url.pathname === route || url.pathname.startsWith(`${route}/`)
-    );
-
-    if (!isPublicRoute) {
-      if (!session) return NextResponse.redirect(new URL("/entrar", req.url));
-      
-      // Trava tática: Voluntário/STAFF NUNCA acessa o Dashboard
-      if (role === "STAFF" && url.pathname.startsWith("/dashboard")) {
-        return NextResponse.redirect(new URL("/vendas", req.url));
-      }
-    }
-
-    // C. O SEGREDO DO MULTI-TENANT
-    // Reescreve a URL por debaixo dos panos para a pasta interna /[subdomain]
-    return NextResponse.rewrite(new URL(`/${subdomain}${url.pathname}`, req.url));
+  // Proteção de rotas privadas
+  if (!session) {
+    return NextResponse.redirect(new URL("/entrar", req.url));
   }
+
+  // Trava de segurança cruzada entre inquilinos
+  if (tenantSubdomain && userSubdomain !== tenantSubdomain && role !== "SUPER_ADMIN") {
+    return NextResponse.redirect(new URL("/entrar", req.url));
+  }
+
+  // Controle de permissão específico para STAFF
+  if (role === "STAFF") {
+    if (!url.pathname.startsWith("/live") && !url.pathname.startsWith("/vendas") && !url.pathname.startsWith("/verify")) {
+      return NextResponse.redirect(new URL("/live", req.url));
+    }
+  }
+
+  return NextResponse.next();
 }
+
+// Opcional: manter como export default se o build ainda reclamar
+export default proxy;
