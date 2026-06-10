@@ -1,64 +1,101 @@
+// src/middleware.ts  ← deve estar neste path para o Next.js reconhecer
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { auth } from "@/lib/auth";
 
-// 1. Configuração do matcher para definir em quais rotas este proxy atua
+// ─────────────────────────────────────────────────────────────────────────────
+// MATCHER — exclui assets estáticos e rotas de API
+// ─────────────────────────────────────────────────────────────────────────────
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$).*)"],
+  matcher: [
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$|.*\\.png$|.*\\.jpg$).*)",
+  ],
 };
 
-/**
- * Função principal de proxy/middleware.
- * O Next.js requer este export nomeado 'proxy' ou 'default'.
- */
-export async function proxy(req: NextRequest) {
-  const url = req.nextUrl;
+// ─────────────────────────────────────────────────────────────────────────────
+// MIDDLEWARE — wrappado com auth() do NextAuth v5
+// req.auth já contém a sessão decodificada (substitui getToken)
+// ─────────────────────────────────────────────────────────────────────────────
+export default auth((req) => {
+  const url   = req.nextUrl;
   const hostname = req.headers.get("host") || "";
-  
-  // Extração do subdomínio
-  const currentHost = process.env.NODE_ENV === "production" 
-    ? hostname.replace(`.seuevento.com.br`, "") 
-    : hostname.replace(`.localhost:3000`, "");
 
-  const session = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const role = session?.role as string | undefined;
-  const userSubdomain = session?.subdomain as string | undefined;
-  const tenantSubdomain = currentHost === "localhost" || currentHost === "seuevento.com.br" ? null : currentHost;
+  const isLocal     = hostname.includes("localhost");
+  const rootDomain  = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+  const protocol    = isLocal ? "http://" : "https://";
 
-  // Definição de rotas públicas
-  const publicTenantRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
-  const isPublicRoute = publicTenantRoutes.some(
+  // Identifica se a requisição está no domínio raiz
+  const isRootDomain =
+    hostname === rootDomain ||
+    hostname === `www.${rootDomain}` ||
+    hostname === "localhost:3000";
+
+  // Subdomínio atual (null se for o domínio raiz)
+  const currentSubdomain = isRootDomain
+    ? null
+    : hostname.split(".")[0];
+
+  // Dados da sessão — req.auth é o equivalente v5 do getToken()
+  const session      = req.auth;
+  const role         = session?.user?.role;
+  const userSubdomain = session?.user?.subdomain;
+
+  // ── 1. ROTEAMENTO PÓS-LOGIN ──────────────────────────────────────────────
+  // Usuário logado bateu em "/" ou "/entrar" → decide para onde mandar
+  if ((url.pathname === "/" || url.pathname === "/entrar") && session) {
+
+    // Super Admin fica sempre no domínio raiz → /admin
+    if (role === "SUPER_ADMIN") {
+      return NextResponse.redirect(new URL("/admin", req.url));
+    }
+
+    // Org Admin e Staff pertencem ao seu subdomínio
+    if (userSubdomain) {
+      const tenantBaseUrl = isLocal
+        ? `${protocol}${userSubdomain}.localhost:3000`
+        : `${protocol}${userSubdomain}.${rootDomain}`;
+
+      // Está no domínio raiz ou no subdomínio errado → ejeta para o correto
+      if (isRootDomain || currentSubdomain !== userSubdomain) {
+        if (role === "ORG_ADMIN") return NextResponse.redirect(`${tenantBaseUrl}/dashboard`);
+        if (role === "STAFF")     return NextResponse.redirect(`${tenantBaseUrl}/vendas`);
+      }
+
+      // Já está no subdomínio correto → rota interna
+      if (role === "ORG_ADMIN") return NextResponse.redirect(new URL("/dashboard", req.url));
+      if (role === "STAFF")     return NextResponse.redirect(new URL("/vendas", req.url));
+    }
+  }
+
+  // ── 2. PROTEÇÃO DE ROTAS PRIVADAS ────────────────────────────────────────
+  const publicRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
+  const isPublicRoute = publicRoutes.some(
     (route) => url.pathname === route || url.pathname.startsWith(`${route}/`)
   );
 
-  // Lógica de Redirecionamento
-  if (isPublicRoute) {
-    if (url.pathname === "/entrar" && session) {
-      if (role === "STAFF") return NextResponse.redirect(new URL("/live", req.url));
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+  // Rota protegida sem sessão → login (preservando callbackUrl)
+  if (!isPublicRoute && !session) {
+    const callbackUrl = encodeURIComponent(url.pathname);
+    return NextResponse.redirect(
+      new URL(`/entrar?callbackUrl=${callbackUrl}`, req.url)
+    );
+  }
+
+  // ── 3. ISOLAMENTO ENTRE TENANTS + RBAC ───────────────────────────────────
+  if (session && role !== "SUPER_ADMIN") {
+
+    // Cross-Tenant Lock: bloqueia acesso ao subdomínio alheio
+    if (!isRootDomain && userSubdomain !== currentSubdomain) {
+      return NextResponse.redirect(new URL("/entrar?error=AccessDenied", req.url));
     }
-    return NextResponse.next();
-  }
 
-  // Proteção de rotas privadas
-  if (!session) {
-    return NextResponse.redirect(new URL("/entrar", req.url));
-  }
-
-  // Trava de segurança cruzada entre inquilinos
-  if (tenantSubdomain && userSubdomain !== tenantSubdomain && role !== "SUPER_ADMIN") {
-    return NextResponse.redirect(new URL("/entrar", req.url));
-  }
-
-  // Controle de permissão específico para STAFF
-  if (role === "STAFF") {
-    if (!url.pathname.startsWith("/live") && !url.pathname.startsWith("/vendas") && !url.pathname.startsWith("/verify")) {
-      return NextResponse.redirect(new URL("/live", req.url));
+    // RBAC: Staff não pode acessar /dashboard nem /admin
+    if (
+      role === "STAFF" &&
+      (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))
+    ) {
+      return NextResponse.redirect(new URL("/vendas", req.url));
     }
   }
 
   return NextResponse.next();
-}
-
-// Opcional: manter como export default se o build ainda reclamar
-export default proxy;
+});
