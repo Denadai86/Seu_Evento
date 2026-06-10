@@ -47,7 +47,7 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
               <p className="text-emerald-500/70 text-sm font-mono -mt-1">{subdomain}</p>
             </div>
           </div>
-          <LogoutButton callbackUrl="/entrar" variant="dark" />
+          <LogoutButton/>
         </div>
       </header>
 

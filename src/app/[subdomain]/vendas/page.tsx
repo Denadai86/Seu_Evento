@@ -29,7 +29,7 @@ export default async function VendasPage({ params }: { params: Promise<{ subdoma
       <div className="min-h-screen bg-[#0b0f14] flex flex-col items-center justify-center text-white p-6 text-center">
         <h1 className="text-2xl font-black mb-2">Nenhum Evento Ativo</h1>
         <p className="text-slate-400 mb-8">Peça para o administrador iniciar o evento no painel principal.</p>
-        <LogoutButton callbackUrl="/entrar" variant="dark" />
+        <LogoutButton />
       </div>
     );
   }
@@ -55,7 +55,7 @@ export default async function VendasPage({ params }: { params: Promise<{ subdoma
             {activeEvent.name}
           </p>
         </div>
-        <LogoutButton callbackUrl="/entrar" variant="dark" />
+        <LogoutButton />
       </header>
 
       <main className="flex-1 flex flex-col">

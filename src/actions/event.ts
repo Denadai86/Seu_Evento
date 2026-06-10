@@ -121,3 +121,26 @@ export async function activateDemoMode(eventId: string) {
 
   return { success: true };
 }
+
+
+export async function updatePixKey(eventId: string, pixKey: string) {
+  try {
+    // Validação básica para evitar chaves vazias sendo salvas como texto
+    const cleanKey = pixKey.trim();
+    
+    await prisma.event.update({
+      where: { id: eventId },
+      data: { pixKey: cleanKey === "" ? null : cleanKey },
+    });
+
+    // Atualiza a tela do dashboard e do PDV
+    revalidatePath(`/[subdomain]/dashboard/${eventId}`, "page");
+    revalidatePath(`/[subdomain]/vendas`, "page");
+    
+    return { success: true };
+  } catch (error) {
+    console.error("[PIX_KEY_ERROR]", error);
+    return { success: false, error: "Erro ao salvar a chave PIX." };
+  }
+}
+

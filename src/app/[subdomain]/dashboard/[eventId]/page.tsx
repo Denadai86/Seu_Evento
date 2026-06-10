@@ -95,7 +95,7 @@ export default async function EventDashboardPage({
               subdomain={subdomain} 
             />
             <div className="h-6 w-px bg-slate-800"></div>
-            <LogoutButton callbackUrl="/entrar" variant="dark" />
+            <LogoutButton />
           </div>
         </div>
       </header>

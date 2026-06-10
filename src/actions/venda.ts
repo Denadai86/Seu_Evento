@@ -21,10 +21,11 @@ export async function processBatchSale(
   try {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      select: { ticketPrice: true, isActive: true, tenantId: true },
+      select: { ticketPrice: true, isActive: true, tenantId: true, status: true },
     });
 
     if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido." };
+    if (event.status === "ENCERRADO") return { success: false, error: "Este evento já está encerrado. O caixa encontra-se fechado." };
     if (!event.isActive) return { success: false, error: "Evento não está ativo. O caixa foi encerrado pela administração." };
 
     const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
@@ -68,3 +69,4 @@ export async function processBatchSale(
     return { success: false, error: error.message || "Falha crítica ao processar carrinho." };
   }
 }
+
