@@ -1,99 +1,91 @@
-// src/middleware.ts  ← deve estar neste path para o Next.js reconhecer
+// src/proxy.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MATCHER — exclui assets estáticos e rotas de API
-// ─────────────────────────────────────────────────────────────────────────────
 export const config = {
   matcher: [
     "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$|.*\\.png$|.*\\.jpg$).*)",
   ],
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MIDDLEWARE — wrappado com auth() do NextAuth v5
-// req.auth já contém a sessão decodificada (substitui getToken)
-// ─────────────────────────────────────────────────────────────────────────────
 export default auth((req) => {
-  const url   = req.nextUrl;
+  const url      = req.nextUrl;             // ← sempre nextUrl, nunca req.url
   const hostname = req.headers.get("host") || "";
 
-  const isLocal     = hostname.includes("localhost");
-  const rootDomain  = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
-  const protocol    = isLocal ? "http://" : "https://";
+  const isLocal    = hostname.includes("localhost");
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+  const protocol   = isLocal ? "http://" : "https://";
 
-  // Identifica se a requisição está no domínio raiz
   const isRootDomain =
     hostname === rootDomain ||
     hostname === `www.${rootDomain}` ||
     hostname === "localhost:3000";
 
-  // Subdomínio atual (null se for o domínio raiz)
-  const currentSubdomain = isRootDomain
-    ? null
-    : hostname.split(".")[0];
+  const currentSubdomain = isRootDomain ? null : hostname.split(".")[0];
 
-  // Dados da sessão — req.auth é o equivalente v5 do getToken()
-  const session      = req.auth;
-  const role         = session?.user?.role;
+  const session       = req.auth;
+  const role          = session?.user?.role;
   const userSubdomain = session?.user?.subdomain;
 
-  // ── 1. ROTEAMENTO PÓS-LOGIN ──────────────────────────────────────────────
-  // Usuário logado bateu em "/" ou "/entrar" → decide para onde mandar
+  // ── helper: redirect interno sem usar req.url ─────────────────────────────
+  const to = (pathname: string) => {
+    const next = url.clone();
+    next.pathname = pathname;
+    return NextResponse.redirect(next);
+  };
+
+  // ── 1. PÓS-LOGIN ─────────────────────────────────────────────────────────
   if ((url.pathname === "/" || url.pathname === "/entrar") && session) {
 
-    // Super Admin fica sempre no domínio raiz → /admin
     if (role === "SUPER_ADMIN") {
-      return NextResponse.redirect(new URL("/admin", req.url));
+      return to("/admin");
     }
 
-    // Org Admin e Staff pertencem ao seu subdomínio
     if (userSubdomain) {
-      const tenantBaseUrl = isLocal
+      const tenantBase = isLocal
         ? `${protocol}${userSubdomain}.localhost:3000`
         : `${protocol}${userSubdomain}.${rootDomain}`;
 
-      // Está no domínio raiz ou no subdomínio errado → ejeta para o correto
+      // Está no domínio errado → ejeta para o subdomínio correto (redirect absoluto)
       if (isRootDomain || currentSubdomain !== userSubdomain) {
-        if (role === "ORG_ADMIN") return NextResponse.redirect(`${tenantBaseUrl}/dashboard`);
-        if (role === "STAFF")     return NextResponse.redirect(`${tenantBaseUrl}/vendas`);
+        if (role === "ORG_ADMIN") return NextResponse.redirect(`${tenantBase}/dashboard`);
+        if (role === "STAFF")     return NextResponse.redirect(`${tenantBase}/vendas`);
       }
 
-      // Já está no subdomínio correto → rota interna
-      if (role === "ORG_ADMIN") return NextResponse.redirect(new URL("/dashboard", req.url));
-      if (role === "STAFF")     return NextResponse.redirect(new URL("/vendas", req.url));
+      // Já no subdomínio correto → redirect interno
+      if (role === "ORG_ADMIN") return to("/dashboard");
+      if (role === "STAFF")     return to("/vendas");
     }
   }
 
-  // ── 2. PROTEÇÃO DE ROTAS PRIVADAS ────────────────────────────────────────
+  // ── 2. PROTEÇÃO DE ROTAS ──────────────────────────────────────────────────
   const publicRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
   const isPublicRoute = publicRoutes.some(
-    (route) => url.pathname === route || url.pathname.startsWith(`${route}/`)
+    (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
   );
 
-  // Rota protegida sem sessão → login (preservando callbackUrl)
   if (!isPublicRoute && !session) {
-    const callbackUrl = encodeURIComponent(url.pathname);
-    return NextResponse.redirect(
-      new URL(`/entrar?callbackUrl=${callbackUrl}`, req.url)
-    );
+    const next = url.clone();
+    next.pathname = "/entrar";
+    next.searchParams.set("callbackUrl", url.pathname);
+    return NextResponse.redirect(next);
   }
 
   // ── 3. ISOLAMENTO ENTRE TENANTS + RBAC ───────────────────────────────────
   if (session && role !== "SUPER_ADMIN") {
 
-    // Cross-Tenant Lock: bloqueia acesso ao subdomínio alheio
     if (!isRootDomain && userSubdomain !== currentSubdomain) {
-      return NextResponse.redirect(new URL("/entrar?error=AccessDenied", req.url));
+      const next = url.clone();
+      next.pathname = "/entrar";
+      next.searchParams.set("error", "AccessDenied");
+      return NextResponse.redirect(next);
     }
 
-    // RBAC: Staff não pode acessar /dashboard nem /admin
     if (
       role === "STAFF" &&
       (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))
     ) {
-      return NextResponse.redirect(new URL("/vendas", req.url));
+      return to("/vendas");
     }
   }
 
