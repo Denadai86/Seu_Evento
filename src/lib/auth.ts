@@ -1,95 +1,63 @@
-// src/lib/auth.ts
-import NextAuth, { DefaultSession } from "next-auth";
+import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
-import { loginRateLimit } from "@/lib/ratelimit";
+import { compare } from "bcryptjs";
 
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id: string;
-      role: string;
-      tenantId: string | null;
-      subdomain: string | null;
-    } & DefaultSession["user"];
-  }
-
-  interface User {
-    role?: string;
-    tenantId?: string | null;
-    subdomain?: string | null;
-  }
-}
-
-declare module "next-auth/jwt" {
-  interface JWT {
-    role?: string;
-    tenantId?: string | null;
-    subdomain?: string | null;
-  }
-}
-
-const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.com";
-const isProd = process.env.NODE_ENV === "production";
-
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  trustHost: true,
-  session: { strategy: "jwt" },
-  pages: { signIn: "/entrar" },
-  cookies: {
-    sessionToken: {
-      name: isProd ? "__Secure-authjs.session-token" : "authjs.session-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: isProd,
-        domain: isProd ? `.${rootDomain}` : undefined, // Permite login cruzado
-      },
-    },
-  },
-
+export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     CredentialsProvider({
-      name: "Credenciais",
+      name: "Credentials",
       credentials: {
-        identifier: { label: "Email ou Usuário", type: "text" },
-        password: { label: "Senha ou PIN", type: "password" },
+        email:    { label: "E-mail ou Usuário", type: "text" },
+        password: { label: "Senha ou PIN",      type: "password" },
       },
-
       async authorize(credentials) {
-        if (!credentials?.identifier || !credentials?.password) return null;
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("Credenciais não informadas.");
+        }
 
-        const rawIdentifier = (credentials.identifier as string).trim();
+        const identifier = (credentials.email as string).trim();
         const rawPassword = credentials.password as string;
 
-        // Rate Limit (Proteção contra força bruta em PINs de 4 dígitos)
-        const { success } = await loginRateLimit.limit(`login_${rawIdentifier.toLowerCase()}`);
-        if (!success) throw new Error("Muitas tentativas. Aguarde 15 minutos.");
-
-        // Lógica Inteligente de Identificação
-        const isEmail = rawIdentifier.includes("@");
-
         const user = await prisma.user.findFirst({
-          where: isEmail
-            ? { email: rawIdentifier.toLowerCase() }
-            : { username: rawIdentifier.toUpperCase() },
-          include: { tenant: true },
+          where: {
+            OR: [
+              { email:    identifier.toLowerCase() },
+              { username: identifier.toUpperCase() },
+            ],
+          },
         });
 
-        if (!user || !user.password) return null;
+        if (!user || !user.password) {
+          console.error("❌ Usuário não encontrado:", identifier);
+          return null;
+        }
 
-        const isPasswordValid = await bcrypt.compare(rawPassword, user.password);
-        if (!isPasswordValid) return null;
+        const isPasswordValid = await compare(rawPassword, user.password);
+        if (!isPasswordValid) {
+          console.error("❌ Senha incorreta:", identifier);
+          return null;
+        }
+
+        // ── FIX 2: busca o subdomain do tenant para o middleware poder rotear ──
+        let subdomain: string | null = null;
+        if (user.tenantId) {
+          const tenant = await prisma.tenant.findUnique({
+            where:  { id: user.tenantId },
+            select: { subdomain: true },
+          });
+          subdomain = tenant?.subdomain ?? null;
+        }
+
+        console.log("✅ Login bem-sucedido:", user.email || user.username, "| subdomain:", subdomain);
 
         return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          tenantId: user.tenantId ?? null,
-          subdomain: user.tenant?.subdomain ?? null,
+          id:       user.id,
+          name:     user.name,
+          email:    user.email,
+          role:     user.role,
+          tenantId: user.tenantId,
+          subdomain,             // ← agora vai junto no token
         };
       },
     }),
@@ -98,20 +66,26 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role = user.role;
-        token.tenantId = user.tenantId ?? null;
-        token.subdomain = user.subdomain ?? null;
+        token.role      = user.role;
+        token.tenantId  = user.tenantId;
+        token.subdomain = user.subdomain; // ← FIX 2: persiste no JWT
       }
       return token;
     },
+
     async session({ session, token }) {
       if (token && session.user) {
-        session.user.id = token.sub!;
-        session.user.role = (token.role as string) ?? "";
-        session.user.tenantId = (token.tenantId as string | null) ?? null;
-        session.user.subdomain = (token.subdomain as string | null) ?? null;
+        session.user.id        = token.sub as string;
+        session.user.role      = token.role      as string;
+        session.user.tenantId  = (token.tenantId  as string) || null;
+        session.user.subdomain = (token.subdomain as string) || null; // ← FIX 2: expõe na sessão
       }
       return session;
     },
   },
+
+  pages:   { signIn: "/entrar" },
+  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
+  secret:  process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  //        ↑ aceita os dois nomes enquanto você migra o .env
 });

@@ -19,9 +19,10 @@ export default function UnifiedLogin() {
     try {
       const res = await signIn("credentials", {
         redirect: false,
-        identifier: identifier.trim(),
+        email: identifier.trim(),   // ← era "identifier:", auth.ts espera "email:"
         password: password.trim(),
       });
+
 
       if (res?.error) {
         setError("Credenciais inválidas. Verifique seu acesso.");

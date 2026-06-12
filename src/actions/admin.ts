@@ -234,3 +234,76 @@ export async function getImpersonationToken(tenantId: string) {
     return { success: false, error: "Erro ao gerar chave de acesso remoto." };
   }
 }
+
+// Adicionar ao final de src/actions/admin.ts
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. ALTERAR A PRÓPRIA SENHA DO SUPER ADMIN LOGADO
+// ─────────────────────────────────────────────────────────────────────────────
+export async function updateSelfPassword(newPassword: string) {
+  try {
+    const session = await requireGodMode();
+    const userId = session.user?.id; // Puxa o ID do admin que disparou a ação
+
+    if (!userId) {
+      return { success: false, error: "Sessão expirada ou inválida." };
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return { success: false, error: "A senha deve conter pelo menos 6 caracteres." };
+    }
+
+    const hashedPassword = await hash(newPassword, 12);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("[UPDATE_SELF_PASSWORD_ERROR]", error);
+    return { success: false, error: error.message || "Erro interno ao atualizar senha." };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. CRIAR UM NOVO SUPER ADMIN GLOBAL (CO-ADMINISTRADOR)
+// ─────────────────────────────────────────────────────────────────────────────
+export async function createNewSuperAdmin(data: { name: string; email: string; pass: string }) {
+  try {
+    await requireGodMode();
+
+    if (!data.name || !data.email || !data.pass) {
+      return { success: false, error: "Todos os campos são obrigatórios." };
+    }
+
+    // Validação de e-mail duplicado
+    const existingUser = await prisma.user.findUnique({
+      where: { email: data.email.toLowerCase().trim() },
+    });
+
+    if (existingUser) {
+      return { success: false, error: "Este e-mail já está sendo utilizado na plataforma." };
+    }
+
+    const hashedPassword = await hash(data.pass, 12);
+
+    // 🔥 Padrão Sênior: Super Admin nasce com tenantId: null porque ele governa acima de qualquer inquilino!
+    await prisma.user.create({
+      data: {
+        name: data.name,
+        email: data.email.toLowerCase().trim(),
+        password: hashedPassword,
+        role: "SUPER_ADMIN",
+        tenantId: null, 
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("[CREATE_SUPER_ADMIN_ERROR]", error);
+    return { success: false, error: error.message || "Erro ao criar novo administrador." };
+  }
+}

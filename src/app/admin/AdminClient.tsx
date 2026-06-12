@@ -16,6 +16,8 @@ import {
   RefreshCcw, Power, Plus, ShieldCheck, ExternalLink, X,
   Key, Copy, Eye, AlertOctagon 
 } from "lucide-react";
+import PlatformSettings from "./_components/PlatformSettings";
+
 
 export default function AdminClient() {
   // ==========================================
@@ -172,6 +174,8 @@ export default function AdminClient() {
           <StatCard icon={<Users />} label="Voluntários/PDVs" value={stats.roles?.verifiers || 0} color="amber" />
         </div>
       )}
+
+     <PlatformSettings />
 
       {/* 3. LISTAGEM DE CLIENTES */}
       <div className="bg-slate-800/50 border border-slate-700 rounded-3xl overflow-hidden">
