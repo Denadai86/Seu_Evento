@@ -9,12 +9,11 @@ export const config = {
 };
 
 export default auth((req) => {
-  const url      = req.nextUrl;             // ← sempre nextUrl, nunca req.url
+  const url      = req.nextUrl; 
   const hostname = req.headers.get("host") || "";
 
   const isLocal    = hostname.includes("localhost");
   const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
-  const protocol   = isLocal ? "http://" : "https://";
 
   const isRootDomain =
     hostname === rootDomain ||
@@ -25,12 +24,21 @@ export default auth((req) => {
 
   const session       = req.auth;
   const role          = session?.user?.role;
-  const userSubdomain = session?.user?.subdomain;
+  // Fallback seguro caso o subdomain esteja aninhado no objeto tenant
+  const userSubdomain = session?.user?.subdomain || (session?.user as any)?.tenant?.subdomain;
 
-  // ── helper: redirect interno sem usar req.url ─────────────────────────────
+  // ── HELPER 1: Redirect interno (Mesmo domínio) ──────────────────────────
   const to = (pathname: string) => {
     const next = url.clone();
     next.pathname = pathname;
+    return NextResponse.redirect(next);
+  };
+
+  // ── HELPER 2: A SOLUÇÃO SÊNIOR (Redirect cruzado para Subdomínio) ───────
+  const toSubdomain = (subdomain: string, pathname: string) => {
+    const next = url.clone(); // Objeto inteligente, sabe se é http ou https
+    next.pathname = pathname;
+    next.host = isLocal ? `${subdomain}.localhost:3000` : `${subdomain}.${rootDomain}`;
     return NextResponse.redirect(next);
   };
 
@@ -42,17 +50,13 @@ export default auth((req) => {
     }
 
     if (userSubdomain) {
-      const tenantBase = isLocal
-        ? `${protocol}${userSubdomain}.localhost:3000`
-        : `${protocol}${userSubdomain}.${rootDomain}`;
-
-      // Está no domínio errado → ejeta para o subdomínio correto (redirect absoluto)
+      // Está no domínio errado (raiz ou outro inquilino) → ejeta para o subdomínio correto
       if (isRootDomain || currentSubdomain !== userSubdomain) {
-        if (role === "ORG_ADMIN") return NextResponse.redirect(`${tenantBase}/dashboard`);
-        if (role === "STAFF")     return NextResponse.redirect(`${tenantBase}/vendas`);
+        if (role === "ORG_ADMIN") return toSubdomain(userSubdomain, "/dashboard");
+        if (role === "STAFF")     return toSubdomain(userSubdomain, "/vendas");
       }
 
-      // Já no subdomínio correto → redirect interno
+      // Já está no subdomínio correto → redirect interno simples
       if (role === "ORG_ADMIN") return to("/dashboard");
       if (role === "STAFF")     return to("/vendas");
     }
@@ -73,7 +77,8 @@ export default auth((req) => {
 
   // ── 3. ISOLAMENTO ENTRE TENANTS + RBAC ───────────────────────────────────
   if (session && role !== "SUPER_ADMIN") {
-
+    
+    // Org_Admin ou Staff tentando acessar subdomínio de outra ONG
     if (!isRootDomain && userSubdomain !== currentSubdomain) {
       const next = url.clone();
       next.pathname = "/entrar";
@@ -81,12 +86,21 @@ export default auth((req) => {
       return NextResponse.redirect(next);
     }
 
+    // Staff tentando dar uma de Admin
     if (
       role === "STAFF" &&
       (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))
     ) {
       return to("/vendas");
     }
+  }
+
+  // ── 4. REWRITE PARA MULTI-TENANT (O SEGREDO DO APP ROUTER) ──────────────
+  // Isso garante que a URL /dashboard no navegador acesse a pasta /src/app/[subdomain]/dashboard
+  if (currentSubdomain) {
+    const rewriteUrl = url.clone();
+    rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
+    return NextResponse.rewrite(rewriteUrl);
   }
 
   return NextResponse.next();
