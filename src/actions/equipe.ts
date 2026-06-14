@@ -34,6 +34,15 @@ export async function createAndAssignStaff(
   const tenantId = await requireTenant();
   await requireAdminRole();
 
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { subdomain: true },
+  });
+
+  if (!tenant) {
+    throw new Error("Tenant não encontrado.");
+  }
+
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
   if (!event) throw new Error("Evento inválido ou acesso negado.");
 
@@ -75,7 +84,7 @@ export async function createAndAssignStaff(
   };
 });
 
-  revalidatePath(`/[subdomain]/dashboard/${eventId}`, "layout");
+  revalidatePath(`/${tenant.subdomain}/dashboard/${eventId}`, "page");
   return { success: true, ...result };
 }
 
@@ -91,6 +100,15 @@ export async function toggleStaffCapability(
   const tenantId = await requireTenant();
   await requireAdminRole();
 
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { subdomain: true },
+  });
+
+  if (!tenant) {
+    throw new Error("Tenant não encontrado.");
+  }
+
   const staff = await prisma.eventStaff.findFirst({
     where: { id: eventStaffId, event: { tenantId } },
   });
@@ -102,7 +120,7 @@ export async function toggleStaffCapability(
     data: { [capability]: newValue },
   });
 
-  revalidatePath(`/[subdomain]/dashboard/${staff.eventId}`, "layout");
+  revalidatePath(`/${tenant.subdomain}/dashboard/${staff.eventId}`, "page");
   return { success: true };
 }
 

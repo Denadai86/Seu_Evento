@@ -205,7 +205,7 @@ export default async function EventDashboardPage({
                     Aloque voluntários, gere PINs de acesso, defina quem pode vender cartelas e quem terá acesso ao palco do locutor.
                   </p>
                   <Link 
-                    href={`/dashboard/${event.id}/equipe`}
+                    href={`/${subdomain}/dashboard/${event.id}/equipe`}
                     className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-xl transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:shadow-[0_0_50px_rgba(37,99,235,0.5)]"
                   >
                     Gerenciar Permissões e Escala <ArrowRight size={20} />
@@ -330,7 +330,7 @@ export default async function EventDashboardPage({
                   </form>
 
                   <a 
-                    href={`/dashboard/${event.id}/relatorio`} 
+                    href={`/${subdomain}/dashboard/${event.id}/relatorio`} 
                     target="_blank"
                     className="col-span-full sm:col-span-2 lg:col-span-4 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20 mt-2"
                   >
