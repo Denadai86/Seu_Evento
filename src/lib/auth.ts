@@ -4,8 +4,26 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/prisma";
 import { compare } from "bcryptjs";
 
-const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+// Extrai domínio de uma URL, removendo protocolo se existir
+const extractDomain = (url: string) => {
+  try {
+    // Se for URL com protocolo, extrai host
+    if (url.includes("://")) {
+      return new URL(url).hostname;
+    }
+    // Senão, retorna como está
+    return url;
+  } catch {
+    return url;
+  }
+};
+
+const rawDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+const rootDomain = extractDomain(rawDomain);
 const isProd     = process.env.NODE_ENV === "production";
+
+console.error(`🔧 [CONFIG] ROOT_DOMAIN configurado como: "${rootDomain}" (raw: "${rawDomain}")`);
+console.error(`🔧 [CONFIG] isProd: ${isProd}`);
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true, // ← obrigatório em produção atrás de proxy reverso
