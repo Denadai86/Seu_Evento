@@ -1,6 +1,5 @@
 // src/app/[subdomain]/dashboard/[eventId]/equipe/page.tsx
 import prisma from "@/lib/prisma";
-import { requireTenant } from "@/lib/requireTenant";
 import StaffClient from "./StaffClient";
 import { notFound } from "next/navigation";
 
@@ -9,14 +8,19 @@ export default async function EquipePage({
 }: {
   params: Promise<{ subdomain: string; eventId: string }>;
 }) {
-  const { eventId } = await params;
-  const tenantId = await requireTenant();
+  // Pegamos o subdomain direto da URL, assim como fazemos no dashboard pai!
+  const { subdomain, eventId } = await params;
 
+  // Busca segura garantindo que o evento pertence ao subdomínio da URL
   const event = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
+    where: { 
+      id: eventId, 
+      tenant: { subdomain: subdomain } 
+    },
     select: { name: true, isActive: true },
   });
 
+  // Se der 404 agora, é porque o ID do evento na URL não existe no banco!
   if (!event) return notFound();
 
   const staffList = await prisma.eventStaff.findMany({

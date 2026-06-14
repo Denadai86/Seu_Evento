@@ -13,6 +13,7 @@ import PrizeManager from "./PrizeManager";
 import SponsorManager from "./SponsorManager";
 import TicketPriceEditor from "./TicketPriceEditor";
 import EventWizard from "./EventWizard";
+import PixKeyEditor from "./PixKeyEditor"; // 👈 NOVO IMPORT
 
 export default async function EventDashboardPage({
   params,
@@ -35,14 +36,13 @@ export default async function EventDashboardPage({
         select: { isPaid: true, isSold: true, price: true }
       },
       prizes: { orderBy: { order: 'asc' } },
-      // 🏦 MUDANÇA ARQUITETURAL: Puxamos as transações (O Livro Razão) para auditoria perfeita
       transactions: {
         select: { amount: true, eventStaffId: true }
       },
       staff: {
         include: { 
           user: { select: { name: true, username: true } }, 
-          cards: { select: { id: true, isPaid: true, price: true } } // Isso é o estoque físico dele
+          cards: { select: { id: true, isPaid: true, price: true } }
         },
         orderBy: { createdAt: 'desc' }
       }
@@ -69,7 +69,7 @@ export default async function EventDashboardPage({
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-4">
             <Link 
-              href={`/${subdomain}/dashboard`}
+              href="/dashboard"
               className="p-2 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white"
             >
               <ArrowLeft size={20} />
@@ -205,7 +205,7 @@ export default async function EventDashboardPage({
                     Aloque voluntários, gere PINs de acesso, defina quem pode vender cartelas e quem terá acesso ao palco do locutor.
                   </p>
                   <Link 
-                    href={`/${subdomain}/dashboard/${event.id}/equipe`}
+                    href={`/dashboard/${event.id}/equipe`}
                     className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-xl transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:shadow-[0_0_50px_rgba(37,99,235,0.5)]"
                   >
                     Gerenciar Permissões e Escala <ArrowRight size={20} />
@@ -213,7 +213,7 @@ export default async function EventDashboardPage({
                 </div>
               </div>
 
-              {/* 💵 MÓDULO 4: AUDITORIA DE VENDAS 100% CORRIGIDO */}
+              {/* 💵 MÓDULO 4: AUDITORIA DE VENDAS */}
               <div className="lg:col-span-1 bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col h-[400px]">
                 <div className="flex items-center gap-3 mb-6 shrink-0">
                   <Wallet className="text-emerald-400" size={28} />
@@ -228,18 +228,13 @@ export default async function EventDashboardPage({
                     <p className="text-slate-500 text-sm text-center py-4">Nenhuma equipe alocada.</p>
                   ) : (
                     event.staff.map((member) => {
-                      // O ESTOQUE FÍSICO (Cartelas que estão no bolso da pessoa, pagas ou não)
                       const totalAssignedCards = member.cards.length;
-                      
-                      // O LIVRO RAZÃO (Vendas 100% confirmadas através do seu PDV)
                       const memberTransactions = event.transactions.filter(t => t.eventStaffId === member.id);
                       const pdvSalesCount = memberTransactions.length;
                       const pdvRevenueInCents = memberTransactions.reduce((sum, t) => sum + (t.amount || 0), 0);
 
-                      // Se o voluntário não pegou bloco de cartela e não vendeu nada no app, oculta ele pra não poluir.
                       if (totalAssignedCards === 0 && pdvSalesCount === 0) return null;
 
-                      // Calcula a % de vendas se ele tiver estoque
                       const salesProgress = totalAssignedCards > 0 
                         ? Math.min(100, (pdvSalesCount / totalAssignedCards) * 100) 
                         : 0;
@@ -258,7 +253,6 @@ export default async function EventDashboardPage({
                             <span className="text-emerald-500/70">{pdvSalesCount} Vendas (PDV)</span>
                           </div>
                           
-                          {/* Barra de Progresso do Estoque vs Venda */}
                           {totalAssignedCards > 0 && (
                             <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
                               <div 
@@ -272,6 +266,13 @@ export default async function EventDashboardPage({
                     })
                   )}
                 </div>
+              </div>
+
+              {/* 💳 INJEÇÃO DO MÓDULO PIX */}
+              <div className="col-span-full">
+                {/* Aqui presumimos que no seu banco (Prisma), a chave pix foi nomeada como pixKey no modelo Event. 
+                    Se for outro nome (ex: pix), altere 'event.pixKey' de acordo. */}
+                <PixKeyEditor eventId={event.id} initialPixKey={(event as any).pixKey || null} />
               </div>
 
               {/* MÓDULO 5: LINKS RÁPIDOS E AÇÕES GLOBAIS */}
@@ -292,7 +293,7 @@ export default async function EventDashboardPage({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full relative z-10">
                   <a 
-                    href={`/${subdomain}/live`} 
+                    href="/live" 
                     target="_blank"
                     className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-slate-700"
                   >
@@ -300,7 +301,7 @@ export default async function EventDashboardPage({
                   </a>
                   
                   <a 
-                    href={`/${subdomain}/projector?eventId=${event.id}`} 
+                    href={`/projector?eventId=${event.id}`} 
                     target="_blank"
                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 text-center flex items-center justify-center gap-2"
                   >
@@ -308,7 +309,7 @@ export default async function EventDashboardPage({
                   </a>
 
                   <a 
-                    href={`/${subdomain}/verify?event=${event.id}`}
+                    href={`/verify?event=${event.id}`}
                     target="_blank"
                     className="bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 border border-violet-500/30"
                   >
@@ -329,7 +330,7 @@ export default async function EventDashboardPage({
                   </form>
 
                   <a 
-                    href={`/${subdomain}/dashboard/${event.id}/relatorio`} 
+                    href={`/dashboard/${event.id}/relatorio`} 
                     target="_blank"
                     className="col-span-full sm:col-span-2 lg:col-span-4 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20 mt-2"
                   >
@@ -342,7 +343,7 @@ export default async function EventDashboardPage({
           </>
         )}
 
-        {/* 🌟 FOOTER MEGA BLASTER PREMIUM SAAS */}
+        {/* 🌟 FOOTER */}
         <footer className="mt-20 border-t border-slate-800/50 pt-12 pb-8 flex flex-col items-center justify-center text-center">
           <div className="w-14 h-14 bg-gradient-to-br from-emerald-500/20 to-emerald-900/20 rounded-2xl flex items-center justify-center text-emerald-400 mb-6 border border-emerald-500/20 shadow-[0_0_40px_rgba(16,185,129,0.1)]">
             <ShieldAlert size={28} /> 
