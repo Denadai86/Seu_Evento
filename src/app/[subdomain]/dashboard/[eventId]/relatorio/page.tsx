@@ -78,7 +78,7 @@ export default async function RelatorioPage({
       <header className="print:hidden bg-[#0b0f14] text-white p-4 sticky top-0 z-50 shadow-md">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Link href={`/${subdomain}/dashboard/${eventId}`} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition">
+            <Link href={`/dashboard/${eventId}`} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition">
               <ArrowLeft size={20} />
             </Link>
             <h1 className="font-bold">Voltar ao Painel</h1>

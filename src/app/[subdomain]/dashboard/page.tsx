@@ -102,13 +102,13 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
                 
                 <div className="flex gap-3 mt-6">
                   <Link
-                    href={`/${subdomain}/dashboard/${activeEvent.id}/equipe`}
+                    href={`/dashboard/${activeEvent.id}/equipe`}
                     className="flex-1 bg-white/10 hover:bg-white/15 text-white font-bold py-3.5 rounded-2xl text-center transition-all"
                   >
                     Equipe
                   </Link>
                   <Link
-                    href={`/${subdomain}/dashboard/${activeEvent.id}/tesouraria`}
+                    href={`/dashboard/${activeEvent.id}/tesouraria`}
                     className="flex-1 bg-white/10 hover:bg-white/15 text-white font-bold py-3.5 rounded-2xl text-center transition-all"
                   >
                     Tesouraria
@@ -128,7 +128,7 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
               </div>
               {activeEvent ? (
                 <Link
-                  href={`/${subdomain}/dashboard/${activeEvent.id}/equipe`}
+                  href={`/dashboard/${activeEvent.id}/equipe`}
                   className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl text-center transition-all"
                 >
                   Gerenciar Equipe
@@ -141,7 +141,7 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
             {/* Tesouraria Rápida */}
             {activeEvent && (
               <Link
-                href={`/${subdomain}/dashboard/${activeEvent.id}/tesouraria`}
+                href={`/dashboard/${activeEvent.id}/tesouraria`}
                 className="block bg-slate-800 hover:bg-slate-700 border border-slate-700 p-8 rounded-3xl transition-all group"
               >
                 <div className="font-bold text-xl mb-2 group-hover:text-emerald-400">Tesouraria</div>
