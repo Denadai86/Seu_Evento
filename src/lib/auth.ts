@@ -19,11 +19,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
+          console.error("❌ Credenciais não informadas.");
           throw new Error("Credenciais não informadas.");
         }
 
         const identifier = (credentials.email as string).trim().toLowerCase();
         const rawPassword = credentials.password as string;
+        
+        console.log("🔍 Tentando autenticar:", identifier);
 
         const user = await prisma.user.findFirst({
           where: {
@@ -34,16 +37,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           },
         });
 
-        if (!user || !user.password) {
+        if (!user) {
           console.error("❌ Usuário não encontrado:", identifier);
           return null;
         }
 
-        const isPasswordValid = await compare(rawPassword, user.password);
-        if (!isPasswordValid) {
-          console.error("❌ Senha incorreta para:", identifier);
+        if (!user.password) {
+          console.error("❌ Usuário sem senha:", identifier);
           return null;
         }
+
+        console.log("🔐 Validando senha para:", identifier);
+        const isPasswordValid = await compare(rawPassword, user.password);
+        
+        if (!isPasswordValid) {
+          console.error("❌ Senha incorreta para:", identifier);
+          console.error("   Hash armazenado (primeiros 20 chars):", user.password.substring(0, 20));
+          console.error("   Senha fornecida: [redacted]");
+          return null;
+        }
+
+        console.log("✅ Login:", user.email || user.username, "| role:", user.role);
 
         // Busca subdomain do tenant para o middleware rotear corretamente
         let subdomain: string | null = null;
@@ -54,8 +68,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           });
           subdomain = tenant?.subdomain ?? null;
         }
-
-        console.log("✅ Login:", user.email || user.username, "| role:", user.role, "| subdomain:", subdomain);
 
         return {
           id:        user.id,

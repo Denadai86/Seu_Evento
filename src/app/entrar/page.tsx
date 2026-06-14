@@ -19,7 +19,7 @@ export default function UnifiedLogin() {
     try {
       const res = await signIn("credentials", {
         redirect: false,
-        email: identifier.trim(),   // ← era "identifier:", auth.ts espera "email:"
+        email: identifier.trim().toLowerCase(),
         password: password.trim(),
       });
 
