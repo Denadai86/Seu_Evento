@@ -13,8 +13,8 @@ async function main() {
   // Sua senha mestra criptografada
   const hashedPassword = await hash('admin123', 10);
   
-  // Seu e-mail do Google
-  const seuEmail = 'jaodena@gmail.com'; 
+  // Seu e-mail do Google (SEMPRE em minúsculas no banco)
+  const seuEmail = 'jaodena@gmail.com'.toLowerCase(); 
 
   const superAdmin = await prisma.user.upsert({
     where: { email: seuEmail },

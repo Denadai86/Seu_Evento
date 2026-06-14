@@ -22,13 +22,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           throw new Error("Credenciais não informadas.");
         }
 
-        const identifier = (credentials.email as string).trim();
+        const identifier = (credentials.email as string).trim().toLowerCase();
         const rawPassword = credentials.password as string;
 
         const user = await prisma.user.findFirst({
           where: {
             OR: [
-              { email:    identifier.toLowerCase() },
+              { email:    identifier },
               { username: identifier.toUpperCase() },
             ],
           },
