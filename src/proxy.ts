@@ -13,7 +13,10 @@ export default auth((req) => {
   const hostname = req.headers.get("host") || "";
 
   const isLocal    = hostname.includes("localhost");
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+  
+  // 🔥 A TRAVA DE SEGURANÇA: Remove protocolos (http:// ou https://) e barras finais que possam vir do .env
+  let rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+  rootDomain = rootDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
   const isRootDomain =
     hostname === rootDomain ||
@@ -36,7 +39,7 @@ export default auth((req) => {
 
   // ── HELPER 2: A SOLUÇÃO SÊNIOR (Redirect cruzado para Subdomínio) ───────
   const toSubdomain = (subdomain: string, pathname: string) => {
-    const next = url.clone(); // Objeto inteligente, sabe se é http ou https
+    const next = url.clone(); // Objeto inteligente, preserva o protocolo
     next.pathname = pathname;
     next.host = isLocal ? `${subdomain}.localhost:3000` : `${subdomain}.${rootDomain}`;
     return NextResponse.redirect(next);
