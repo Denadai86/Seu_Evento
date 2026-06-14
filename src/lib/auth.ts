@@ -18,65 +18,81 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Senha ou PIN",      type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          console.error("❌ Credenciais não informadas.");
-          throw new Error("Credenciais não informadas.");
-        }
+        try {
+          console.error("🔐🔐🔐 [AUTH] authorize() CHAMADO 🔐🔐🔐");
+          
+          if (!credentials?.email || !credentials?.password) {
+            console.error("❌ [AUTH] Credenciais não informadas.", { email: !!credentials?.email, password: !!credentials?.password });
+            return null;
+          }
 
-        const identifier = (credentials.email as string).trim().toLowerCase();
-        const rawPassword = credentials.password as string;
-        
-        console.log("🔍 Tentando autenticar:", identifier);
+          const identifier = (credentials.email as string).trim().toLowerCase();
+          const rawPassword = credentials.password as string;
+          
+          console.error(`🔍 [AUTH] Procurando usuário: "${identifier}"`);
 
-        const user = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { email:    identifier },
-              { username: identifier.toUpperCase() },
-            ],
-          },
-        });
-
-        if (!user) {
-          console.error("❌ Usuário não encontrado:", identifier);
-          return null;
-        }
-
-        if (!user.password) {
-          console.error("❌ Usuário sem senha:", identifier);
-          return null;
-        }
-
-        console.log("🔐 Validando senha para:", identifier);
-        const isPasswordValid = await compare(rawPassword, user.password);
-        
-        if (!isPasswordValid) {
-          console.error("❌ Senha incorreta para:", identifier);
-          console.error("   Hash armazenado (primeiros 20 chars):", user.password.substring(0, 20));
-          console.error("   Senha fornecida: [redacted]");
-          return null;
-        }
-
-        console.log("✅ Login:", user.email || user.username, "| role:", user.role);
-
-        // Busca subdomain do tenant para o middleware rotear corretamente
-        let subdomain: string | null = null;
-        if (user.tenantId) {
-          const tenant = await prisma.tenant.findUnique({
-            where:  { id: user.tenantId },
-            select: { subdomain: true },
+          const user = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { email:    identifier },
+                { username: identifier.toUpperCase() },
+              ],
+            },
           });
-          subdomain = tenant?.subdomain ?? null;
-        }
 
-        return {
-          id:        user.id,
-          name:      user.name,
-          email:     user.email,
-          role:      user.role,
-          tenantId:  user.tenantId,
-          subdomain,
-        };
+          if (!user) {
+            console.error(`❌ [AUTH] Usuário NÃO encontrado no banco: "${identifier}"`);
+            console.error(`❌ [AUTH] Procurados com: email="${identifier}" ou username="${identifier.toUpperCase()}"`);
+            return null;
+          }
+
+          console.error(`✅ [AUTH] Usuário ENCONTRADO: ${user.email}`);
+
+          if (!user.password) {
+            console.error(`❌ [AUTH] Usuário encontrado mas SEM SENHA: ${user.email}`);
+            return null;
+          }
+
+          console.error(`🔐 [AUTH] Comparando senha... (hash primeiros 20 chars: ${user.password.substring(0, 20)})`);
+          
+          let isPasswordValid = false;
+          try {
+            isPasswordValid = await compare(rawPassword, user.password);
+          } catch (compareError) {
+            console.error(`❌ [AUTH] ERRO ao comparar senha:`, compareError);
+            return null;
+          }
+          
+          if (!isPasswordValid) {
+            console.error(`❌ [AUTH] Senha INCORRETA para: ${identifier}`);
+            return null;
+          }
+
+          console.error(`✅✅✅ [AUTH] Login SUCESSO: ${user.email}`);
+
+          // Busca subdomain do tenant para o middleware rotear corretamente
+          let subdomain: string | null = null;
+          if (user.tenantId) {
+            const tenant = await prisma.tenant.findUnique({
+              where:  { id: user.tenantId },
+              select: { subdomain: true },
+            });
+            subdomain = tenant?.subdomain ?? null;
+          }
+
+          return {
+            id:        user.id,
+            name:      user.name,
+            email:     user.email,
+            role:      user.role,
+            tenantId:  user.tenantId,
+            subdomain,
+          };
+        } catch (err: any) {
+          console.error("❌ [AUTH] ERRO NÃO TRATADO:", err?.message || err);
+          console.error("❌ [AUTH] Stack:", err?.stack);
+          return null;
+        }
       },
     }),
   ],
