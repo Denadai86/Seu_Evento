@@ -4,8 +4,7 @@ import { redirect } from "next/navigation";
 import EventList from "./EventList";
 import LogoutButton from "@/components/auth/LogoutButton";
 import Link from "next/link";
-import { Calendar, Users, Activity, UserCheck, ArrowRight, Plus, XCircle } from "lucide-react";
-import { closeEventAndGenerateReport } from "@/actions/closeEvent";
+import { Calendar, Users, Activity, Plus } from "lucide-react";
 import CloseEventButton from "./CloseEventButton";
 
 export default async function TenantDashboardPage({ params }: { params: Promise<{ subdomain: string }> }) {
@@ -81,7 +80,7 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
               <h2 className="text-3xl font-black text-white">Meus Eventos</h2>
               <Link 
                 href="/dashboard/novo-evento" 
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-3 rounded-2xl transition-all"
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-3 rounded-2xl transition-all shadow-lg shadow-emerald-900/20"
               >
                 <Plus size={20} /> Novo Evento
               </Link>
@@ -91,62 +90,57 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
 
           {/* Sidebar - Ações Rápidas */}
           <div className="lg:col-span-4 space-y-6">
-            {/* Evento Ativo */}
-            {activeEvent && (
+            
+            {/* NOVO: Link Global de RH (Aparece sempre!) */}
+            <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-blue-900/50 rounded-3xl p-8 relative overflow-hidden group">
+              <div className="absolute -top-16 -right-16 w-40 h-40 bg-blue-500/10 blur-[50px] rounded-full transition-transform group-hover:scale-150"></div>
+              <div className="flex items-center gap-4 mb-4 relative z-10">
+                <div className="p-3 bg-blue-900/30 text-blue-400 rounded-xl border border-blue-500/20">
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">Equipe Global</h3>
+                  <p className="text-slate-400 text-xs mt-1">Gerencie os voluntários da ONG.</p>
+                </div>
+              </div>
+              <Link
+                href="/dashboard/equipe"
+                className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl text-center transition-all shadow-[0_0_20px_rgba(37,99,235,0.2)] hover:shadow-[0_0_40px_rgba(37,99,235,0.4)] relative z-10"
+              >
+                Central de RH
+              </Link>
+            </div>
+
+            {/* Painel do Evento Ativo */}
+            {activeEvent ? (
               <div className="bg-gradient-to-br from-emerald-950 to-slate-900 border border-emerald-500/30 rounded-3xl p-8">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse" />
                   <span className="uppercase text-xs font-bold tracking-widest text-emerald-400">Evento em Andamento</span>
                 </div>
                 <h3 className="text-xl font-black text-white mb-1">{activeEvent.name}</h3>
+                <p className="text-slate-400 text-sm mb-6">Controle operacional e financeiro do dia.</p>
                 
-                <div className="flex gap-3 mt-6">
-                  <Link
-                    href={`/dashboard/${activeEvent.id}/equipe`}
-                    className="flex-1 bg-white/10 hover:bg-white/15 text-white font-bold py-3.5 rounded-2xl text-center transition-all"
-                  >
-                    Equipe
-                  </Link>
+                <div className="space-y-3">
                   <Link
                     href={`/dashboard/${activeEvent.id}/tesouraria`}
-                    className="flex-1 bg-white/10 hover:bg-white/15 text-white font-bold py-3.5 rounded-2xl text-center transition-all"
+                    className="block w-full bg-white/10 hover:bg-white/15 text-white font-bold py-4 rounded-xl text-center transition-all border border-white/5"
                   >
-                    Tesouraria
+                    Tesouraria PDV
                   </Link>
+
+                  {/* Botão de Fechamento */}
+                  <div className="pt-2">
+                    <CloseEventButton eventId={activeEvent.id} eventName={activeEvent.name} />
+                  </div>
                 </div>
-
-                {/* Botão de Fechamento */}
-                <CloseEventButton eventId={activeEvent.id} eventName={activeEvent.name} />
               </div>
-            )}
-
-            {/* Gestão de Equipe */}
-            <div className="bg-[#111827] border border-blue-900/30 rounded-3xl p-8">
-              <div className="flex items-center gap-3 mb-6">
-                <UserCheck className="text-blue-400" size={28} />
-                <h3 className="text-xl font-black">Escala da Equipe</h3>
+            ) : (
+              <div className="bg-[#111827] border border-slate-800 rounded-3xl p-8 text-center flex flex-col items-center justify-center min-h-[200px]">
+                <Activity className="text-slate-600 mb-4" size={40} />
+                <p className="text-slate-500 font-bold">Nenhum evento ativo.</p>
+                <p className="text-slate-600 text-sm mt-1">Inicie um evento para liberar o PDV e a Tesouraria.</p>
               </div>
-              {activeEvent ? (
-                <Link
-                  href={`/dashboard/${activeEvent.id}/equipe`}
-                  className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl text-center transition-all"
-                >
-                  Gerenciar Equipe
-                </Link>
-              ) : (
-                <p className="text-slate-400 text-sm">Ative um evento para gerenciar a equipe.</p>
-              )}
-            </div>
-
-            {/* Tesouraria Rápida */}
-            {activeEvent && (
-              <Link
-                href={`/dashboard/${activeEvent.id}/tesouraria`}
-                className="block bg-slate-800 hover:bg-slate-700 border border-slate-700 p-8 rounded-3xl transition-all group"
-              >
-                <div className="font-bold text-xl mb-2 group-hover:text-emerald-400">Tesouraria</div>
-                <p className="text-slate-400">Controle de lotes e devoluções</p>
-              </Link>
             )}
           </div>
         </div>
