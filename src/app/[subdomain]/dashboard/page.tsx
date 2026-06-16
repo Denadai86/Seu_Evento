@@ -4,11 +4,15 @@ import { redirect } from "next/navigation";
 import EventList from "./EventList";
 import LogoutButton from "@/components/auth/LogoutButton";
 import Link from "next/link";
-import { Calendar, Users, Activity, Plus } from "lucide-react";
+import { Calendar, Users, Activity, Plus, UserCircle } from "lucide-react";
 import CloseEventButton from "./CloseEventButton";
+import { auth } from "@/lib/auth"; // 🔥 NOVO: Importando a sessão do usuário
 
 export default async function TenantDashboardPage({ params }: { params: Promise<{ subdomain: string }> }) {
   const { subdomain } = await params;
+  
+  // 🔥 NOVO: Buscando quem é o usuário logado
+  const session = await auth();
 
   const tenant = await prisma.tenant.findUnique({
     where: { subdomain },
@@ -37,21 +41,44 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
       {/* HEADER */}
       <header className="sticky top-0 z-50 bg-[#0b0f14]/95 backdrop-blur-lg border-b border-emerald-900/30 px-6 py-5">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
+          
+          {/* Lado Esquerdo: Info do Tenant (ONG) */}
           <div className="flex items-center gap-4">
-            <div className="w-9 h-9 bg-emerald-500 rounded-2xl flex items-center justify-center text-black font-black text-xl">
+            <div className="w-9 h-9 bg-emerald-500 rounded-2xl flex items-center justify-center text-black font-black text-xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">
               {tenant.name.charAt(0)}
             </div>
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-white">{tenant.name}</h1>
-              <p className="text-emerald-500/70 text-sm font-mono -mt-1">{subdomain}</p>
+              <h1 className="text-2xl font-black tracking-tight text-white leading-none">{tenant.name}</h1>
+              <p className="text-emerald-500/70 text-sm font-mono mt-1">{subdomain}</p>
             </div>
           </div>
-          <LogoutButton/>
+
+          {/* 🔥 Lado Direito: Perfil do Usuário + Logout */}
+          <div className="flex items-center gap-6">
+            {session?.user && (
+              <div className="flex items-center gap-3 border-r border-slate-800 pr-6 hidden md:flex">
+                <div className="text-right">
+                  <p className="text-sm font-bold text-white leading-tight">
+                    {session.user.name || "Administrador"}
+                  </p>
+                  <p className="text-[10px] text-emerald-500 font-mono tracking-widest uppercase mt-0.5">
+                    {session.user.role === "SUPER_ADMIN" ? "God Mode" : "Org Admin"}
+                  </p>
+                </div>
+                <div className="w-10 h-10 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center text-slate-400">
+                  <UserCircle size={24} />
+                </div>
+              </div>
+            )}
+            
+            <LogoutButton/>
+          </div>
+
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 mt-10">
-        {/* KPIs - Mais modernos */}
+        {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <KpiCard 
             icon={<Calendar className="w-8 h-8" />} 
@@ -91,7 +118,7 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
           {/* Sidebar - Ações Rápidas */}
           <div className="lg:col-span-4 space-y-6">
             
-            {/* NOVO: Link Global de RH (Aparece sempre!) */}
+            {/* Link Global de RH */}
             <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-blue-900/50 rounded-3xl p-8 relative overflow-hidden group">
               <div className="absolute -top-16 -right-16 w-40 h-40 bg-blue-500/10 blur-[50px] rounded-full transition-transform group-hover:scale-150"></div>
               <div className="flex items-center gap-4 mb-4 relative z-10">

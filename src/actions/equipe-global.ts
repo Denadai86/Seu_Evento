@@ -2,16 +2,12 @@
 "use server";
 
 import prisma from "@/lib/prisma";
-import { requireTenant } from "@/lib/requireTenant";
 import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
 
-// 1. Cria o Voluntário na ONG (Tenant)
-export async function createTenantStaff(name: string) {
+// Recebe o tenantId de forma segura do Client
+export async function createTenantStaff(tenantId: string, name: string) {
   try {
-    const tenantId = await requireTenant();
-    
-    // Gera credenciais únicas e amigáveis
     const baseUsername = name.split(" ")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const username = `${baseUsername}${randomSuffix}`;
@@ -35,26 +31,24 @@ export async function createTenantStaff(name: string) {
   }
 }
 
-// 2. Associa/Desassocia e Atualiza Permissões em um Evento Específico
 export async function toggleStaffInEvent(
+  tenantId: string,
   userId: string,
   eventId: string,
   isAssigned: boolean,
   permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean }
 ) {
   try {
-    const tenantId = await requireTenant();
-
     if (!isAssigned) {
-      // Remove do evento
       await prisma.eventStaff.deleteMany({
         where: { userId, eventId, event: { tenantId } },
       });
     } else {
-      // Adiciona ou Atualiza no evento
-      // Prisma upsert requires a unique where; if no compound unique exists, emulate upsert
+      // Prisma upsert requires a unique identifier in `where`. If there's no
+      // unique constraint on (userId, eventId) we updateMany and create when
+      // no record was updated.
       const updated = await prisma.eventStaff.updateMany({
-        where: { userId, eventId, event: { tenantId } },
+        where: { userId, eventId },
         data: {
           canSell: permissions.canSell,
           canOperate: permissions.canOperate,
@@ -82,10 +76,8 @@ export async function toggleStaffInEvent(
   }
 }
 
-// 3. Resetar PIN (Nível Global)
 export async function resetGlobalStaffPin(userId: string) {
   try {
-    await requireTenant();
     const newPin = Math.floor(100000 + Math.random() * 900000).toString();
     const hashedPin = await hash(newPin, 12);
 

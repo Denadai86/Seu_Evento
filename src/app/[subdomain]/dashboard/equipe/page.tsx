@@ -58,7 +58,7 @@ export default async function GlobalEquipePage() {
           </div>
         </div>
 
-        <GlobalStaffClient staffMembers={staffMembers} events={events} />
+        <GlobalStaffClient staffMembers={staffMembers} events={events} tenantId={tenantId} />
       </div>
     </div>
   );

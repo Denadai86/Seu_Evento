@@ -10,7 +10,7 @@ type EventType = { id: string; name: string; isActive: boolean };
 type StaffEventType = { eventId: string; canSell: boolean; canOperate: boolean; canVerify: boolean };
 type StaffMemberType = { id: string; name: string | null; username: string | null; events: StaffEventType[] };
 
-export default function GlobalStaffClient({ staffMembers, events }: { staffMembers: StaffMemberType[], events: EventType[] }) {
+export default function GlobalStaffClient({ staffMembers, events, tenantId }: { staffMembers: StaffMemberType[], events: EventType[], tenantId: string }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showAddModal, setShowAddModal] = useState(false);
@@ -23,7 +23,7 @@ export default function GlobalStaffClient({ staffMembers, events }: { staffMembe
   const handleAddStaff = (e: React.FormEvent) => {
     e.preventDefault();
     startTransition(async () => {
-      const res = await createTenantStaff(newStaffName);
+      const res = await createTenantStaff(tenantId, newStaffName);
       if (res.success && res.pin) {
         setNewStaffName("");
         setShowAddModal(false);
@@ -53,7 +53,7 @@ export default function GlobalStaffClient({ staffMembers, events }: { staffMembe
       const newAssigned = !currentAssigned;
       const perms = newAssigned ? { canSell: true, canOperate: false, canVerify: false } : { canSell: false, canOperate: false, canVerify: false };
       
-      await toggleStaffInEvent(userId, eventId, newAssigned, perms);
+      await toggleStaffInEvent(tenantId, userId, eventId, newAssigned, perms);
       router.refresh();
       // Atualiza o estado do modal localmente para ser instantâneo
       if (activeStaffModal) {
@@ -68,7 +68,7 @@ export default function GlobalStaffClient({ staffMembers, events }: { staffMembe
   const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify', currentPerms: any) => {
     startTransition(async () => {
       const updatedPerms = { ...currentPerms, [permKey]: !currentPerms[permKey] };
-      await toggleStaffInEvent(userId, eventId, true, updatedPerms);
+      await toggleStaffInEvent(tenantId, userId, eventId, true, updatedPerms);
       router.refresh();
       
       if (activeStaffModal) {

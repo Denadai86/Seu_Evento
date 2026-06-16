@@ -205,12 +205,34 @@ export default async function EventDashboardPage({
                     Aloque voluntários, gere PINs de acesso, defina quem pode vender cartelas e quem terá acesso ao palco do locutor.
                   </p>
                   <Link 
-                    href={`/dashboard/${event.id}/equipe`}
+                     href="/dashboard/equipe" 
                     className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-xl transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:shadow-[0_0_50px_rgba(37,99,235,0.5)]"
                   >
                     Gerenciar Permissões e Escala <ArrowRight size={20} />
                   </Link>
                 </div>
+              </div>
+
+              {/* CARD DA TESOURARIA (Adicione import { Wallet } from "lucide-react" no topo do arquivo) */}
+              <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-emerald-900/50 rounded-3xl p-8 relative overflow-hidden group hover:border-emerald-500/50 transition-all">
+                <div className="absolute -top-16 -right-16 w-40 h-40 bg-emerald-500/10 blur-[50px] rounded-full transition-transform group-hover:scale-150"></div>
+                
+                <div className="flex items-center gap-4 mb-6 relative z-10">
+                  <div className="p-3 bg-emerald-900/30 text-emerald-400 rounded-xl border border-emerald-500/20">
+                    <Wallet size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white">Tesouraria do Evento</h3>
+                    <p className="text-slate-400 text-xs mt-1">Gestão de lotes e estoque de cartelas</p>
+                  </div>
+                </div>
+
+                <Link
+                  href={`/dashboard/${event.id}/tesouraria`}
+                  className="flex items-center justify-center gap-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl text-center transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] hover:shadow-[0_0_40px_rgba(16,185,129,0.4)] relative z-10"
+                >
+                  Abrir Tesouraria
+                </Link>
               </div>
 
               {/* 💵 MÓDULO 4: AUDITORIA DE VENDAS */}
