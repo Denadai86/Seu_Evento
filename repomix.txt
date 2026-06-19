@@ -32,7 +32,7 @@ The content is organized as follows:
 <notes>
 - Some files may have been excluded based on .gitignore rules and Repomix's configuration
 - Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
-- Files matching these patterns are excluded: node_modules, .env, .next, dist, coverage, pnpm-lock.yaml, package-lock.json
+- Files matching these patterns are excluded: node_modules, .env, .env.local, .next, dist, coverage, pnpm-lock.yaml, package-lock.json
 - Files matching patterns in .gitignore are excluded
 - Files matching default ignore patterns are excluded
 - Files are sorted by Git change count (files with more changes are at the bottom)
@@ -75,11 +75,12 @@ src/actions/admin.ts
 src/actions/bingo.ts
 src/actions/closeEvent.ts
 src/actions/danger.ts
-src/actions/equipe.ts
+src/actions/equipe-global.ts
 src/actions/event.ts
 src/actions/finance.ts
 src/actions/prize.ts
 src/actions/sponsor.ts
+src/actions/tesouraria.ts
 src/actions/venda.ts
 src/app/(marketing)/layout.tsx
 src/app/(marketing)/page.tsx
@@ -87,8 +88,6 @@ src/app/(marketing)/privacidade/page.tsx
 src/app/(marketing)/termos/page.tsx
 src/app/[subdomain]/cartela/[shortId]/InteractiveCard.tsx
 src/app/[subdomain]/cartela/[shortId]/page.tsx
-src/app/[subdomain]/dashboard/[eventId]/equipe/page.tsx
-src/app/[subdomain]/dashboard/[eventId]/equipe/StaffClient.tsx
 src/app/[subdomain]/dashboard/[eventId]/EventStatusToggle.tsx
 src/app/[subdomain]/dashboard/[eventId]/EventWizard.tsx
 src/app/[subdomain]/dashboard/[eventId]/finance/FinanceCharts.tsx
@@ -102,8 +101,11 @@ src/app/[subdomain]/dashboard/[eventId]/relatorio/page.tsx
 src/app/[subdomain]/dashboard/[eventId]/relatorio/PrintButton.tsx
 src/app/[subdomain]/dashboard/[eventId]/SponsorManager.tsx
 src/app/[subdomain]/dashboard/[eventId]/tesouraria/page.tsx
+src/app/[subdomain]/dashboard/[eventId]/tesouraria/TesourariaClient.tsx
 src/app/[subdomain]/dashboard/[eventId]/TicketPriceEditor.tsx
 src/app/[subdomain]/dashboard/CloseEventButton.tsx
+src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx
+src/app/[subdomain]/dashboard/equipe/page.tsx
 src/app/[subdomain]/dashboard/EventList.tsx
 src/app/[subdomain]/dashboard/page.tsx
 src/app/[subdomain]/layout.tsx
@@ -1804,6 +1806,125 @@ export async function nukeDatabase(password: string) {
 }
 </file>
 
+<file path="src/actions/tesouraria.ts">
+// src/actions/tesouraria.ts
+"use server";
+
+import prisma from "@/lib/prisma";
+import { revalidatePath } from "next/cache";
+
+export async function assignCardsToStaff(eventId: string, eventStaffId: string, codes: string[]) {
+  try {
+    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
+
+    // Busca apenas cartelas que existem no evento e estão LIVRES
+    const availableCards = await prisma.card.findMany({
+      where: {
+        eventId,
+        shortId: { in: codes },
+        eventStaffId: null,
+      },
+      select: { id: true, shortId: true },
+    });
+
+    if (availableCards.length === 0) {
+      return { success: false, error: "Nenhuma cartela livre encontrada com os códigos informados." };
+    }
+
+    const cardIds = availableCards.map(c => c.id);
+
+    // Atualiza em lote (MUITO mais rápido que fazer um por um)
+    await prisma.card.updateMany({
+      where: { id: { in: cardIds } },
+      data: { eventStaffId },
+    });
+
+    revalidatePath(`/dashboard/${eventId}/tesouraria`);
+    return { success: true, count: cardIds.length };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function returnCardsFromStaff(eventId: string, eventStaffId: string, codes: string[]) {
+  try {
+    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
+
+    // Busca cartelas que estão com ESSE vendedor e NÃO foram pagas
+    const returnableCards = await prisma.card.findMany({
+      where: {
+        eventId,
+        eventStaffId,
+        shortId: { in: codes },
+        isPaid: false, // Regra de Ouro: Cartela paga não volta pro estoque!
+      },
+      select: { id: true },
+    });
+
+    if (returnableCards.length === 0) {
+      return { success: false, error: "Nenhuma cartela válida para devolução (ou já foram pagas)." };
+    }
+
+    const cardIds = returnableCards.map(c => c.id);
+
+    // Remove o vínculo (volta pra fábrica)
+    await prisma.card.updateMany({
+      where: { id: { in: cardIds } },
+      data: { eventStaffId: null },
+    });
+
+    revalidatePath(`/dashboard/${eventId}/tesouraria`);
+    return { success: true, count: cardIds.length };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Adicione no final do arquivo src/actions/tesouraria.ts
+
+export async function registerCardPayment(eventId: string, eventStaffId: string, codes: string[]) {
+  try {
+    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
+
+    // Busca as cartelas que estão com ESSE voluntário e ainda NÃO foram pagas
+    const unpaidCards = await prisma.card.findMany({
+      where: {
+        eventId,
+        eventStaffId,
+        shortId: { in: codes },
+        isPaid: false,
+      },
+      select: { id: true },
+    });
+
+    if (unpaidCards.length === 0) {
+      return { success: false, error: "Nenhuma cartela pendente encontrada com os códigos informados." };
+    }
+
+    const cardIds = unpaidCards.map(c => c.id);
+
+    // Registra o pagamento (Baixa a cartela)
+    // isSold = true (Foi vendida pro cliente final)
+    // isPaid = true (O dinheiro já está na Tesouraria)
+    await prisma.card.updateMany({
+      where: { id: { in: cardIds } },
+      data: { 
+        isSold: true, 
+        isPaid: true 
+      },
+    });
+
+    // BÔNUS SÊNIOR: Aqui no futuro você pode dar um prisma.transaction.create() 
+    // para registrar o fluxo de caixa exato dessa operação no fechamento.
+
+    revalidatePath(`/dashboard/${eventId}/tesouraria`);
+    return { success: true, count: cardIds.length };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+</file>
+
 <file path="src/app/[subdomain]/cartela/[shortId]/InteractiveCard.tsx">
 // src/app/[subdomain]/cartela/[shortId]/InteractiveCard.tsx
 "use client";
@@ -1981,396 +2102,6 @@ export default async function DigitalCardPage({
           sponsors={cardData.event.sponsors} 
         />
       </div>
-    </div>
-  );
-}
-</file>
-
-<file path="src/app/[subdomain]/dashboard/[eventId]/equipe/StaffClient.tsx">
-// src/app/[subdomain]/dashboard/[eventId]/equipe/StaffClient.tsx
-"use client";
-
-import { useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation"; // ✅ FIX 1: necessário para router.refresh()
-import { 
-  createAndAssignStaff, 
-  toggleStaffCapability, 
-  removeStaffFromEvent, 
-  resetStaffPassword,
-  assignCardsToStaff
-} from "@/actions/equipe";
-import { UserPlus, Shield, Mic, Ticket, Trash2, Key, CheckCircle, X, Package } from "lucide-react";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIX 2: userId adicionado ao tipo.
-// O componente recebia userId do servidor (formattedStaff inclui userId),
-// mas o tipo não o declarava. handleResetPin passava s.id (EventStaff.id)
-// para resetStaffPassword que espera User.id → banco retornava null → PIN nunca aparecia.
-// ─────────────────────────────────────────────────────────────────────────────
-type StaffMember = {
-  id: string;       // EventStaff.id — usado para toggles e remoção
-  userId: string;   // User.id — usado para resetar PIN ← estava faltando
-  name: string;
-  username: string;
-  canSell: boolean;
-  canOperate: boolean;
-  canVerify: boolean;
-  cardsTotal: number;
-  cardsSold: number;
-};
-
-const ToggleSwitch = ({
-  active,
-  icon,
-  onChange,
-}: {
-  active: boolean;
-  icon: ReactNode;
-  onChange: () => void;
-}) => (
-  <button
-    type="button"
-    onClick={onChange}
-    className={`inline-flex items-center justify-center w-10 h-10 rounded-full transition ${
-      active
-        ? "bg-indigo-600 text-white"
-        : "bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-    }`}
-    aria-pressed={active}
-  >
-    {icon}
-  </button>
-);
-
-export default function StaffClient({
-  eventId,
-  initialStaff,
-  isEventActive,
-}: {
-  eventId: string;
-  initialStaff: StaffMember[];
-  isEventActive: boolean;
-}) {
-  const router = useRouter(); // ✅ FIX 1
-  const [staff, setStaff] = useState<StaffMember[]>(initialStaff);
-  const [isPending, startTransition] = useTransition();
-
-  // Estados dos Modais
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newStaffName, setNewStaffName] = useState("");
-  const [permissions, setPermissions] = useState({ canSell: true, canOperate: false, canVerify: false });
-  const [credentialsModal, setCredentialsModal] = useState<{
-    username: string;
-    pin: string;
-    isNewMember: boolean; // distingue criação de reset de PIN
-  } | null>(null);
-
-  // Modal de Lote
-  const [assignModal, setAssignModal] = useState<{ staffId: string; name: string } | null>(null);
-  const [assignQty, setAssignQty] = useState("10");
-
-  // ── TOGGLE DE PERMISSÃO ───────────────────────────────────────────────────
-  const handleToggle = (
-    staffId: string,
-    capability: "canSell" | "canOperate" | "canVerify",
-    currentValue: boolean
-  ) => {
-    // Optimistic UI
-    setStaff((prev) =>
-      prev.map((s) => (s.id === staffId ? { ...s, [capability]: !currentValue } : s))
-    );
-    startTransition(async () => {
-      const res = await toggleStaffCapability(staffId, capability, !currentValue);
-      if (!res.success) {
-        alert("Erro ao alterar permissão.");
-        setStaff(initialStaff);
-      }
-    });
-  };
-
-  // ── CRIAR MEMBRO ─────────────────────────────────────────────────────────
-  const handleAddStaff = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newStaffName.trim()) return;
-
-    startTransition(async () => {
-      const res = await createAndAssignStaff(eventId, newStaffName, permissions);
-      if (res.success && res.username && res.pin) {
-        setShowAddModal(false);
-        setNewStaffName("");
-        setCredentialsModal({
-          username: res.username,
-          pin: res.pin,
-          isNewMember: true, // ✅ sinaliza que precisa de router.refresh() ao fechar
-        });
-      } else {
-        alert("Erro ao criar membro da equipe.");
-      }
-    });
-  };
-
-  // ── RESETAR PIN ──────────────────────────────────────────────────────────
-  // ✅ FIX 2: recebe s.userId (User.id), não s.id (EventStaff.id)
-  const handleResetPin = (userId: string, name: string) => {
-    if (!confirm(`Gerar novo PIN para ${name}?`)) return;
-
-    startTransition(async () => {
-      const res = await resetStaffPassword(userId); // ← agora recebe o User.id correto
-      if (res.success && res.newPin) {
-        setCredentialsModal({
-          username: res.username || name,
-          pin: res.newPin,
-          isNewMember: false, // reset de PIN não precisa de refresh (nenhuma linha nova)
-        });
-      } else {
-        alert(res.error || "Erro ao resetar PIN.");
-      }
-    });
-  };
-
-  // ── REMOVER DA ESCALA ────────────────────────────────────────────────────
-  const handleRemove = (staffId: string) => {
-    if (!confirm("Remover da escala deste evento?")) return;
-    startTransition(async () => {
-      const res = await removeStaffFromEvent(staffId);
-      if (res.success) {
-        setStaff((prev) => prev.filter((s) => s.id !== staffId));
-      } else {
-        alert(res.error);
-      }
-    });
-  };
-
-  // ── ENTREGAR LOTE ─────────────────────────────────────────────────────────
-  const handleAssignCards = () => {
-    if (!assignModal) return;
-    const qty = parseInt(assignQty);
-    if (isNaN(qty) || qty <= 0) return;
-
-    startTransition(async () => {
-      const res = await assignCardsToStaff(eventId, assignModal.staffId, qty);
-      if (res.success) {
-        setAssignModal(null);
-        setAssignQty("10");
-        router.refresh(); // atualiza contagem de cartelas na tabela
-      } else {
-        alert(res.error || "Erro ao entregar cartelas.");
-      }
-    });
-  };
-
-  // ── FECHAR MODAL DE CREDENCIAIS ──────────────────────────────────────────
-  // ✅ FIX 1: router.refresh() quando foi criação (nova linha na tabela)
-  const handleCloseCredentials = () => {
-    const wasNewMember = credentialsModal?.isNewMember;
-    setCredentialsModal(null);
-    if (wasNewMember) {
-      router.refresh(); // re-busca initialStaff do servidor com o novo membro
-    }
-  };
-
-  return (
-    <div>
-      {/* TOOLBAR */}
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-bold text-slate-700 dark:text-slate-200">Escala do Dia</h2>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold transition"
-        >
-          <UserPlus size={18} /> Adicionar Voluntário
-        </button>
-      </div>
-
-      {/* TABELA DE EQUIPE */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-bold uppercase tracking-wider">
-            <tr>
-              <th className="p-4">Identificação</th>
-              <th className="p-4 text-center">PDV</th>
-              <th className="p-4 text-center">Palco</th>
-              <th className="p-4 text-center">Fiscal</th>
-              <th className="p-4 text-center">Cartelas</th>
-              <th className="p-4 text-right">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-            {staff.map((s) => (
-              <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition">
-                <td className="p-4">
-                  <p className="font-bold text-slate-900 dark:text-white text-base">{s.name}</p>
-                  <p className="text-xs font-mono text-indigo-500">@{s.username}</p>
-                </td>
-
-                <td className="p-4 text-center">
-                  <ToggleSwitch active={s.canSell} icon={<Ticket size={14} />} onChange={() => handleToggle(s.id, "canSell", s.canSell)} />
-                </td>
-                <td className="p-4 text-center">
-                  <ToggleSwitch active={s.canOperate} icon={<Mic size={14} />} onChange={() => handleToggle(s.id, "canOperate", s.canOperate)} />
-                </td>
-                <td className="p-4 text-center">
-                  <ToggleSwitch active={s.canVerify} icon={<Shield size={14} />} onChange={() => handleToggle(s.id, "canVerify", s.canVerify)} />
-                </td>
-
-                <td className="p-4 text-center">
-                  <button
-                    onClick={() => setAssignModal({ staffId: s.id, name: s.name })}
-                    className="flex flex-col items-center mx-auto hover:text-indigo-400 transition"
-                    title="Entregar lote de cartelas"
-                  >
-                    <span className="text-sm font-bold">{s.cardsSold} / {s.cardsTotal}</span>
-                    <span className="text-[10px] text-slate-400 uppercase tracking-widest">Vendidas</span>
-                  </button>
-                </td>
-
-                <td className="p-4 text-right space-x-1">
-                  <button
-                    onClick={() => setAssignModal({ staffId: s.id, name: s.name })}
-                    className="p-2 text-slate-400 hover:text-indigo-400 transition"
-                    title="Entregar lote de cartelas"
-                  >
-                    <Package size={18} />
-                  </button>
-                  {/* ✅ FIX 2: passa s.userId (User.id) ao invés de s.id (EventStaff.id) */}
-                  <button
-                    onClick={() => handleResetPin(s.userId, s.name)}
-                    className="p-2 text-slate-400 hover:text-amber-500 transition"
-                    title="Resetar PIN"
-                  >
-                    <Key size={18} />
-                  </button>
-                  <button
-                    onClick={() => handleRemove(s.id)}
-                    className="p-2 text-slate-400 hover:text-red-500 transition"
-                    title="Remover da Escala"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {staff.length === 0 && (
-              <tr>
-                <td colSpan={6} className="p-8 text-center text-slate-500">
-                  Nenhum membro alocado neste evento ainda.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* MODAL: ADICIONAR MEMBRO */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-md relative">
-            <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
-              <X />
-            </button>
-            <h3 className="text-xl font-bold mb-4 dark:text-white">Adicionar à Escala</h3>
-            <form onSubmit={handleAddStaff} className="space-y-4">
-              <div>
-                <label className="text-sm font-bold text-slate-500 mb-1 block">Nome do Voluntário</label>
-                <input
-                  required
-                  value={newStaffName}
-                  onChange={(e) => setNewStaffName(e.target.value)}
-                  className="w-full p-3 border rounded-xl dark:bg-slate-800 dark:border-slate-700 outline-none focus:border-indigo-500"
-                  placeholder="Ex: Maria Joaquina"
-                />
-              </div>
-              <div className="pt-2 border-t dark:border-slate-700">
-                <label className="text-sm font-bold text-slate-500 mb-2 block">Permissões Iniciais</label>
-                <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800 p-3 rounded-lg">
-                  <span className="text-sm font-medium dark:text-slate-300">Vender Cartelas (PDV)</span>
-                  <input type="checkbox" checked={permissions.canSell} onChange={(e) => setPermissions({ ...permissions, canSell: e.target.checked })} className="w-5 h-5 accent-indigo-600" />
-                </div>
-                <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800 p-3 rounded-lg mt-2">
-                  <span className="text-sm font-medium dark:text-slate-300">Acessar Palco (Locutor)</span>
-                  <input type="checkbox" checked={permissions.canOperate} onChange={(e) => setPermissions({ ...permissions, canOperate: e.target.checked })} className="w-5 h-5 accent-indigo-600" />
-                </div>
-                <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800 p-3 rounded-lg mt-2">
-                  <span className="text-sm font-medium dark:text-slate-300">Validar Ganhadores (Fiscal)</span>
-                  <input type="checkbox" checked={permissions.canVerify} onChange={(e) => setPermissions({ ...permissions, canVerify: e.target.checked })} className="w-5 h-5 accent-indigo-600" />
-                </div>
-              </div>
-              <button
-                disabled={isPending}
-                type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl mt-4 disabled:opacity-50"
-              >
-                {isPending ? "Processando..." : "Confirmar e Gerar PIN"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: ENTREGAR LOTE DE CARTELAS */}
-      {assignModal && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-sm relative">
-            <button onClick={() => setAssignModal(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
-              <X />
-            </button>
-            <h3 className="text-xl font-bold mb-1 dark:text-white">Entregar Lote</h3>
-            <p className="text-slate-400 text-sm mb-6">{assignModal.name}</p>
-            <div>
-              <label className="text-sm font-bold text-slate-500 mb-1 block">Quantidade de cartelas</label>
-              <input
-                type="number"
-                min="1"
-                max="500"
-                value={assignQty}
-                onChange={(e) => setAssignQty(e.target.value)}
-                className="w-full p-3 border rounded-xl dark:bg-slate-800 dark:border-slate-700 outline-none focus:border-indigo-500 text-center text-2xl font-black"
-              />
-            </div>
-            <button
-              disabled={isPending}
-              onClick={handleAssignCards}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl mt-4 disabled:opacity-50"
-            >
-              {isPending ? "Entregando..." : `Entregar ${assignQty} cartelas`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: CREDENCIAIS (criação + reset de PIN) */}
-      {credentialsModal && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-8 w-full max-w-sm text-center shadow-2xl">
-            <div className="mx-auto w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6">
-              <CheckCircle className="text-emerald-500" size={48} />
-            </div>
-            <h3 className="text-2xl font-black text-white mb-2">
-              {credentialsModal.isNewMember ? "Credenciais Geradas!" : "PIN Atualizado!"}
-            </h3>
-            <p className="text-slate-400 mb-8">Entregue estas informações ao voluntário.</p>
-            <div className="bg-slate-800 rounded-2xl p-6 mb-8 text-left space-y-4">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-slate-500 mb-1">USUÁRIO</p>
-                <p className="font-mono text-xl font-bold text-white">{credentialsModal.username}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-widest text-slate-500 mb-1">SENHA (PIN)</p>
-                <p className="font-mono text-4xl font-black text-emerald-400 tracking-[4px]">
-                  {credentialsModal.pin}
-                </p>
-              </div>
-            </div>
-            {/* ✅ FIX 1: router.refresh() quando foi criação de novo membro */}
-            <button
-              onClick={handleCloseCredentials}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-bold text-white transition"
-            >
-              Entendi, Fechar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -3004,62 +2735,203 @@ export default function PrintButton() {
 }
 </file>
 
-<file path="src/app/[subdomain]/dashboard/[eventId]/tesouraria/page.tsx">
-// src/app/[subdomain]/dashboard/[eventId]/tesouraria/page.tsx
-import prisma from "@/lib/prisma";
-import TreasuryClient from "@/features/tesouraria/components/TreasuryClient";
-import { requireTenant } from "@/lib/requireTenant";
+<file path="src/app/[subdomain]/dashboard/[eventId]/tesouraria/TesourariaClient.tsx">
+// src/app/[subdomain]/dashboard/[eventId]/tesouraria/TesourariaClient.tsx
+"use client";
 
-export default async function TesourariaPage({ 
-  params 
+import { useState, useTransition } from "react";
+import { assignCardsToStaff, returnCardsFromStaff, registerCardPayment } from "@/actions/tesouraria";
+import { Package, Users, PackagePlus, PackageMinus, Ticket, CheckCircle2, CircleDollarSign } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+export default function TesourariaClient({ 
+  eventId, 
+  initialStaff,
+  availableCardsCount
 }: { 
-  params: Promise<{ subdomain: string; eventId: string }> 
+  eventId: string; 
+  initialStaff: any[];
+  availableCardsCount: number;
 }) {
-  const { eventId } = await params;
-  const tenantId = await requireTenant();
+  const router = useRouter();
+  const [activeStaff, setActiveStaff] = useState<any>(null);
+  
+  // 🔥 Adicionado o tipo "pay" para o acerto financeiro
+  const [modalType, setModalType] = useState<"assign" | "return" | "pay" | null>(null);
+  
+  const [batchInput, setBatchInput] = useState("");
+  const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  // Validação de segurança + tenant
-  const event = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
-  });
+  const openModal = (staff: any, type: "assign" | "return" | "pay") => {
+    setActiveStaff(staff);
+    setModalType(type);
+    setBatchInput("");
+    setMessage(null);
+  };
 
-  if (!event) {
-    return <div className="p-10 text-red-400">Evento não encontrado ou sem acesso.</div>;
-  }
+  const handleProcess = async () => {
+    if (!batchInput.trim() || !activeStaff) return;
 
-  const eventStaff = await prisma.eventStaff.findMany({
-    where: { eventId },
-    include: {
-      user: { select: { name: true, username: true } },
-      cards: {
-        select: { 
-          id: true,
-          shortId: true, 
-          isSold: true, 
-          isPaid: true,
-          price: true 
-        }
+    const codes = batchInput.toUpperCase().split(/[\s,]+/).filter(Boolean);
+
+    startTransition(async () => {
+      let res;
+      
+      // 🔥 Roteamento da Ação com base no Modal
+      if (modalType === "assign") {
+        res = await assignCardsToStaff(eventId, activeStaff.id, codes);
+      } else if (modalType === "return") {
+        res = await returnCardsFromStaff(eventId, activeStaff.id, codes);
+      } else {
+        res = await registerCardPayment(eventId, activeStaff.id, codes);
       }
-    },
-    orderBy: { createdAt: 'desc' }
-  });
+
+      if (res.success) {
+        setMessage({ text: `${res.count} cartelas processadas com sucesso!`, type: "success" });
+        setBatchInput("");
+        router.refresh(); 
+        setTimeout(() => setModalType(null), 2000);
+      } else {
+        setMessage({ text: res.error, type: "error" });
+      }
+    });
+  };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-8 flex justify-between items-end">
-        <div>
-          <h1 className="text-3xl font-black text-white">Tesouraria</h1>
-          <p className="text-slate-400">Distribuição, devolução e controle de cartelas</p>
-        </div>
-        <div className="text-sm text-emerald-400 font-mono">
-          {event.name}
+    <div className="space-y-8">
+      {/* KPI DO ESTOQUE CENTRAL */}
+      <div className="bg-[#111827] border border-emerald-500/30 rounded-3xl p-8 flex items-center justify-between shadow-xl">
+        <div className="flex items-center gap-6">
+          <div className="w-16 h-16 bg-emerald-900/30 text-emerald-400 rounded-2xl flex items-center justify-center">
+            <Package size={32} />
+          </div>
+          <div>
+            <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-1">Fábrica (Estoque Livre)</p>
+            <p className="text-4xl font-black text-white">{availableCardsCount} <span className="text-lg text-slate-500 font-normal">cartelas disponíveis</span></p>
+          </div>
         </div>
       </div>
 
-      <TreasuryClient 
-        eventId={eventId} 
-        initialStaff={eventStaff}   // ← renomeado de initialSellers
-      />
+      <h2 className="text-xl font-bold text-white mb-4">Vendedores Ativos no Evento</h2>
+
+      {initialStaff.length === 0 ? (
+         <div className="text-center bg-[#111827] border border-slate-800 rounded-3xl p-10">
+           <p className="text-slate-400">Nenhum voluntário escalado com permissão de venda.</p>
+           <p className="text-sm text-slate-500 mt-2">Vá na Central de RH e adicione a permissão de "Vender (PDV)" aos voluntários.</p>
+         </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {initialStaff.map((staff: any) => {
+            const assigned = staff.cards.length;
+            const sold = staff.cards.filter((c: any) => c.isPaid).length;
+            const pending = assigned - sold;
+
+            return (
+              <div key={staff.id} className="bg-[#111827] border border-slate-800 rounded-3xl p-6 hover:border-emerald-500/50 transition-all flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-slate-800 rounded-lg text-slate-400"><Users size={20} /></div>
+                    <div>
+                      <h3 className="font-bold text-lg text-white leading-tight">{staff.user.name}</h3>
+                      <p className="text-xs font-mono text-emerald-500/70">@{staff.user.username}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-black/40 border border-slate-800 rounded-xl p-4 space-y-3 mb-6">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-400 flex items-center gap-2"><Ticket size={16}/> No Bolso</span>
+                      <span className="font-bold text-white">{assigned}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-400 flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-500"/> Vendidas/Pagas</span>
+                      <span className="font-bold text-emerald-400">{sold}</span>
+                    </div>
+                    <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-sm">
+                      <span className="text-slate-500">Devolvíveis / Pendentes</span>
+                      <span className="font-bold text-amber-500">{pending}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🔥 GRID COM OS 3 BOTÕES DE AÇÃO */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => openModal(staff, "assign")}
+                    className="bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-600/20 py-3 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all"
+                  >
+                    <PackagePlus size={16} /> Entregar
+                  </button>
+                  <button
+                    onClick={() => openModal(staff, "pay")}
+                    disabled={pending === 0}
+                    className="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-600/20 disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-600 py-3 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all"
+                  >
+                    <CircleDollarSign size={16} /> Receber
+                  </button>
+                  <button
+                    onClick={() => openModal(staff, "return")}
+                    disabled={pending === 0}
+                    className="bg-amber-600/10 hover:bg-amber-600/20 text-amber-500 border border-amber-600/20 disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-600 py-3 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all"
+                  >
+                    <PackageMinus size={16} /> Devolver
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* MODAL DE BATCH INPUT */}
+      {modalType && activeStaff && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#111827] border border-slate-700 rounded-3xl p-6 w-full max-w-md relative">
+            <h3 className="text-2xl font-black text-white mb-1">
+              {modalType === "assign" && "Entregar Lote"}
+              {modalType === "return" && "Recolher Cartelas"}
+              {modalType === "pay" && "Registrar Pagamento"}
+            </h3>
+            <p className="text-slate-400 text-sm mb-6">Operando cartelas de: <strong className="text-emerald-400">@{activeStaff.user.username}</strong></p>
+
+            <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 block">
+              Códigos das Cartelas (shortId)
+            </label>
+            <textarea
+              value={batchInput}
+              onChange={(e) => setBatchInput(e.target.value)}
+              placeholder="Ex: 001, 002, 003 ou cole uma coluna inteira..."
+              className="w-full h-32 bg-black border border-slate-800 rounded-xl p-4 font-mono text-sm text-white focus:border-emerald-500 outline-none resize-none mb-4 custom-scrollbar"
+            />
+
+            {message && (
+              <div className={`p-4 rounded-xl mb-4 text-sm font-bold ${message.type === "success" ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}>
+                {message.text}
+              </div>
+            )}
+
+            <div className="flex gap-3 mt-2">
+              <button 
+                onClick={() => setModalType(null)} 
+                className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-all"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleProcess}
+                disabled={isPending || !batchInput.trim()}
+                className={`flex-1 py-4 rounded-xl font-black text-white transition-all disabled:opacity-50 
+                  ${modalType === "assign" ? "bg-emerald-600 hover:bg-emerald-500" : ""}
+                  ${modalType === "return" ? "bg-amber-600 hover:bg-amber-500" : ""}
+                  ${modalType === "pay" ? "bg-blue-600 hover:bg-blue-500" : ""}
+                `}
+              >
+                {isPending ? "Processando..." : "Confirmar Lote"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5731,240 +5603,99 @@ main()
   });
 </file>
 
-<file path="src/actions/equipe.ts">
-// src/actions/equipe.ts
+<file path="src/actions/equipe-global.ts">
+// src/actions/equipe-global.ts
 "use server";
 
 import prisma from "@/lib/prisma";
-import bcrypt from "bcryptjs";
-import { auth } from "@/lib/auth";
-import { requireTenant } from "@/lib/requireTenant";
+import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GUARDS & HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-async function requireAdminRole() {
-  const session = await auth();
-  if (session?.user?.role !== "ORG_ADMIN" && session?.user?.role !== "SUPER_ADMIN") {
-    throw new Error("Apenas administradores podem gerenciar a equipe.");
+// Recebe o tenantId de forma segura do Client
+export async function createTenantStaff(tenantId: string, name: string) {
+  try {
+    const baseUsername = name.split(" ")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const username = `${baseUsername}${randomSuffix}`;
+    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedPin = await hash(pin, 12);
+
+    await prisma.user.create({
+      data: {
+        name: name.trim(),
+        username: username.toUpperCase(),
+        password: hashedPin,
+        role: "STAFF",
+        tenantId,
+      },
+    });
+
+    revalidatePath("/dashboard/equipe");
+    return { success: true, username: username.toUpperCase(), pin };
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
 }
 
-function generateUsername(fullName: string): string {
-  const parts = fullName.trim().toUpperCase().split(/\s+/);
-  if (parts.length === 1) return parts[0].substring(0, 8);
-  return `${parts[0].substring(0, 3)}${parts[parts.length - 1].substring(0, 5)}`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. CRIAR MEMBRO E ALOCAR NO EVENTO DIRETO (Fluxo Rápido)
-// ─────────────────────────────────────────────────────────────────────────────
-export async function createAndAssignStaff(
+export async function toggleStaffInEvent(
+  tenantId: string,
+  userId: string,
   eventId: string,
-  name: string,
+  isAssigned: boolean,
   permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean }
 ) {
-  const tenantId = await requireTenant();
-  await requireAdminRole();
+  try {
+    if (!isAssigned) {
+      await prisma.eventStaff.deleteMany({
+        where: { userId, eventId, event: { tenantId } },
+      });
+    } else {
+      // Prisma upsert requires a unique identifier in `where`. If there's no
+      // unique constraint on (userId, eventId) we updateMany and create when
+      // no record was updated.
+      const updated = await prisma.eventStaff.updateMany({
+        where: { userId, eventId },
+        data: {
+          canSell: permissions.canSell,
+          canOperate: permissions.canOperate,
+          canVerify: permissions.canVerify,
+        },
+      });
 
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: { subdomain: true },
-  });
+      if (updated.count === 0) {
+        await prisma.eventStaff.create({
+          data: {
+            userId,
+            eventId,
+            canSell: permissions.canSell,
+            canOperate: permissions.canOperate,
+            canVerify: permissions.canVerify,
+          },
+        });
+      }
+    }
 
-  if (!tenant) {
-    throw new Error("Tenant não encontrado.");
+    revalidatePath("/dashboard/equipe");
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
-
-  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
-  if (!event) throw new Error("Evento inválido ou acesso negado.");
-
-  let baseUsername = generateUsername(name);
-  let finalUsername = baseUsername;
-  let counter = 1;
-  while (await prisma.user.findUnique({ where: { username: finalUsername } })) {
-    finalUsername = `${baseUsername}${counter}`;
-    counter++;
-  }
-
-  const pin = Math.floor(1000 + Math.random() * 9000).toString();
-  const hashedPin = await bcrypt.hash(pin, 10);
-
- const result = await prisma.$transaction(async (tx) => {
-  const newUser = await tx.user.create({
-    data: {
-      name: name.trim(),
-      username: finalUsername,
-      password: hashedPin,
-      role: "STAFF",
-      tenantId,
-    },
-  });
-
-  await tx.eventStaff.create({
-    data: {
-      eventId,
-      userId: newUser.id,
-      canSell: permissions.canSell ?? true,
-      canOperate: permissions.canOperate ?? false,
-      canVerify: permissions.canVerify ?? false,
-    },
-  });
-
-  return { 
-    username: finalUsername, 
-    pin 
-  };
-});
-
-  revalidatePath(`/${tenant.subdomain}/dashboard/${eventId}`, "page");
-  return { success: true, ...result };
 }
 
+export async function resetGlobalStaffPin(userId: string) {
+  try {
+    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedPin = await hash(newPin, 12);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. ALTERAR PERMISSÕES DURANTE O EVENTO
-// ─────────────────────────────────────────────────────────────────────────────
-export async function toggleStaffCapability(
-  eventStaffId: string,
-  capability: "canSell" | "canOperate" | "canVerify",
-  newValue: boolean
-) {
-  const tenantId = await requireTenant();
-  await requireAdminRole();
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPin },
+    });
 
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: { subdomain: true },
-  });
-
-  if (!tenant) {
-    throw new Error("Tenant não encontrado.");
+    return { success: true, newPin, username: user.username };
+  } catch (error: any) {
+    return { success: false, error: "Falha ao resetar PIN." };
   }
-
-  const staff = await prisma.eventStaff.findFirst({
-    where: { id: eventStaffId, event: { tenantId } },
-  });
-
-  if (!staff) throw new Error("Acesso negado.");
-
-  await prisma.eventStaff.update({
-    where: { id: eventStaffId },
-    data: { [capability]: newValue },
-  });
-
-  revalidatePath(`/${tenant.subdomain}/dashboard/${staff.eventId}`, "page");
-  return { success: true };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. ESTOQUE: ENTREGAR CARTELAS PARA O VOLUNTÁRIO (Ex-assignCardsToSeller)
-// ─────────────────────────────────────────────────────────────────────────────
-export async function assignCardsToStaff(eventId: string, eventStaffId: string, quantity: number) {
-  const tenantId = await requireTenant();
-  await requireAdminRole();
-
-  const availableCards = await prisma.card.findMany({
-    where: { eventId, eventStaffId: null, event: { tenantId } },
-    take: quantity,
-    select: { id: true },
-  });
-
-  if (availableCards.length < quantity) {
-    return { success: false, error: `Há apenas ${availableCards.length} cartelas livres no estoque.` };
-  }
-
-  const cardIds = availableCards.map((c) => c.id);
-
-  await prisma.card.updateMany({
-    where: { id: { in: cardIds } },
-    data: { eventStaffId },
-  });
-
-  revalidatePath("/");
-  return { success: true, count: cardIds.length };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. ESTOQUE: DEVOLVER CARTELAS NÃO VENDIDAS
-// ─────────────────────────────────────────────────────────────────────────────
-export async function returnCardsFromStaff(eventStaffId: string, quantity: number) {
-  const tenantId = await requireTenant();
-  await requireAdminRole();
-
-  const returnable = await prisma.card.findMany({
-    where: { eventStaffId, isPaid: false, event: { tenantId } },
-    take: quantity,
-    select: { id: true },
-  });
-
-  if (returnable.length < quantity) {
-    return { success: false, error: "Quantidade inválida para devolução." };
-  }
-
-  const cardIds = returnable.map((c) => c.id);
-  await prisma.card.updateMany({
-    where: { id: { in: cardIds } },
-    data: { eventStaffId: null },
-  });
-
-  revalidatePath("/");
-  return { success: true };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. REMOVER DA ESCALA DO EVENTO
-// ─────────────────────────────────────────────────────────────────────────────
-export async function removeStaffFromEvent(eventStaffId: string) {
-  const tenantId = await requireTenant();
-  await requireAdminRole();
-
-  const paidCount = await prisma.card.count({ where: { eventStaffId, isPaid: true } });
-  if (paidCount > 0) {
-    return { success: false, error: "Vínculos financeiros existem. Não pode ser removido da escala." };
-  }
-
-  await prisma.card.updateMany({
-    where: { eventStaffId },
-    data: { eventStaffId: null },
-  });
-
-  await prisma.eventStaff.delete({ where: { id: eventStaffId } });
-  revalidatePath("/");
-  return { success: true };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 6. RESETAR SENHA (PIN) DO MEMBRO DA EQUIPE
-// ─────────────────────────────────────────────────────────────────────────────
-export async function resetStaffPassword(userId: string) {
-  const tenantId = await requireTenant();
-  await requireAdminRole();
-
-  const user = await prisma.user.findFirst({
-    where: { id: userId, tenantId },
-    select: { username: true, name: true },
-  });
-
-  if (!user) {
-    return { success: false, error: "Usuário não encontrado ou sem permissão." };
-  }
-
-  const newPin = Math.floor(1000 + Math.random() * 9000).toString();
-  const hashedPin = await bcrypt.hash(newPin, 10);
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: { password: hashedPin },
-  });
-
-  return { 
-    success: true, 
-    username: user.username,
-    name: user.name,
-    newPin 
-  };
 }
 </file>
 
@@ -6175,76 +5906,6 @@ export default function TermosPage() {
 }
 </file>
 
-<file path="src/app/[subdomain]/dashboard/[eventId]/equipe/page.tsx">
-// src/app/[subdomain]/dashboard/[eventId]/equipe/page.tsx
-import prisma from "@/lib/prisma";
-import StaffClient from "./StaffClient";
-import { notFound } from "next/navigation";
-
-export default async function EquipePage({
-  params,
-}: {
-  params: Promise<{ subdomain: string; eventId: string }>;
-}) {
-  // Pegamos o subdomain direto da URL, assim como fazemos no dashboard pai!
-  const { subdomain, eventId } = await params;
-
-  // Busca segura garantindo que o evento pertence ao subdomínio da URL
-  const event = await prisma.event.findFirst({
-    where: { 
-      id: eventId, 
-      tenant: { subdomain: subdomain } 
-    },
-    select: { name: true, isActive: true },
-  });
-
-  // Se der 404 agora, é porque o ID do evento na URL não existe no banco!
-  if (!event) return notFound();
-
-  const staffList = await prisma.eventStaff.findMany({
-    where: { eventId },
-    include: {
-      user: {
-        select: { id: true, name: true, username: true },
-      },
-      cards: {
-        select: { isPaid: true },
-      },
-    },
-    orderBy: { createdAt: "asc" },
-  });
-
-  const formattedStaff = staffList.map((staff) => ({
-    id: staff.id,
-    userId: staff.userId,
-    name: staff.user.name ?? "Sem Nome",
-    username: staff.user.username ?? "",
-    canSell: staff.canSell,
-    canOperate: staff.canOperate,
-    canVerify: staff.canVerify,
-    cardsTotal: staff.cards.length,
-    cardsSold: staff.cards.filter((c) => c.isPaid).length,
-  }));
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-black text-white">Gestão da Equipe</h1>
-        <p className="text-slate-400">
-          Evento: <span className="font-bold text-emerald-400">{event.name}</span>
-        </p>
-      </div>
-
-      <StaffClient 
-        eventId={eventId} 
-        initialStaff={formattedStaff} 
-        isEventActive={event.isActive}
-      />
-    </div>
-  );
-}
-</file>
-
 <file path="src/app/[subdomain]/dashboard/[eventId]/EventStatusToggle.tsx">
 "use client";
 
@@ -6307,6 +5968,82 @@ export default function EventStatusToggle({ eventId, initialStatus, tenantId, su
       <Power size={18} className={isPending ? "animate-pulse" : ""} />
       {isActive ? "Evento Ativo" : "Evento Inativo"}
     </button>
+  );
+}
+</file>
+
+<file path="src/app/[subdomain]/dashboard/[eventId]/tesouraria/page.tsx">
+// src/app/[subdomain]/dashboard/[eventId]/tesouraria/page.tsx
+import prisma from "@/lib/prisma";
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, Wallet } from "lucide-react";
+import TesourariaClient from "./TesourariaClient";
+
+export default async function TesourariaPage({ 
+  params 
+}: { 
+  params: Promise<{ subdomain: string; eventId: string }> 
+}) {
+  const { subdomain, eventId } = await params;
+
+  // 1. Resolve o tenant pela URL (Blindado contra bug do Super Admin)
+  const tenant = await prisma.tenant.findUnique({ where: { subdomain } });
+  if (!tenant) return notFound();
+
+  // 2. Busca o Evento e a Equipe (somente quem tem permissão canSell)
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenantId: tenant.id },
+  });
+
+  if (!event) return notFound();
+
+  // 3. Busca a equipe escalada com suas cartelas
+  const eventStaff = await prisma.eventStaff.findMany({
+    where: { eventId, canSell: true },
+    include: {
+      user: { select: { name: true, username: true } },
+      cards: {
+        select: { id: true, shortId: true, isPaid: true }
+      }
+    },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  // 4. KPI de Fábrica (Cartelas sem dono neste evento)
+  const availableCardsCount = await prisma.card.count({
+    where: { eventId, eventStaffId: null }
+  });
+
+  return (
+    <div className="min-h-screen bg-[#0b0f14] text-slate-200 font-sans pb-20">
+      <header className="sticky top-0 z-50 bg-[#0b0f14]/80 backdrop-blur-md border-b border-emerald-900/30">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">
+          <Link 
+            href={`/dashboard/${eventId}`}
+            className="p-2 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white"
+          >
+            <ArrowLeft size={20} />
+          </Link>
+          <div className="w-10 h-10 bg-emerald-900/40 text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20">
+            <Wallet size={20} />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-white">Tesouraria & Estoque</h1>
+            <p className="text-emerald-500/70 text-xs font-bold uppercase tracking-widest">{event.name}</p>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 mt-8">
+        {/* Passando os dados para o Client Component mesclado */}
+        <TesourariaClient 
+          eventId={eventId} 
+          initialStaff={eventStaff} 
+          availableCardsCount={availableCardsCount} 
+        />
+      </main>
+    </div>
   );
 }
 </file>
@@ -6399,6 +6136,289 @@ export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: 
             <Pencil size={12} className="opacity-50" />
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx">
+// src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx
+"use client";
+
+import { useState, useTransition } from "react";
+import { createTenantStaff, toggleStaffInEvent, resetGlobalStaffPin } from "@/actions/equipe-global";
+import { UserPlus, Settings2, Key, CheckCircle, Ticket, Mic, Shield } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+type EventType = { id: string; name: string; isActive: boolean };
+type StaffEventType = { eventId: string; canSell: boolean; canOperate: boolean; canVerify: boolean };
+type StaffMemberType = { id: string; name: string | null; username: string | null; events: StaffEventType[] };
+
+export default function GlobalStaffClient({ staffMembers, events, tenantId }: { staffMembers: StaffMemberType[], events: EventType[], tenantId: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newStaffName, setNewStaffName] = useState("");
+  const [credentialsModal, setCredentialsModal] = useState<{ username: string; pin: string } | null>(null);
+  
+  // Controle do Modal de Eventos
+  const [activeStaffModal, setActiveStaffModal] = useState<StaffMemberType | null>(null);
+
+  const handleAddStaff = (e: React.FormEvent) => {
+    e.preventDefault();
+    startTransition(async () => {
+      const res = await createTenantStaff(tenantId, newStaffName);
+      if (res.success && res.pin) {
+        setNewStaffName("");
+        setShowAddModal(false);
+        setCredentialsModal({ username: res.username!, pin: res.pin });
+        router.refresh();
+      } else {
+        alert(res.error);
+      }
+    });
+  };
+
+  const handleResetPin = (userId: string, name: string) => {
+    if (!confirm(`Gerar novo PIN para ${name}?`)) return;
+    startTransition(async () => {
+      const res = await resetGlobalStaffPin(userId);
+      if (res.success && res.newPin) {
+        setCredentialsModal({ username: res.username!, pin: res.newPin });
+      } else {
+        alert(res.error);
+      }
+    });
+  };
+
+  const handleEventToggle = (userId: string, eventId: string, currentAssigned: boolean, currentPerms: any) => {
+    startTransition(async () => {
+      // Se não estava no evento, ativa com permissão de venda padrão. Se já estava, remove.
+      const newAssigned = !currentAssigned;
+      const perms = newAssigned ? { canSell: true, canOperate: false, canVerify: false } : { canSell: false, canOperate: false, canVerify: false };
+      
+      await toggleStaffInEvent(tenantId, userId, eventId, newAssigned, perms);
+      router.refresh();
+      // Atualiza o estado do modal localmente para ser instantâneo
+      if (activeStaffModal) {
+        const updatedEvents = newAssigned 
+          ? [...activeStaffModal.events, { eventId, ...perms }]
+          : activeStaffModal.events.filter(e => e.eventId !== eventId);
+        setActiveStaffModal({ ...activeStaffModal, events: updatedEvents });
+      }
+    });
+  };
+
+  const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify', currentPerms: any) => {
+    startTransition(async () => {
+      const updatedPerms = { ...currentPerms, [permKey]: !currentPerms[permKey] };
+      await toggleStaffInEvent(tenantId, userId, eventId, true, updatedPerms);
+      router.refresh();
+      
+      if (activeStaffModal) {
+        const updatedEvents = activeStaffModal.events.map(e => e.eventId === eventId ? { ...e, ...updatedPerms } : e);
+        setActiveStaffModal({ ...activeStaffModal, events: updatedEvents });
+      }
+    });
+  };
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-slate-300">Equipe Cadastrada</h2>
+        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-bold transition shadow-lg shadow-blue-900/20">
+          <UserPlus size={18} /> Novo Voluntário
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {staffMembers.map((staff) => (
+          <div key={staff.id} className="bg-[#111827] border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-blue-500/50 transition">
+            <div>
+              <h3 className="text-lg font-black text-white">{staff.name}</h3>
+              <p className="text-sm font-mono text-blue-400 mb-4">@{staff.username}</p>
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-black/40 px-3 py-1.5 rounded-lg w-max mb-6">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                Ativo em {staff.events.length} evento(s)
+              </div>
+            </div>
+            
+            <div className="flex gap-2 border-t border-slate-800 pt-4">
+              <button 
+                onClick={() => setActiveStaffModal(staff)}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
+              >
+                <Settings2 size={16} /> Gerenciar Eventos
+              </button>
+              <button 
+                onClick={() => handleResetPin(staff.id, staff.name!)}
+                className="p-2 bg-slate-800 hover:bg-amber-900/40 text-amber-500 rounded-xl transition" title="Resetar PIN"
+              >
+                <Key size={18} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* MODAL: GERENCIAR EVENTOS DO VOLUNTÁRIO */}
+      {activeStaffModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-slate-700 rounded-3xl p-6 w-full max-w-2xl relative max-h-[85vh] flex flex-col">
+            <button onClick={() => setActiveStaffModal(null)} className="absolute top-6 right-6 text-slate-400 hover:text-white font-black text-xl">X</button>
+            
+            <h3 className="text-2xl font-black text-white mb-1">Permissões de {activeStaffModal.name}</h3>
+            <p className="text-slate-400 text-sm mb-6">Ligue o voluntário no evento desejado e defina o que ele pode fazer.</p>
+
+            <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
+              {events.map(event => {
+                const staffEvent = activeStaffModal.events.find(e => e.eventId === event.id);
+                const isAssigned = !!staffEvent;
+
+                return (
+                  <div key={event.id} className={`p-5 rounded-2xl border transition-all ${isAssigned ? 'bg-blue-900/10 border-blue-500/30' : 'bg-black/40 border-slate-800 opacity-60 hover:opacity-100'}`}>
+                    <div className="flex justify-between items-center mb-4">
+                      <p className="font-bold text-white text-lg">{event.name} {event.isActive && <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-md ml-2 align-middle">ATIVO</span>}</p>
+                      
+                      {/* TOGGLE PRINCIPAL: PARTICIPA DO EVENTO? */}
+                      <button 
+                        disabled={isPending}
+                        onClick={() => handleEventToggle(activeStaffModal.id, event.id, isAssigned, staffEvent)}
+                        className={`px-4 py-2 rounded-xl text-xs font-black transition ${isAssigned ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
+                      >
+                        {isAssigned ? 'REMOVER DO EVENTO' : '+ INCLUIR NO EVENTO'}
+                      </button>
+                    </div>
+
+                    {/* TOGGLES DE PERMISSÃO */}
+                    {isAssigned && (
+                      <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800">
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canSell', staffEvent)}
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canSell ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                        >
+                          <Ticket size={16} /> Vender (PDV)
+                        </button>
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canOperate', staffEvent)}
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canOperate ? 'bg-violet-600/20 border-violet-500 text-violet-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                        >
+                          <Mic size={16} /> Palco
+                        </button>
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canVerify', staffEvent)}
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canVerify ? 'bg-amber-600/20 border-amber-500 text-amber-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                        >
+                          <Shield size={16} /> Fiscal
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {events.length === 0 && <p className="text-center text-slate-500 py-10">Crie um evento primeiro para poder alocar a equipe.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OUTROS MODAIS (NOVO STAFF E PIN GERADO) MANTIDOS IGUAIS... */}
+      {showAddModal && (
+         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+         <div className="bg-[#111827] rounded-3xl p-6 w-full max-w-md relative border border-slate-800">
+           <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 text-slate-400">X</button>
+           <h3 className="text-xl font-bold text-white mb-4">Novo Voluntário</h3>
+           <form onSubmit={handleAddStaff}>
+             <input required value={newStaffName} onChange={(e) => setNewStaffName(e.target.value)} className="w-full p-4 bg-black border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 mb-4" placeholder="Nome Completo" />
+             <button disabled={isPending} type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl disabled:opacity-50">Confirmar e Gerar Acesso</button>
+           </form>
+         </div>
+       </div>
+      )}
+
+      {credentialsModal && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-emerald-500/30 rounded-3xl p-8 w-full max-w-sm text-center shadow-2xl">
+            <div className="mx-auto w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6">
+              <CheckCircle className="text-emerald-500" size={48} />
+            </div>
+            <h3 className="text-2xl font-black text-white mb-2">Credenciais Geradas!</h3>
+            <div className="bg-black rounded-2xl p-6 mb-8 text-left space-y-4 border border-slate-800">
+              <div><p className="text-xs uppercase text-slate-500 mb-1">USUÁRIO</p><p className="font-mono text-xl font-bold text-white">{credentialsModal.username}</p></div>
+              <div><p className="text-xs uppercase text-slate-500 mb-1">SENHA (PIN)</p><p className="font-mono text-4xl font-black text-emerald-400 tracking-widest">{credentialsModal.pin}</p></div>
+            </div>
+            <button onClick={() => setCredentialsModal(null)} className="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-bold text-white">Entendi, Fechar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/[subdomain]/dashboard/equipe/page.tsx">
+// src/app/[subdomain]/dashboard/equipe/page.tsx
+import prisma from "@/lib/prisma";
+import { requireTenant } from "@/lib/requireTenant";
+import GlobalStaffClient from "./GlobalStaffClient";
+import { Users } from "lucide-react";
+
+export default async function GlobalEquipePage() {
+  const tenantId = await requireTenant();
+
+  // 1. Busca todos os eventos da ONG
+  const events = await prisma.event.findMany({
+    where: { tenantId },
+    select: { id: true, name: true, isActive: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  // 2. Busca todos os voluntários desta ONG, e em quais eventos eles estão
+  const users = await prisma.user.findMany({
+    where: { tenantId, role: "STAFF" },
+    include: {
+      // 🔥 CORRIGIDO: O nome correto da relação no seu schema.prisma
+      staffAssignments: {
+        select: {
+          eventId: true,
+          canSell: true,
+          canOperate: true,
+          canVerify: true,
+        }
+      }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+  // 3. Mapeia o resultado do Prisma para o formato exato que a UI precisa
+  const staffMembers = users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    username: u.username,
+    // 🔥 CORRIGIDO: Lendo de staffAssignments
+    events: u.staffAssignments.map((es) => ({
+      eventId: es.eventId,
+      canSell: es.canSell,
+      canOperate: es.canOperate,
+      canVerify: es.canVerify,
+    }))
+  }));
+
+  return (
+    <div className="min-h-screen bg-[#0b0f14] text-slate-200 p-8 font-sans pb-20">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex items-center gap-4 mb-8">
+          <div className="w-16 h-16 bg-blue-900/30 text-blue-400 rounded-2xl flex items-center justify-center border border-blue-500/20">
+            <Users size={32} />
+          </div>
+          <div>
+            <h1 className="text-3xl font-black text-white">Central de Voluntários</h1>
+            <p className="text-slate-400 mt-1">Gerencie sua equipe e aloque-os rapidamente em qualquer evento.</p>
+          </div>
+        </div>
+
+        <GlobalStaffClient staffMembers={staffMembers} events={events} tenantId={tenantId} />
       </div>
     </div>
   );
@@ -10481,194 +10501,6 @@ export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeI
 }
 </file>
 
-<file path="src/app/[subdomain]/dashboard/page.tsx">
-// src/app/[subdomain]/dashboard/page.tsx
-import prisma from "@/lib/prisma";
-import { redirect } from "next/navigation";
-import EventList from "./EventList";
-import LogoutButton from "@/components/auth/LogoutButton";
-import Link from "next/link";
-import { Calendar, Users, Activity, UserCheck, ArrowRight, Plus, XCircle } from "lucide-react";
-import { closeEventAndGenerateReport } from "@/actions/closeEvent";
-import CloseEventButton from "./CloseEventButton";
-
-export default async function TenantDashboardPage({ params }: { params: Promise<{ subdomain: string }> }) {
-  const { subdomain } = await params;
-
-  const tenant = await prisma.tenant.findUnique({
-    where: { subdomain },
-    include: {
-      events: {
-        orderBy: { createdAt: "desc" },
-        include: { staff: true },
-      },
-      users: {
-        where: { role: "STAFF" },
-        select: { id: true },
-      },
-    },
-  });
-
-  if (!tenant) redirect("/");
-
-  const totalEvents = tenant.events.length;
-  const activeEvents = tenant.events.filter(e => e.status === "ACTIVE").length;
-  const totalStaff = tenant.users.length;
-
-  const activeEvent = tenant.events.find(e => e.status === "ACTIVE");
-
-  return (
-    <div className="min-h-screen bg-[#0b0f14] text-slate-200 pb-20">
-      {/* HEADER */}
-      <header className="sticky top-0 z-50 bg-[#0b0f14]/95 backdrop-blur-lg border-b border-emerald-900/30 px-6 py-5">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <div className="w-9 h-9 bg-emerald-500 rounded-2xl flex items-center justify-center text-black font-black text-xl">
-              {tenant.name.charAt(0)}
-            </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-white">{tenant.name}</h1>
-              <p className="text-emerald-500/70 text-sm font-mono -mt-1">{subdomain}</p>
-            </div>
-          </div>
-          <LogoutButton/>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-6 mt-10">
-        {/* KPIs - Mais modernos */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <KpiCard 
-            icon={<Calendar className="w-8 h-8" />} 
-            label="Total de Eventos" 
-            value={totalEvents} 
-            color="emerald" 
-          />
-          <KpiCard 
-            icon={<Activity className="w-8 h-8" />} 
-            label="Eventos Ativos" 
-            value={activeEvents} 
-            color="amber" 
-          />
-          <KpiCard 
-            icon={<Users className="w-8 h-8" />} 
-            label="Voluntários" 
-            value={totalStaff} 
-            color="blue" 
-          />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Lista de Eventos - Principal */}
-          <div className="lg:col-span-8">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-3xl font-black text-white">Meus Eventos</h2>
-              <Link 
-                href="/dashboard/novo-evento" 
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-3 rounded-2xl transition-all"
-              >
-                <Plus size={20} /> Novo Evento
-              </Link>
-            </div>
-            <EventList initialEvents={tenant.events} />
-          </div>
-
-          {/* Sidebar - Ações Rápidas */}
-          <div className="lg:col-span-4 space-y-6">
-            {/* Evento Ativo */}
-            {activeEvent && (
-              <div className="bg-gradient-to-br from-emerald-950 to-slate-900 border border-emerald-500/30 rounded-3xl p-8">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse" />
-                  <span className="uppercase text-xs font-bold tracking-widest text-emerald-400">Evento em Andamento</span>
-                </div>
-                <h3 className="text-xl font-black text-white mb-1">{activeEvent.name}</h3>
-                
-                <div className="flex gap-3 mt-6">
-                  <Link
-                    href={`/dashboard/${activeEvent.id}/equipe`}
-                    className="flex-1 bg-white/10 hover:bg-white/15 text-white font-bold py-3.5 rounded-2xl text-center transition-all"
-                  >
-                    Equipe
-                  </Link>
-                  <Link
-                    href={`/dashboard/${activeEvent.id}/tesouraria`}
-                    className="flex-1 bg-white/10 hover:bg-white/15 text-white font-bold py-3.5 rounded-2xl text-center transition-all"
-                  >
-                    Tesouraria
-                  </Link>
-                </div>
-
-                {/* Botão de Fechamento */}
-                <CloseEventButton eventId={activeEvent.id} eventName={activeEvent.name} />
-              </div>
-            )}
-
-            {/* Gestão de Equipe */}
-            <div className="bg-[#111827] border border-blue-900/30 rounded-3xl p-8">
-              <div className="flex items-center gap-3 mb-6">
-                <UserCheck className="text-blue-400" size={28} />
-                <h3 className="text-xl font-black">Escala da Equipe</h3>
-              </div>
-              {activeEvent ? (
-                <Link
-                  href={`/dashboard/${activeEvent.id}/equipe`}
-                  className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl text-center transition-all"
-                >
-                  Gerenciar Equipe
-                </Link>
-              ) : (
-                <p className="text-slate-400 text-sm">Ative um evento para gerenciar a equipe.</p>
-              )}
-            </div>
-
-            {/* Tesouraria Rápida */}
-            {activeEvent && (
-              <Link
-                href={`/dashboard/${activeEvent.id}/tesouraria`}
-                className="block bg-slate-800 hover:bg-slate-700 border border-slate-700 p-8 rounded-3xl transition-all group"
-              >
-                <div className="font-bold text-xl mb-2 group-hover:text-emerald-400">Tesouraria</div>
-                <p className="text-slate-400">Controle de lotes e devoluções</p>
-              </Link>
-            )}
-          </div>
-        </div>
-      </main>
-    </div>
-  );
-}
-
-// Componente KPI
-function KpiCard({ 
-  icon, 
-  label, 
-  value, 
-  color 
-}: { 
-  icon: React.ReactNode; 
-  label: string; 
-  value: number; 
-  color: 'emerald' | 'amber' | 'blue' 
-}) {
-  const colorMap = {
-    emerald: "text-emerald-400 border-emerald-500/20 bg-emerald-950/30",
-    amber:   "text-amber-400 border-amber-500/20 bg-amber-950/30",
-    blue:    "text-blue-400 border-blue-500/20 bg-blue-950/30",
-  } as const;
-
-  return (
-    <div className={`border ${colorMap[color]} p-8 rounded-3xl flex items-center gap-6 transition-all hover:scale-[1.02]`}>
-      <div className="text-5xl opacity-80">{icon}</div>
-      <div>
-        <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-1">{label}</p>
-        <p className="text-5xl font-black text-white">{value}</p>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="src/app/[subdomain]/live/BingoGame.tsx">
 // src/app/[subdomain]/live/BingoGame.tsx
 "use client";
@@ -11586,6 +11418,215 @@ const maskDocument = (value: string) => {
 };
 </file>
 
+<file path="src/app/[subdomain]/dashboard/page.tsx">
+// src/app/[subdomain]/dashboard/page.tsx
+import prisma from "@/lib/prisma";
+import { redirect } from "next/navigation";
+import EventList from "./EventList";
+import LogoutButton from "@/components/auth/LogoutButton";
+import Link from "next/link";
+import { Calendar, Users, Activity, Plus, UserCircle } from "lucide-react";
+import CloseEventButton from "./CloseEventButton";
+import { auth } from "@/lib/auth"; // 🔥 NOVO: Importando a sessão do usuário
+
+export default async function TenantDashboardPage({ params }: { params: Promise<{ subdomain: string }> }) {
+  const { subdomain } = await params;
+  
+  // 🔥 NOVO: Buscando quem é o usuário logado
+  const session = await auth();
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { subdomain },
+    include: {
+      events: {
+        orderBy: { createdAt: "desc" },
+        include: { staff: true },
+      },
+      users: {
+        where: { role: "STAFF" },
+        select: { id: true },
+      },
+    },
+  });
+
+  if (!tenant) redirect("/");
+
+  const totalEvents = tenant.events.length;
+  const activeEvents = tenant.events.filter(e => e.status === "ACTIVE").length;
+  const totalStaff = tenant.users.length;
+
+  const activeEvent = tenant.events.find(e => e.status === "ACTIVE");
+
+  return (
+    <div className="min-h-screen bg-[#0b0f14] text-slate-200 pb-20">
+      {/* HEADER */}
+      <header className="sticky top-0 z-50 bg-[#0b0f14]/95 backdrop-blur-lg border-b border-emerald-900/30 px-6 py-5">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          
+          {/* Lado Esquerdo: Info do Tenant (ONG) */}
+          <div className="flex items-center gap-4">
+            <div className="w-9 h-9 bg-emerald-500 rounded-2xl flex items-center justify-center text-black font-black text-xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+              {tenant.name.charAt(0)}
+            </div>
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-white leading-none">{tenant.name}</h1>
+              <p className="text-emerald-500/70 text-sm font-mono mt-1">{subdomain}</p>
+            </div>
+          </div>
+
+          {/* 🔥 Lado Direito: Perfil do Usuário + Logout */}
+          <div className="flex items-center gap-6">
+            {session?.user && (
+              <div className="flex items-center gap-3 border-r border-slate-800 pr-6 hidden md:flex">
+                <div className="text-right">
+                  <p className="text-sm font-bold text-white leading-tight">
+                    {session.user.name || "Administrador"}
+                  </p>
+                  <p className="text-[10px] text-emerald-500 font-mono tracking-widest uppercase mt-0.5">
+                    {session.user.role === "SUPER_ADMIN" ? "God Mode" : "Org Admin"}
+                  </p>
+                </div>
+                <div className="w-10 h-10 bg-slate-800 border border-slate-700 rounded-full flex items-center justify-center text-slate-400">
+                  <UserCircle size={24} />
+                </div>
+              </div>
+            )}
+            
+            <LogoutButton/>
+          </div>
+
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 mt-10">
+        {/* KPIs */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+          <KpiCard 
+            icon={<Calendar className="w-8 h-8" />} 
+            label="Total de Eventos" 
+            value={totalEvents} 
+            color="emerald" 
+          />
+          <KpiCard 
+            icon={<Activity className="w-8 h-8" />} 
+            label="Eventos Ativos" 
+            value={activeEvents} 
+            color="amber" 
+          />
+          <KpiCard 
+            icon={<Users className="w-8 h-8" />} 
+            label="Voluntários" 
+            value={totalStaff} 
+            color="blue" 
+          />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Lista de Eventos - Principal */}
+          <div className="lg:col-span-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-3xl font-black text-white">Meus Eventos</h2>
+              <Link 
+                href="/dashboard/novo-evento" 
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-3 rounded-2xl transition-all shadow-lg shadow-emerald-900/20"
+              >
+                <Plus size={20} /> Novo Evento
+              </Link>
+            </div>
+            <EventList initialEvents={tenant.events} />
+          </div>
+
+          {/* Sidebar - Ações Rápidas */}
+          <div className="lg:col-span-4 space-y-6">
+            
+            {/* Link Global de RH */}
+            <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-blue-900/50 rounded-3xl p-8 relative overflow-hidden group">
+              <div className="absolute -top-16 -right-16 w-40 h-40 bg-blue-500/10 blur-[50px] rounded-full transition-transform group-hover:scale-150"></div>
+              <div className="flex items-center gap-4 mb-4 relative z-10">
+                <div className="p-3 bg-blue-900/30 text-blue-400 rounded-xl border border-blue-500/20">
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">Equipe Global</h3>
+                  <p className="text-slate-400 text-xs mt-1">Gerencie os voluntários da ONG.</p>
+                </div>
+              </div>
+              <Link
+                href="/dashboard/equipe"
+                className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl text-center transition-all shadow-[0_0_20px_rgba(37,99,235,0.2)] hover:shadow-[0_0_40px_rgba(37,99,235,0.4)] relative z-10"
+              >
+                Central de RH
+              </Link>
+            </div>
+
+            {/* Painel do Evento Ativo */}
+            {activeEvent ? (
+              <div className="bg-gradient-to-br from-emerald-950 to-slate-900 border border-emerald-500/30 rounded-3xl p-8">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse" />
+                  <span className="uppercase text-xs font-bold tracking-widest text-emerald-400">Evento em Andamento</span>
+                </div>
+                <h3 className="text-xl font-black text-white mb-1">{activeEvent.name}</h3>
+                <p className="text-slate-400 text-sm mb-6">Controle operacional e financeiro do dia.</p>
+                
+                <div className="space-y-3">
+                  <Link
+                    href={`/dashboard/${activeEvent.id}/tesouraria`}
+                    className="block w-full bg-white/10 hover:bg-white/15 text-white font-bold py-4 rounded-xl text-center transition-all border border-white/5"
+                  >
+                    Tesouraria PDV
+                  </Link>
+
+                  {/* Botão de Fechamento */}
+                  <div className="pt-2">
+                    <CloseEventButton eventId={activeEvent.id} eventName={activeEvent.name} />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-[#111827] border border-slate-800 rounded-3xl p-8 text-center flex flex-col items-center justify-center min-h-[200px]">
+                <Activity className="text-slate-600 mb-4" size={40} />
+                <p className="text-slate-500 font-bold">Nenhum evento ativo.</p>
+                <p className="text-slate-600 text-sm mt-1">Inicie um evento para liberar o PDV e a Tesouraria.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// Componente KPI
+function KpiCard({ 
+  icon, 
+  label, 
+  value, 
+  color 
+}: { 
+  icon: React.ReactNode; 
+  label: string; 
+  value: number; 
+  color: 'emerald' | 'amber' | 'blue' 
+}) {
+  const colorMap = {
+    emerald: "text-emerald-400 border-emerald-500/20 bg-emerald-950/30",
+    amber:   "text-amber-400 border-amber-500/20 bg-amber-950/30",
+    blue:    "text-blue-400 border-blue-500/20 bg-blue-950/30",
+  } as const;
+
+  return (
+    <div className={`border ${colorMap[color]} p-8 rounded-3xl flex items-center gap-6 transition-all hover:scale-[1.02]`}>
+      <div className="text-5xl opacity-80">{icon}</div>
+      <div>
+        <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-1">{label}</p>
+        <p className="text-5xl font-black text-white">{value}</p>
+      </div>
+    </div>
+  );
+}
+</file>
+
 <file path="package.json">
 {
   "name": "seuevento-acaoleve",
@@ -12261,12 +12302,34 @@ export default async function EventDashboardPage({
                     Aloque voluntários, gere PINs de acesso, defina quem pode vender cartelas e quem terá acesso ao palco do locutor.
                   </p>
                   <Link 
-                    href={`/dashboard/${event.id}/equipe`}
+                     href="/dashboard/equipe" 
                     className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-xl transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:shadow-[0_0_50px_rgba(37,99,235,0.5)]"
                   >
                     Gerenciar Permissões e Escala <ArrowRight size={20} />
                   </Link>
                 </div>
+              </div>
+
+              {/* CARD DA TESOURARIA (Adicione import { Wallet } from "lucide-react" no topo do arquivo) */}
+              <div className="bg-gradient-to-br from-[#111827] to-[#0d131a] border border-emerald-900/50 rounded-3xl p-8 relative overflow-hidden group hover:border-emerald-500/50 transition-all">
+                <div className="absolute -top-16 -right-16 w-40 h-40 bg-emerald-500/10 blur-[50px] rounded-full transition-transform group-hover:scale-150"></div>
+                
+                <div className="flex items-center gap-4 mb-6 relative z-10">
+                  <div className="p-3 bg-emerald-900/30 text-emerald-400 rounded-xl border border-emerald-500/20">
+                    <Wallet size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white">Tesouraria do Evento</h3>
+                    <p className="text-slate-400 text-xs mt-1">Gestão de lotes e estoque de cartelas</p>
+                  </div>
+                </div>
+
+                <Link
+                  href={`/dashboard/${event.id}/tesouraria`}
+                  className="flex items-center justify-center gap-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl text-center transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] hover:shadow-[0_0_40px_rgba(16,185,129,0.4)] relative z-10"
+                >
+                  Abrir Tesouraria
+                </Link>
               </div>
 
               {/* 💵 MÓDULO 4: AUDITORIA DE VENDAS */}
@@ -12526,12 +12589,21 @@ export default auth((req) => {
     }
   }
 
-  // ── 4. REWRITE PARA MULTI-TENANT (O SEGREDO DO APP ROUTER) ──────────────
-  // Isso garante que a URL /dashboard no navegador acesse a pasta /src/app/[subdomain]/dashboard
+// ── 4. REWRITE PARA MULTI-TENANT (O SEGREDO DO APP ROUTER) ──────────────
   if (currentSubdomain) {
-    const rewriteUrl = url.clone();
-    rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
-    return NextResponse.rewrite(rewriteUrl);
+    // 🔥 A MÁGICA DA CORREÇÃO: Protegendo as rotas globais!
+    // Avisamos o Next.js que estas rotas NÃO vivem dentro da pasta [subdomain]
+    const globalRoutes = ["/entrar", "/api"]; 
+    const isGlobalRoute = globalRoutes.some(
+      (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
+    );
+
+    // Só aplica o Rewrite mascarado se NÃO for uma rota global
+    if (!isGlobalRoute) {
+      const rewriteUrl = url.clone();
+      rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
+      return NextResponse.rewrite(rewriteUrl);
+    }
   }
 
   return NextResponse.next();

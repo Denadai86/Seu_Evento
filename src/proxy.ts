@@ -98,22 +98,30 @@ export default auth((req) => {
     }
   }
 
-// ── 4. REWRITE PARA MULTI-TENANT (O SEGREDO DO APP ROUTER) ──────────────
-  if (currentSubdomain) {
-    // 🔥 A MÁGICA DA CORREÇÃO: Protegendo as rotas globais!
-    // Avisamos o Next.js que estas rotas NÃO vivem dentro da pasta [subdomain]
-    const globalRoutes = ["/entrar", "/api"]; 
-    const isGlobalRoute = globalRoutes.some(
-      (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
-    );
+// ── 4. REWRITE PARA MULTI-TENANT (Melhorado para Server Actions) ──────────────
+if (currentSubdomain) {
+  const globalRoutes = ["/entrar", "/api", "/_next"]; 
+  const isGlobalRoute = globalRoutes.some(r => 
+    url.pathname === r || url.pathname.startsWith(r + "/")
+  );
 
-    // Só aplica o Rewrite mascarado se NÃO for uma rota global
-    if (!isGlobalRoute) {
-      const rewriteUrl = url.clone();
-      rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
-      return NextResponse.rewrite(rewriteUrl);
+  // Não reescreve rotas globais e também preserva Server Actions
+  if (!isGlobalRoute) {
+    const rewriteUrl = url.clone();
+    rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
+
+    // Importante: Preservar headers de Server Action
+    if (req.headers.get("next-action") || req.method === "POST") {
+      return NextResponse.rewrite(rewriteUrl, {
+        request: {
+          headers: req.headers,
+        },
+      });
     }
+
+    return NextResponse.rewrite(rewriteUrl);
   }
+}
 
   return NextResponse.next();
 });
