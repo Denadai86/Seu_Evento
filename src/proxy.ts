@@ -1,22 +1,19 @@
-// src/proxy.ts
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getRootDomain, isLocalHost, toLogin, toSubdomain, to } from "@/lib/middleware/helpers";
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$|.*\\.png$|.*\\.jpg$).*)",
+    // Atualizado: ignora robots, sitemaps e mais extensões de mídia
+    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp)$).*)",
   ],
 };
 
 export default auth((req) => {
-  const url      = req.nextUrl; 
+  const url = req.nextUrl;
   const hostname = req.headers.get("host") || "";
-
-  const isLocal    = hostname.includes("localhost");
-  
-  // 🔥 A TRAVA DE SEGURANÇA: Remove protocolos (http:// ou https://) e barras finais que possam vir do .env
-  let rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
-  rootDomain = rootDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const isLocal = isLocalHost(hostname);
+  const rootDomain = getRootDomain();
 
   const isRootDomain =
     hostname === rootDomain ||
@@ -24,104 +21,69 @@ export default auth((req) => {
     hostname === "localhost:3000";
 
   const currentSubdomain = isRootDomain ? null : hostname.split(".")[0];
+  const session = req.auth;
+  const role = session?.user?.role;
+  const userSubdomain = session?.user?.subdomain ?? (session?.user as any)?.tenant?.subdomain;
 
-  const session       = req.auth;
-  const role          = session?.user?.role;
-  // Fallback seguro caso o subdomain esteja aninhado no objeto tenant
-  const userSubdomain = session?.user?.subdomain || (session?.user as any)?.tenant?.subdomain;
+  // ── 1. SESSÃO INVÁLIDA ───────────────────────────────────────────────────
+  if ((session as any)?.error === "RefreshAccessTokenError") {
+    return toLogin(url, "session_expired");
+  }
 
-  // ── HELPER 1: Redirect interno (Mesmo domínio) ──────────────────────────
-  const to = (pathname: string) => {
-    const next = url.clone();
-    next.pathname = pathname;
-    return NextResponse.redirect(next);
-  };
-
-  // ── HELPER 2: A SOLUÇÃO SÊNIOR (Redirect cruzado para Subdomínio) ───────
-  const toSubdomain = (subdomain: string, pathname: string) => {
-    const next = url.clone(); // Objeto inteligente, preserva o protocolo
-    next.pathname = pathname;
-    next.host = isLocal ? `${subdomain}.localhost:3000` : `${subdomain}.${rootDomain}`;
-    return NextResponse.redirect(next);
-  };
-
-  // ── 1. PÓS-LOGIN ─────────────────────────────────────────────────────────
+  // ── 2. ROTEAMENTO PÓS-LOGIN ──────────────────────────────────────────────
   if ((url.pathname === "/" || url.pathname === "/entrar") && session) {
-
-    if (role === "SUPER_ADMIN") {
-      return to("/admin");
-    }
+    if (role === "SUPER_ADMIN") return to(url, "/admin");
 
     if (userSubdomain) {
-      // Está no domínio errado (raiz ou outro inquilino) → ejeta para o subdomínio correto
       if (isRootDomain || currentSubdomain !== userSubdomain) {
-        if (role === "ORG_ADMIN") return toSubdomain(userSubdomain, "/dashboard");
-        if (role === "STAFF")     return toSubdomain(userSubdomain, "/vendas");
+        if (role === "ORG_ADMIN") return toSubdomain(url, userSubdomain, "/dashboard");
+        if (role === "STAFF")     return toSubdomain(url, userSubdomain, "/vendas");
       }
-
-      // Já está no subdomínio correto → redirect interno simples
-      if (role === "ORG_ADMIN") return to("/dashboard");
-      if (role === "STAFF")     return to("/vendas");
+      if (role === "ORG_ADMIN") return to(url, "/dashboard");
+      if (role === "STAFF")     return to(url, "/vendas");
     }
   }
 
-  // ── 2. PROTEÇÃO DE ROTAS ──────────────────────────────────────────────────
+  // ── 3. PROTEÇÃO DE ROTAS PÚBLICAS ─────────────────────────────────────────
   const publicRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
-  const isPublicRoute = publicRoutes.some(
-    (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
-  );
+  const isPublicRoute = publicRoutes.some((r) => url.pathname === r || url.pathname.startsWith(`${r}/`));
 
   if (!isPublicRoute && !session) {
-    const next = url.clone();
-    next.pathname = "/entrar";
-    next.searchParams.set("callbackUrl", url.pathname);
-    return NextResponse.redirect(next);
+    return toLogin(url, undefined, url.pathname); // Envia a rota atual como callbackUrl
   }
 
-  // ── 3. ISOLAMENTO ENTRE TENANTS + RBAC ───────────────────────────────────
+  // ── 4. ISOLAMENTO CROSS-TENANT E RBAC ─────────────────────────────────────
   if (session && role !== "SUPER_ADMIN") {
-    
-    // Org_Admin ou Staff tentando acessar subdomínio de outra ONG
     if (!isRootDomain && userSubdomain !== currentSubdomain) {
-      const next = url.clone();
-      next.pathname = "/entrar";
-      next.searchParams.set("error", "AccessDenied");
-      return NextResponse.redirect(next);
+      if (req.headers.has("next-action") || req.method !== "GET") {
+        return new NextResponse("Forbidden: Tentativa de manipulação cross-tenant.", { status: 403 });
+      }
+      return toLogin(url, "AccessDenied");
     }
 
-    // Staff tentando dar uma de Admin
-    if (
-      role === "STAFF" &&
-      (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))
-    ) {
-      return to("/vendas");
+    if (role === "STAFF" && (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))) {
+      return to(url, "/vendas");
     }
   }
 
-// ── 4. REWRITE PARA MULTI-TENANT (Melhorado para Server Actions) ──────────────
-if (currentSubdomain) {
-  const globalRoutes = ["/entrar", "/api", "/_next"]; 
-  const isGlobalRoute = globalRoutes.some(r => 
-    url.pathname === r || url.pathname.startsWith(r + "/")
-  );
+  // ── 5. MULTI-TENANT REWRITE (Com Correção de Cache da Edge) ───────────────
+  if (currentSubdomain) {
+    const globalRoutes = ["/entrar", "/api", "/_next"];
+    const isGlobalRoute = globalRoutes.some((r) => url.pathname === r || url.pathname.startsWith(r + "/"));
 
-  // Não reescreve rotas globais e também preserva Server Actions
-  if (!isGlobalRoute) {
-    const rewriteUrl = url.clone();
-    rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
+    if (!isGlobalRoute) {
+      const rewriteUrl = url.clone();
+      rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
 
-    // Importante: Preservar headers de Server Action
-    if (req.headers.get("next-action") || req.method === "POST") {
-      return NextResponse.rewrite(rewriteUrl, {
-        request: {
-          headers: req.headers,
-        },
-      });
+      const response = (req.headers.has("next-action") || req.method === "POST")
+        ? NextResponse.rewrite(rewriteUrl, { request: { headers: req.headers } })
+        : NextResponse.rewrite(rewriteUrl);
+
+      // 🔥 O SEGREDINHO SÊNIOR: Impede que a Edge Cache misture respostas de tenants diferentes
+      response.headers.set("x-middleware-cache", "no-cache");
+      return response;
     }
-
-    return NextResponse.rewrite(rewriteUrl);
   }
-}
 
   return NextResponse.next();
 });

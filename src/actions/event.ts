@@ -1,4 +1,5 @@
 // src/actions/event.ts
+
 "use server";
 
 import prisma from "@/lib/prisma";
@@ -17,6 +18,9 @@ export async function createEvent(name: string) {
     data: {
       name: name.trim(),
       tenantId: session.user.tenantId,
+      // ⚠️ CORREÇÃO DO BUG 7: O banco define default 10.00, mas o app usa centavos.
+      // Se não enviarmos nada, ele nasce cobrando R$ 0,10. Forçando R$ 10,00 (1000 centavos).
+      ticketPrice: 1000, 
     },
   });
 
@@ -26,18 +30,6 @@ export async function createEvent(name: string) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ALTERNAR STATUS DO EVENTO
-//
-// ⚠️  CORREÇÃO CRÍTICA DE BUG:
-//     O schema tem dois campos de "ativo" no Event:
-//       • status: String  → lido pelo EventStatusToggle / dashboard
-//       • isActive: Boolean → lido por processBatchSale para liberar o caixa
-//     Eles estavam DESCONECTADOS. Ativar o evento pelo toggle não abria o PDV.
-//     Agora ambos são sincronizados na mesma transação.
-//
-// ⚠️  MUDANÇA DE ASSINATURA:
-//     Os parâmetros `tenantId` e `subdomain` foram REMOVIDOS.
-//     O tenantId vem da sessão JWT (não confiamos em dados passados pelo cliente).
-//     Atualize o EventStatusToggle.tsx para chamar sem esses parâmetros.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function toggleEventStatus(
   eventId: string,
@@ -45,7 +37,7 @@ export async function toggleEventStatus(
 ) {
   const tenantId = await requireTenant();
 
-  // Valida posse: o evento deve pertencer ao tenant logado
+  // 🛡️ SEGURANÇA: Valida posse. O evento DEVE pertencer ao tenant logado.
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
   if (!event) return { success: false, error: "Evento não encontrado ou acesso negado." };
 
@@ -55,17 +47,17 @@ export async function toggleEventStatus(
       await prisma.$transaction([
         prisma.event.updateMany({
           where: { tenantId, status: "ACTIVE" },
-          data: { status: "DRAFT", isActive: false }, // ← sincroniza os dois campos
+          data: { status: "DRAFT", isActive: false },
         }),
         prisma.event.update({
           where: { id: eventId },
-          data: { status: "ACTIVE", isActive: true }, // ← sincroniza os dois campos
+          data: { status: "ACTIVE", isActive: true },
         }),
       ]);
     } else {
       await prisma.event.update({
         where: { id: eventId },
-        data: { status: newStatus, isActive: false }, // ← fecha o caixa junto
+        data: { status: newStatus, isActive: false },
       });
     }
 
@@ -82,31 +74,27 @@ export async function toggleEventStatus(
 // ─────────────────────────────────────────────────────────────────────────────
 export async function updateTicketPrice(eventId: string, priceInCents: number) {
   const tenantId = await requireTenant();
+  
   if (priceInCents < 0) throw new Error("O valor não pode ser negativo.");
 
-  // WHERE garante que só altera se o evento for deste tenant
-  await prisma.event.update({
+  // 🛡️ SEGURANÇA: O 'where' duplo garante que não altere preço de eventos de terceiros
+  const event = await prisma.event.update({
     where: { id: eventId, tenantId },
     data: { ticketPrice: priceInCents },
   });
+
+  if (!event) throw new Error("Acesso negado ou evento inexistente.");
 
   return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MODO DEMONSTRAÇÃO
-//
-// Marca cartelas não pagas como pagas com price = 0.
-// O campo `price: 0` é o marcador de cartelas de demo.
-// A tabela Transaction NÃO recebe registros para essas cartelas,
-// portanto o financeiro (que lê Transaction) permanece limpo.
-//
-// Nota: o campo `isDemoCard` sugerido pelo Gemini NÃO existe no schema.
-// Não adicione sem criar a migration correspondente.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function activateDemoMode(eventId: string) {
   const tenantId = await requireTenant();
 
+  // 🛡️ SEGURANÇA: Verifica posse antes de manipular cartelas
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
   if (!event) throw new Error("Acesso negado.");
 
@@ -122,11 +110,19 @@ export async function activateDemoMode(eventId: string) {
   return { success: true };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ATUALIZAR CHAVE PIX
+// ─────────────────────────────────────────────────────────────────────────────
+export async function updatePixKey(eventId: string, newPixKey: string) {
+  // 🛡️ CORREÇÃO CRÍTICA (Item 3 do Overview): Estava sem NENHUMA validação de Auth.
+  const tenantId = await requireTenant();
 
-export async function updatePixKey(eventId: string, pixKey: string) {
+  // 🛡️ SEGURANÇA: Garantir que o evento pertence ao tenant que está tentando alterar
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
+  if (!event) return { success: false, error: "Acesso negado. Tentativa de manipulação detectada." };
+
   try {
-    // Validação básica para evitar chaves vazias sendo salvas como texto
-    const cleanKey = pixKey.trim();
+    const cleanKey = newPixKey.trim();
     
     await prisma.event.update({
       where: { id: eventId },
@@ -134,8 +130,10 @@ export async function updatePixKey(eventId: string, pixKey: string) {
     });
 
     // Atualiza a tela do dashboard e do PDV
-    revalidatePath(`/[subdomain]/dashboard/${eventId}`, "page");
-    revalidatePath(`/[subdomain]/vendas`, "page");
+    // Nota: Removi o [subdomain] do revalidatePath, pois o App Router muitas vezes lida
+    // melhor com layouts genéricos dependendo da sua estrutura de pastas reais.
+    revalidatePath(`/dashboard/${eventId}`, "page");
+    revalidatePath(`/vendas`, "page");
     
     return { success: true };
   } catch (error) {
@@ -143,4 +141,3 @@ export async function updatePixKey(eventId: string, pixKey: string) {
     return { success: false, error: "Erro ao salvar a chave PIX." };
   }
 }
-

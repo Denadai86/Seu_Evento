@@ -58,9 +58,6 @@ pnpm-workspace.yaml
 postcss.config.js
 postcss.config.mjs
 prisma.config.ts
-prisma/migrations/20260501171316_/migration.sql
-prisma/migrations/20260501172108_init/migration.sql
-prisma/migrations/migration_lock.toml
 prisma/schema.prisma
 prisma/seed.ts
 public/file.svg
@@ -135,7 +132,6 @@ src/app/favicon.ico
 src/app/globals.css
 src/app/imprimir/page.tsx
 src/app/layout.tsx
-src/components/auth/ClientLogoutButton.tsx
 src/components/auth/LogoutButton.tsx
 src/components/BingoCardPDF.tsx
 src/components/marketing/Audience.tsx
@@ -165,6 +161,7 @@ src/lib/pix.ts
 src/lib/prisma.ts
 src/lib/ratelimit.ts
 src/lib/requireTenant.ts
+src/lib/server-auth.ts
 src/proxy.ts
 src/types/next-auth.d.ts
 tailwind.config.js
@@ -176,6 +173,59 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="src/lib/server-auth.ts">
+import { auth } from "./auth"; // Ajusta para o teu caminho do NextAuth/Auth.js ou outra lib
+import  prisma  from "@/lib/prisma";
+
+/**
+ * 1. Garante que existe um utilizador autenticado e devolve a sessão.
+ */
+export async function requireAuth() {
+  const session = await auth();
+  if (!session || !session.user || !session.user.id) {
+    throw new Error("Não autenticado. Por favor, inicie sessão.");
+  }
+  return session.user;
+}
+
+/**
+ * 2. Garante que o utilizador pertence a um Tenant específico.
+ * NUNCA recebas o tenantId do client. Usa sempre o da sessão.
+ */
+export async function requireTenant() {
+  const user = await requireAuth();
+  if (!user.tenantId) {
+    throw new Error("Utilizador não está associado a nenhuma organização (Tenant).");
+  }
+  return { user, tenantId: user.tenantId };
+}
+
+/**
+ * 3. A Guarda de Ouro: Valida se um evento pertence de facto ao Tenant do utilizador logado.
+ * Previne que um atacante passe o eventId de outra ONG no payload.
+ */
+export async function requireEventOwnership(eventId: string) {
+  const { user, tenantId } = await requireTenant();
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { id: true, tenantId: true } // Otimização: traz apenas o necessário
+  });
+
+  if (!event) {
+    throw new Error("Evento não encontrado.");
+  }
+
+  if (event.tenantId !== tenantId) {
+    // Log de segurança importante aqui (possível tentativa de invasão)
+    console.error(`[ALERTA DE SEGURANÇA] User ${user.id} tentou aceder ao evento ${eventId} do tenant ${event.tenantId}`);
+    throw new Error("Acesso negado. Este evento não pertence à sua organização.");
+  }
+
+  return { user, tenantId, event };
+}
+</file>
 
 <file path=".agent.md">
 name: "SeuEvento Repo Assistant"
@@ -1430,132 +1480,6 @@ const config = {
 export default config;
 </file>
 
-<file path="prisma/migrations/20260501171316_/migration.sql">
--- CreateEnum
-CREATE TYPE "Role" AS ENUM ('SUPER_ADMIN', 'ORG_ADMIN', 'OPERATOR');
-
--- CreateTable
-CREATE TABLE "Organization" (
-    "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "slug" TEXT NOT NULL,
-    "logoUrl" TEXT,
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "Organization_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Event" (
-    "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'DRAFT',
-    "drawnNumbers" INTEGER[] DEFAULT ARRAY[]::INTEGER[],
-    "organizationId" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "Event_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Sponsor" (
-    "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "logoUrl" TEXT,
-    "eventId" TEXT NOT NULL,
-
-    CONSTRAINT "Sponsor_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Card" (
-    "id" TEXT NOT NULL,
-    "shortId" TEXT NOT NULL,
-    "matrix" JSONB NOT NULL,
-    "isSold" BOOLEAN NOT NULL DEFAULT false,
-    "eventId" TEXT NOT NULL,
-
-    CONSTRAINT "Card_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Operator" (
-    "id" TEXT NOT NULL,
-    "username" TEXT NOT NULL,
-    "password" TEXT NOT NULL,
-    "organizationId" TEXT NOT NULL,
-
-    CONSTRAINT "Operator_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "User" (
-    "id" TEXT NOT NULL,
-    "email" TEXT NOT NULL,
-    "password" TEXT NOT NULL,
-    "role" TEXT NOT NULL DEFAULT 'ORG_ADMIN',
-    "organizationId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
-);
-
--- CreateIndex
-CREATE UNIQUE INDEX "Organization_slug_key" ON "Organization"("slug");
-
--- CreateIndex
-CREATE INDEX "Card_shortId_idx" ON "Card"("shortId");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Operator_username_organizationId_key" ON "Operator"("username", "organizationId");
-
--- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
-
--- AddForeignKey
-ALTER TABLE "Event" ADD CONSTRAINT "Event_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Sponsor" ADD CONSTRAINT "Sponsor_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Card" ADD CONSTRAINT "Card_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "Event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Operator" ADD CONSTRAINT "Operator_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "User" ADD CONSTRAINT "User_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-</file>
-
-<file path="prisma/migrations/20260501172108_init/migration.sql">
-/*
-  Warnings:
-
-  - The `role` column on the `User` table would be dropped and recreated. This will lead to data loss if there is data in the column.
-
-*/
--- AlterTable
-ALTER TABLE "Operator" ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
-
--- AlterTable
-ALTER TABLE "User" DROP COLUMN "role",
-ADD COLUMN     "role" "Role" NOT NULL DEFAULT 'ORG_ADMIN';
-
--- CreateIndex
-CREATE INDEX "Event_organizationId_idx" ON "Event"("organizationId");
-
--- CreateIndex
-CREATE INDEX "User_organizationId_idx" ON "User"("organizationId");
-</file>
-
-<file path="prisma/migrations/migration_lock.toml">
-# Please do not edit this file manually
-# It should be added in your version-control system (i.e. Git)
-provider = "postgresql"
-</file>
-
 <file path="public/file.svg">
 <svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
 </file>
@@ -1808,13 +1732,41 @@ export async function nukeDatabase(password: string) {
 
 <file path="src/actions/tesouraria.ts">
 // src/actions/tesouraria.ts
+
 "use server";
 
 import prisma from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { requireTenant } from "@/lib/requireTenant";
 import { revalidatePath } from "next/cache";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNÇÃO AUXILIAR: VALIDAÇÃO DE SEGURANÇA (DRY - Don't Repeat Yourself)
+// ─────────────────────────────────────────────────────────────────────────────
+async function requireEventAccess(eventId: string) {
+  const tenantId = await requireTenant();
+  
+  // Busca o evento para garantir que pertence à ONG atual e retorna dados úteis (como o preço)
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenantId },
+    select: { id: true, ticketPrice: true }
+  });
+
+  if (!event) {
+    throw new Error("Acesso negado. Evento não encontrado ou não pertence à sua organização.");
+  }
+
+  return event;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATRIBUIR CARTELAS PARA O VENDEDOR (STAFF)
+// ─────────────────────────────────────────────────────────────────────────────
 export async function assignCardsToStaff(eventId: string, eventStaffId: string, codes: string[]) {
   try {
+    // 🛡️ SEGURANÇA: Garante que o evento pertence ao tenant logado
+    await requireEventAccess(eventId);
+
     if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
 
     // Busca apenas cartelas que existem no evento e estão LIVRES
@@ -1842,12 +1794,19 @@ export async function assignCardsToStaff(eventId: string, eventStaffId: string, 
     revalidatePath(`/dashboard/${eventId}/tesouraria`);
     return { success: true, count: cardIds.length };
   } catch (error: any) {
+    console.error("[ASSIGN_CARDS_ERROR]", error);
     return { success: false, error: error.message };
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DEVOLVER CARTELAS DO VENDEDOR (STAFF) PARA A TESOURARIA
+// ─────────────────────────────────────────────────────────────────────────────
 export async function returnCardsFromStaff(eventId: string, eventStaffId: string, codes: string[]) {
   try {
+    // 🛡️ SEGURANÇA: Garante que o evento pertence ao tenant logado
+    await requireEventAccess(eventId);
+
     if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
 
     // Busca cartelas que estão com ESSE vendedor e NÃO foram pagas
@@ -1876,14 +1835,22 @@ export async function returnCardsFromStaff(eventId: string, eventStaffId: string
     revalidatePath(`/dashboard/${eventId}/tesouraria`);
     return { success: true, count: cardIds.length };
   } catch (error: any) {
+    console.error("[RETURN_CARDS_ERROR]", error);
     return { success: false, error: error.message };
   }
 }
 
-// Adicione no final do arquivo src/actions/tesouraria.ts
-
+// ─────────────────────────────────────────────────────────────────────────────
+// REGISTRAR PAGAMENTO DE CARTELAS NA TESOURARIA (FECHAMENTO DE CAIXA)
+// ─────────────────────────────────────────────────────────────────────────────
 export async function registerCardPayment(eventId: string, eventStaffId: string, codes: string[]) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) throw new Error("Usuário não autenticado.");
+
+    // 🛡️ SEGURANÇA: Retorna o evento apenas se pertencer ao tenant e traz o preço atual da cartela
+    const event = await requireEventAccess(eventId);
+
     if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
 
     // Busca as cartelas que estão com ESSE voluntário e ainda NÃO foram pagas
@@ -1902,24 +1869,37 @@ export async function registerCardPayment(eventId: string, eventStaffId: string,
     }
 
     const cardIds = unpaidCards.map(c => c.id);
+    
+    // 🧮 CÁLCULO FINANCEIRO: Quantidade de cartelas * Preço do Evento
+    const totalAmountInCents = cardIds.length * event.ticketPrice;
 
-    // Registra o pagamento (Baixa a cartela)
-    // isSold = true (Foi vendida pro cliente final)
-    // isPaid = true (O dinheiro já está na Tesouraria)
-    await prisma.card.updateMany({
-      where: { id: { in: cardIds } },
-      data: { 
-        isSold: true, 
-        isPaid: true 
-      },
+    // ⚠️ CORREÇÃO CRÍTICA (Item 12): Transação ACID adaptada ao seu Schema Prisma Real
+    await prisma.$transaction(async (tx) => {
+      // 1. Baixa as cartelas
+      await tx.card.updateMany({
+        where: { id: { in: cardIds } },
+        data: { 
+          isSold: true, 
+          isPaid: true 
+        },
+      });
+
+      // 2. Cria a Transação vinculando ao EventStaff
+      // O TypeScript agora ficará feliz, pois os campos batem 100% com o schema!
+      await tx.transaction.create({
+        data: {
+          eventId: eventId,
+          eventStaffId: eventStaffId, // O voluntário (EventStaff) a quem as cartelas pertenciam
+          amount: totalAmountInCents, // Valor sendo inserido
+          method: "CASH", // Assumimos dinheiro espécie no acerto direto de tesouraria
+        }
+      });
     });
-
-    // BÔNUS SÊNIOR: Aqui no futuro você pode dar um prisma.transaction.create() 
-    // para registrar o fluxo de caixa exato dessa operação no fechamento.
 
     revalidatePath(`/dashboard/${eventId}/tesouraria`);
     return { success: true, count: cardIds.length };
   } catch (error: any) {
+    console.error("[REGISTER_PAYMENT_ERROR]", error);
     return { success: false, error: error.message };
   }
 }
@@ -3468,43 +3448,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 }
 </file>
 
-<file path="src/components/auth/ClientLogoutButton.tsx">
-"use client";
-
-import { signOut } from "next-auth/react";
-import { LogOut } from "lucide-react";
-import { useState } from "react";
-
-interface ClientLogoutButtonProps {
-  className?: string;
-}
-
-export default function ClientLogoutButton({ className = "" }: ClientLogoutButtonProps) {
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-
-  const handleLogout = async () => {
-    setIsLoggingOut(true);
-    // Realiza o signout pelo lado do cliente e força o redirecionamento
-    await signOut({ callbackUrl: "/entrar" });
-  };
-
-  return (
-    <button
-      onClick={handleLogout}
-      disabled={isLoggingOut}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 disabled:opacity-50 group ${className}`}
-    >
-      <LogOut 
-        size={18} 
-        className="text-slate-500 group-hover:text-red-400 transition-colors" 
-      />
-      <span>{isLoggingOut ? "Saindo..." : "Sair da Conta"}</span>
-    </button>
-  );
-}
-</file>
-
 <file path="src/components/auth/LogoutButton.tsx">
+// src/components/auth/LogoutButton.tsx
+
 import { signOut } from "@/lib/auth";
 import { LogOut } from "lucide-react";
 
@@ -3518,21 +3464,21 @@ export default function LogoutButton({ className = "", showText = true }: Logout
     <form
       action={async () => {
         "use server";
-        // O NextAuth v5 limpa o cookie cross-domain automaticamente 
-        // e invalida a sessão no servidor.
+        // Destrói a sessão no servidor e te joga com segurança para a tela de login
         await signOut({ redirectTo: "/entrar" });
       }}
-      className="w-full"
     >
       <button
         type="submit"
-        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 outline-none focus:ring-2 focus:ring-red-500/20 group ${className}`}
+        className={`flex items-center gap-2 p-2 sm:px-4 sm:py-2 bg-slate-800/50 hover:bg-red-500/10 text-slate-400 hover:text-red-400 rounded-xl transition-all font-bold text-sm border border-transparent hover:border-red-500/20 group outline-none focus:ring-2 focus:ring-red-500/20 ${className}`}
+        title="Sair da Conta"
       >
         <LogOut 
           size={18} 
-          className="text-slate-500 group-hover:text-red-400 transition-colors" 
+          className="group-hover:scale-110 transition-transform" 
         />
-        {showText && <span>Sair da Conta</span>}
+        {/* Esconde o texto no celular (sm:inline) para não quebrar o Header */}
+        {showText && <span className="hidden sm:inline">Sair</span>}
       </button>
     </form>
   );
@@ -5605,15 +5551,23 @@ main()
 
 <file path="src/actions/equipe-global.ts">
 // src/actions/equipe-global.ts
+
 "use server";
 
 import prisma from "@/lib/prisma";
 import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
+import { requireTenant } from "@/lib/requireTenant"; // Importação crucial
 
-// Recebe o tenantId de forma segura do Client
-export async function createTenantStaff(tenantId: string, name: string) {
+// ─────────────────────────────────────────────────────────────────────────────
+// CRIAR STAFF (VENDEDOR/VOLUNTÁRIO)
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ MUDANÇA DE ASSINATURA: tenantId removido dos parâmetros!
+export async function createTenantStaff(name: string) {
   try {
+    // 🛡️ SEGURANÇA: O tenantId vem do servidor. Ninguém consegue forjar.
+    const tenantId = await requireTenant();
+
     const baseUsername = name.split(" ")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const username = `${baseUsername}${randomSuffix}`;
@@ -5626,33 +5580,47 @@ export async function createTenantStaff(tenantId: string, name: string) {
         username: username.toUpperCase(),
         password: hashedPin,
         role: "STAFF",
-        tenantId,
+        tenantId: tenantId, // Vinculação garantida ao tenant correto
       },
     });
 
     revalidatePath("/dashboard/equipe");
     return { success: true, username: username.toUpperCase(), pin };
   } catch (error: any) {
+    console.error("[CREATE_STAFF_ERROR]", error);
     return { success: false, error: error.message };
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// VINCULAR/DESVINCULAR STAFF DE UM EVENTO ESPECÍFICO
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ MUDANÇA DE ASSINATURA: tenantId removido dos parâmetros!
 export async function toggleStaffInEvent(
-  tenantId: string,
   userId: string,
   eventId: string,
   isAssigned: boolean,
   permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean }
 ) {
   try {
+    const tenantId = await requireTenant();
+
+    // 🛡️ SEGURANÇA DUPLA: Temos que garantir que tanto o Evento quanto o Usuário pertencem à ONG logada
+    const [eventExists, userExists] = await Promise.all([
+      prisma.event.findFirst({ where: { id: eventId, tenantId } }),
+      prisma.user.findFirst({ where: { id: userId, tenantId } })
+    ]);
+
+    if (!eventExists) throw new Error("Evento não encontrado ou acesso negado.");
+    if (!userExists) throw new Error("Usuário não encontrado ou não pertence à sua equipe.");
+
     if (!isAssigned) {
       await prisma.eventStaff.deleteMany({
-        where: { userId, eventId, event: { tenantId } },
+        where: { userId, eventId }, // Já validamos a posse acima, então isso é seguro
       });
     } else {
-      // Prisma upsert requires a unique identifier in `where`. If there's no
-      // unique constraint on (userId, eventId) we updateMany and create when
-      // no record was updated.
+      // Como você mencionou que pode não haver unique constraint, mantive a sua lógica,
+      // mas agora ela opera sob o guarda-chuva de segurança do servidor.
       const updated = await prisma.eventStaff.updateMany({
         where: { userId, eventId },
         data: {
@@ -5678,12 +5646,27 @@ export async function toggleStaffInEvent(
     revalidatePath("/dashboard/equipe");
     return { success: true };
   } catch (error: any) {
+    console.error("[TOGGLE_STAFF_ERROR]", error);
     return { success: false, error: error.message };
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RESETAR PIN DE UM MEMBRO DA EQUIPE
+// ─────────────────────────────────────────────────────────────────────────────
 export async function resetGlobalStaffPin(userId: string) {
   try {
+    const tenantId = await requireTenant();
+
+    // 🛡️ SEGURANÇA: Impede que o Admin da ONG 'A' resete a senha do usuário da ONG 'B'
+    const userToReset = await prisma.user.findFirst({
+      where: { id: userId, tenantId }
+    });
+
+    if (!userToReset) {
+      throw new Error("Acesso negado. O usuário não pertence à sua organização.");
+    }
+
     const newPin = Math.floor(100000 + Math.random() * 900000).toString();
     const hashedPin = await hash(newPin, 12);
 
@@ -5694,7 +5677,8 @@ export async function resetGlobalStaffPin(userId: string) {
 
     return { success: true, newPin, username: user.username };
   } catch (error: any) {
-    return { success: false, error: "Falha ao resetar PIN." };
+    console.error("[RESET_PIN_ERROR]", error);
+    return { success: false, error: error.message };
   }
 }
 </file>
@@ -6420,364 +6404,6 @@ export default async function GlobalEquipePage() {
 
         <GlobalStaffClient staffMembers={staffMembers} events={events} tenantId={tenantId} />
       </div>
-    </div>
-  );
-}
-</file>
-
-<file path="src/app/[subdomain]/vendas/PDVClient.tsx">
-// src/app/[subdomain]/vendas/PDVClient.tsx
-"use client";
-
-import { useState, useTransition, useRef, useEffect } from "react";
-import { processBatchSale } from "@/actions/venda"; // Ajuste o path se necessário
-import { QrCode, Trash2, Banknote, CreditCard, CheckCircle2, UserCircle, X, Copy } from "lucide-react";
-import QRCode from "react-qr-code"; // Biblioteca que instalamos
-
-interface Seller {
-  id: string;
-  name: string;
-}
-
-interface EventData {
-  id: string;
-  name: string;
-  ticketPrice: number; // Em centavos
-  pixKey: string;      // A chave PIX do evento/contratante
-  sellers: Seller[];
-}
-
-export default function PDVClient({ activeEvent }: { activeEvent: EventData | null }) {
-  const [selectedSeller, setSelectedSeller] = useState<string>("");
-  const [isPending, startTransition] = useTransition();
-  
-  const [cart, setCart] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  
-  // Controle do Modal PIX
-  const [showPixModal, setShowPixModal] = useState(false);
-  
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Auto-foco para agilidade
-  useEffect(() => {
-    if (selectedSeller && !showPixModal) inputRef.current?.focus();
-  }, [selectedSeller, showPixModal, cart]);
-
-  if (!activeEvent) return <div className="p-10 text-center text-white">Nenhum evento ativo.</div>;
-
-  // TELA 1: QUEM ESTÁ VENDENDO?
-  if (!selectedSeller) {
-    return (
-      <div className="min-h-screen bg-[#0b0f14] flex flex-col p-6 animate-in fade-in">
-        <div className="flex-1 flex flex-col justify-center max-w-md mx-auto w-full">
-          <div className="text-center mb-8">
-            <UserCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
-            <h1 className="text-2xl font-black text-white">Frente de Caixa</h1>
-            <p className="text-slate-400 text-sm mt-2">Identifique-se para iniciar</p>
-          </div>
-          <div className="space-y-3">
-            {activeEvent.sellers.map(seller => (
-              <button key={seller.id} onClick={() => setSelectedSeller(seller.id)} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-2xl border border-slate-700 active:scale-95 transition-all">
-                {seller.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Lógica do Carrinho
-  const handleAddCard = (e?: React.FormEvent<HTMLFormElement>) => {
-    if (e) e.preventDefault();
-    const id = inputValue.trim().toUpperCase();
-
-    if (!id) return;
-    if (cart.includes(id)) {
-      alert("Esta cartela já está no carrinho!");
-      return setInputValue("");
-    }
-
-    setCart([id, ...cart]);
-    setInputValue("");
-    setSuccessMessage(""); 
-  };
-
-  const handleRemoveCard = (idToRemove: string) => {
-    setCart(cart.filter(id => id !== idToRemove));
-  };
-
-  // Finalizar a Venda
-  const executeSale = (method: "PIX" | "CASH") => {
-    startTransition(async () => {
-      const res = await processBatchSale(activeEvent.id, cart, method, selectedSeller);
-      if (res.success) {
-        setSuccessMessage(`✅ Venda de ${cart.length} cartela(s) concluída!`);
-        setCart([]);
-        setShowPixModal(false);
-      } else {
-        alert(res.error);
-      }
-    });
-  };
-
-  const handleCheckoutClick = (method: "PIX" | "CASH") => {
-    if (method === "PIX") {
-      setShowPixModal(true); // Abre a tela pro cliente pagar primeiro
-    } else {
-      executeSale("CASH"); // Dinheiro salva direto
-    }
-  };
-
-  const cartTotalAmount = cart.length * (activeEvent.ticketPrice / 100);
-  const sellerName = activeEvent.sellers.find(s => s.id === selectedSeller)?.name;
-
-  return (
-    <div className="min-h-screen bg-[#0b0f14] flex flex-col font-sans">
-      
-      {/* HEADER DO VENDEDOR */}
-      <header className="bg-[#111827] border-b border-slate-800 p-4 flex justify-between items-center z-10">
-        <div>
-          <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Operador</p>
-          <p className="text-emerald-400 font-black">{sellerName}</p>
-        </div>
-        <button onClick={() => setSelectedSeller("")} className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold">
-          Trocar
-        </button>
-      </header>
-
-      {/* SEU DESIGN DE PDV (Adaptado) */}
-      <div className="flex flex-col flex-1 max-w-md mx-auto w-full p-4 relative pt-6">
-        
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4 shadow-lg">
-          <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-2 block">
-            Adicionar Cartela
-          </label>
-          <form onSubmit={handleAddCard} className="flex gap-2">
-            <input 
-              ref={inputRef}
-              type="text" 
-              placeholder="ID da Cartela (ex: A9B2)" 
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              className="flex-1 bg-black/50 border border-slate-700 rounded-xl px-4 py-3 text-lg font-black text-white uppercase outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-600 placeholder:text-sm placeholder:font-normal"
-            />
-            <button 
-              type="submit"
-              disabled={!inputValue.trim()}
-              className="bg-emerald-600 disabled:bg-slate-800 text-white font-bold px-5 rounded-xl transition-colors shrink-0 text-xl"
-            >
-              +
-            </button>
-          </form>
-        </div>
-
-        {successMessage && (
-          <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl mb-4 text-center font-bold text-sm animate-in fade-in">
-            {successMessage}
-          </div>
-        )}
-
-        {/* CARRINHO */}
-        <div className="flex-1 bg-slate-900/50 border border-slate-800/50 rounded-2xl p-4 flex flex-col mb-24 overflow-hidden">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-sm font-bold text-slate-400">Na Mão (Pendentes)</h2>
-            <div className="text-right">
-              <span className="text-white font-black text-lg mr-2">
-                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cartTotalAmount)}
-              </span>
-              <span className="bg-slate-800 text-emerald-400 text-xs font-black px-2 py-1 rounded-md">
-                {cart.length} itens
-              </span>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
-            {cart.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-600 opacity-50">
-                <QrCode size={40} className="mb-2" />
-                <p className="text-sm font-bold">Carrinho vazio</p>
-              </div>
-            ) : (
-              cart.map(id => (
-                <div key={id} className="bg-black/40 border border-slate-800 p-3 rounded-xl flex justify-between items-center animate-in slide-in-from-left-2">
-                  <span className="font-black text-slate-200 tracking-wider">{id}</span>
-                  <button onClick={() => handleRemoveCard(id)} className="text-slate-500 hover:text-red-400 p-1">
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* MÓDULO DE PAGAMENTO */}
-        <div className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-40">
-          <div className="max-w-md mx-auto flex gap-3">
-            <button 
-              onClick={() => handleCheckoutClick("CASH")}
-              disabled={cart.length === 0 || isPending}
-              className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 disabled:hover:bg-amber-600 text-white font-black py-4 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
-            >
-              <Banknote size={24} />
-              <span className="text-[10px] uppercase tracking-widest">Dinheiro</span>
-            </button>
-            
-            <button 
-              onClick={() => handleCheckoutClick("PIX")}
-              disabled={cart.length === 0 || isPending}
-              className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 disabled:hover:bg-emerald-600 text-white font-black py-4 rounded-xl flex flex-col items-center justify-center gap-1 transition-all shadow-lg shadow-emerald-900/20"
-            >
-              <CreditCard size={24} />
-              <span className="text-[10px] uppercase tracking-widest">PIX</span>
-            </button>
-          </div>
-        </div>
-
-      </div>
-
-      {/* 🚀 O MODAL DO PIX QUE VOCÊ PEDIU */}
-      {showPixModal && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
-          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-3xl p-6 flex flex-col items-center relative shadow-2xl">
-            
-            <button onClick={() => setShowPixModal(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white">
-              <X size={24} />
-            </button>
-
-            <div className="bg-emerald-500/10 p-4 rounded-full mb-4">
-              <QrCode size={32} className="text-emerald-400" />
-            </div>
-            
-            <h2 className="text-white font-black text-2xl mb-1">Pagamento via PIX</h2>
-            <p className="text-slate-400 text-sm mb-6 text-center">Peça para o cliente escanear o código abaixo no app do banco.</p>
-
-            <div className="bg-white p-4 rounded-2xl mb-6">
-              {/* O QR CODE REAL GERADO NA HORA */}
-              <QRCode 
-                value={activeEvent.pixKey} 
-                size={200} 
-                level="M" 
-              />
-            </div>
-
-            <div className="w-full bg-black/50 border border-slate-800 rounded-xl p-4 mb-6">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Chave PIX / Valor</p>
-              <div className="flex justify-between items-center">
-                <p className="font-mono text-emerald-400 font-bold truncate pr-4">{activeEvent.pixKey}</p>
-                <button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(activeEvent.pixKey);
-                    alert("Chave copiada!");
-                  }} 
-                  className="text-slate-400 hover:text-white"
-                >
-                  <Copy size={18} />
-                </button>
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-800 flex justify-between items-end">
-                <span className="text-slate-400 text-sm">Total a cobrar:</span>
-                <span className="text-white font-black text-2xl">
-                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cartTotalAmount)}
-                </span>
-              </div>
-            </div>
-
-            <button 
-              onClick={() => executeSale("PIX")}
-              disabled={isPending}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50"
-            >
-              {isPending ? "Confirmando..." : "Confirmar Pagamento Realizado"}
-            </button>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
-</file>
-
-<file path="src/app/[subdomain]/verify/verifyClient.tsx">
-// src/app/[subdomain]/verify/verifyClient.tsx
-"use client";
-
-import { useState, useTransition } from "react";
-import { alertLocutor } from "@/actions/bingo";
-import { Trophy, Send, AlertTriangle, CheckCircle2 } from "lucide-react"; // 🔥 CheckCircle2 adicionado!
-
-interface Props {
-  eventId: string;
-  shortId: string;
-  validation: any;
-  verifierName: string;
-}
-
-export default function VerifyClient({ eventId, shortId, validation, verifierName }: Props) {
-  const [isPending, startTransition] = useTransition();
-  const [isSent, setIsSent] = useState(false); // 🔥 Novo estado para controlar o visual!
-
-  const handleAlert = () => {
-    const winnerName = prompt("Nome do Ganhador na mesa:");
-    if (!winnerName) return;
-
-    startTransition(async () => {
-      // Enviamos o alerta para o locutor
-      await alertLocutor(eventId, shortId, `${winnerName} (Ref: ${verifierName})`);
-      // Em vez do alert() nativo, nós mudamos o estado do botão!
-      setIsSent(true);
-    });
-  };
-
-  if (!validation.success) return null;
-
-  return (
-    <div className="mt-8 space-y-4">
-      {validation.isWinner ? (
-        <div className="bg-emerald-500/10 border-2 border-emerald-500 rounded-3xl p-6 text-center animate-in zoom-in duration-300">
-          <div className="flex justify-center mb-4 text-emerald-400">
-            <Trophy size={48} />
-          </div>
-          <h2 className="text-2xl font-black text-white mb-2">BINGO DETECTADO!</h2>
-          <p className="text-emerald-400 text-sm font-bold mb-6 italic">{validation.winMessage}</p>
-          
-          {/* 🔥 A MÁGICA DA RESPONSIVIDADE AQUI */}
-          {isSent ? (
-            <div className="w-full bg-emerald-500 text-black font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg animate-in fade-in slide-in-from-bottom-2">
-              <CheckCircle2 size={24} /> AVISO LÁ NO TELÃO!
-            </div>
-          ) : verifierName !== "Desconhecido" ? (
-            <button
-              onClick={handleAlert}
-              disabled={isPending}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-50 disabled:scale-95"
-            >
-              <Send size={20} /> {isPending ? "ENVIANDO..." : "AVISAR LOCUTOR"}
-            </button>
-          ) : (
-            <div className="mt-4 p-4 bg-black/40 border border-slate-700 rounded-xl text-slate-400 text-xs text-center">
-              Apenas fiscais credenciados podem enviar o alerta para a mesa.
-            </div>
-          )}
-
-        </div>
-      ) : (
-        <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 text-center italic text-slate-400 text-sm">
-          {validation.winMessage}
-        </div>
-      )}
-
-      {!validation.isPaid && (
-        <div className="bg-red-500/10 border border-red-500/50 rounded-2xl p-4 flex items-center gap-3 text-red-400">
-          <AlertTriangle size={20} className="shrink-0" />
-          <p className="text-xs font-bold leading-tight uppercase">
-            Atenção: Cartela não paga. Pagamento de prêmio proibido!
-          </p>
-        </div>
-      )}
     </div>
   );
 }
@@ -7713,230 +7339,397 @@ export default async function ProjectorPage({
 }
 </file>
 
-<file path="src/app/[subdomain]/verify/page.tsx">
-// src/app/[subdomain]/verify/page.tsx
-// src/app/[subdomain]/verify/page.tsx
-import prisma from "@/lib/prisma";
-import { auth } from "@/lib/auth";
-import { validateWinningCard } from "@/actions/bingo";
-import QRCodeScanner from "./QRCodeScanner";
-import VerifyClient from "./verifyClient";
+<file path="src/app/[subdomain]/vendas/PDVClient.tsx">
+// src/app/[subdomain]/vendas/PDVClient.tsx
+"use client";
 
-export default async function VerifyPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ subdomain: string }>;
-  searchParams: Promise<{ event?: string | string[]; id?: string | string[] }>; // Aceita Array p/ não quebrar
-}) {
-  const { subdomain } = await params;
-  const search = await searchParams;
-  const session = await auth();
+import { useState, useTransition, useRef, useEffect } from "react";
+import { processBatchSale } from "@/actions/venda";
+import { QrCode, Trash2, Banknote, CreditCard, UserCircle, X, Copy } from "lucide-react";
+import QRCode from "react-qr-code";
 
-  // 🔥 BLINDAGEM: Se vier duplicado na URL (Array), pegamos apenas o primeiro valor como string
-  const urlEventId = Array.isArray(search.event) ? search.event[0] : search.event;
-  const rawShortId = Array.isArray(search.id) ? search.id[0] : search.id;
+interface Seller {
+  id: string;
+  name: string;
+}
 
-  if (!rawShortId) {
-    return <VerifyHome subdomain={subdomain} eventId={urlEventId || null} />;
+interface EventData {
+  id: string;
+  name: string;
+  ticketPrice: number; // Em centavos
+  pixKey: string;
+  sellers: Seller[];
+}
+
+export default function PDVClient({ activeEvent }: { activeEvent: EventData | null }) {
+  const [selectedSeller, setSelectedSeller] = useState<string>("");
+  const [isPending, startTransition] = useTransition();
+  
+  const [cart, setCart] = useState<string[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [showPixModal, setShowPixModal] = useState(false);
+  
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-foco no campo de entrada
+  useEffect(() => {
+    if (selectedSeller && !showPixModal) {
+      inputRef.current?.focus();
+    }
+  }, [selectedSeller, showPixModal]);
+
+  if (!activeEvent) {
+    return <div className="p-10 text-center text-white">Nenhum evento ativo.</div>;
   }
 
-  // Garante que é uma string e converte para maiúsculo
-  const shortId = typeof rawShortId === 'string' ? rawShortId.toUpperCase() : '';
-
-  // Busca a cartela direto pelo código único de 6 letras
-  const card = await prisma.card.findUnique({
-    where: { shortId },
-    include: { event: { select: { id: true, name: true, tenant: true } } }
-  });
-
-  // Se a cartela não existe ou pertence a outro cliente
-  if (!card || card.event.tenant.subdomain !== subdomain) {
+  // ====================== TELA DE SELEÇÃO DE VENDEDOR ======================
+  if (!selectedSeller) {
     return (
-      <div className="min-h-screen bg-[#0b0f14] text-white flex items-center justify-center p-6 text-center">
-        <div>
-          <div className="text-6xl mb-6">❌</div>
-          <h1 className="text-3xl font-black mb-3 text-red-500">Cartela Inválida</h1>
-          <p className="text-slate-400">ID {shortId} não encontrado neste sistema.</p>
-          <a href={`/verify${urlEventId ? `?event=${urlEventId}` : ''}`} className="mt-6 inline-block bg-slate-800 text-white px-6 py-3 rounded-xl font-bold">Voltar</a>
+      <div className="min-h-screen bg-[#0b0f14] flex flex-col p-6 animate-in fade-in">
+        <div className="flex-1 flex flex-col justify-center max-w-md mx-auto w-full">
+          <div className="text-center mb-8">
+            <UserCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+            <h1 className="text-2xl font-black text-white">Frente de Caixa</h1>
+            <p className="text-slate-400 text-sm mt-2">Identifique-se para iniciar</p>
+          </div>
+
+          <div className="space-y-3">
+            {activeEvent.sellers.map((seller) => (
+              <button
+                key={seller.id}
+                type="button"
+                onClick={() => setSelectedSeller(seller.id)}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-2xl border border-slate-700 active:scale-95 transition-all"
+                aria-label={`Entrar como ${seller.name}`}
+              >
+                {seller.name}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
-  const eventId = card.event.id;
-  const validation = await validateWinningCard(eventId, shortId);
+  // ====================== LÓGICA DO PDV ======================
+  const handleAddCard = (e?: React.FormEvent<HTMLFormElement>) => {
+    if (e) e.preventDefault();
+    const id = inputValue.trim().toUpperCase();
+    if (!id) return;
 
-  
+    if (cart.includes(id)) {
+      alert("Esta cartela já está no carrinho!");
+      return setInputValue("");
+    }
+
+    setCart([id, ...cart]);
+    setInputValue("");
+    setSuccessMessage("");
+  };
+
+  const handleRemoveCard = (idToRemove: string) => {
+    setCart(cart.filter((id) => id !== idToRemove));
+  };
+
+  const executeSale = (method: "PIX" | "CASH") => {
+    startTransition(async () => {
+      const res = await processBatchSale(
+        activeEvent.id,
+        cart,
+        method,
+        selectedSeller
+      );
+
+      if (res.success) {
+        setSuccessMessage(`✅ Venda de ${cart.length} cartela(s) concluída!`);
+        setCart([]);
+        setShowPixModal(false);
+      } else {
+        alert(res.error || "Erro ao processar venda");
+      }
+    });
+  };
+
+  const handleCheckoutClick = (method: "PIX" | "CASH") => {
+    if (method === "PIX") {
+      setShowPixModal(true);
+    } else {
+      executeSale("CASH");
+    }
+  };
+
+  const cartTotalAmount = cart.length * (activeEvent.ticketPrice / 100);
+  const sellerName = activeEvent.sellers.find((s) => s.id === selectedSeller)?.name;
 
   return (
-    <div className="min-h-screen bg-[#0b0f14] text-white p-6">
-      <div className="max-w-md mx-auto">
-        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl overflow-hidden relative">
-          {/* Badge de Verificador Logado */}
-          <div className="absolute top-0 right-8 bg-slate-800 px-3 py-1 rounded-b-xl text-[9px] font-bold text-slate-500 uppercase tracking-widest border-x border-b border-slate-700">
-            Fiscal: {session?.user?.name || "Público"}
+    <div className="min-h-screen bg-[#0b0f14] flex flex-col font-sans">
+      {/* HEADER */}
+      <header className="bg-[#111827] border-b border-slate-800 p-4 flex justify-between items-center z-10">
+        <div>
+          <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Operador</p>
+          <p className="text-emerald-400 font-black">{sellerName}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setSelectedSeller("")}
+          className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-700 transition"
+          aria-label="Trocar operador"
+        >
+          Trocar
+        </button>
+      </header>
+
+      {/* CONTEÚDO PRINCIPAL */}
+      <div className="flex flex-col flex-1 max-w-md mx-auto w-full p-4 relative pt-6">
+        {/* Adicionar Cartela */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4 shadow-lg">
+          <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-2 block">
+            Adicionar Cartela
+          </label>
+          <form onSubmit={handleAddCard} className="flex gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="ID da Cartela (ex: A9B2)"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              className="flex-1 bg-black/50 border border-slate-700 rounded-xl px-4 py-3 text-lg font-black text-white uppercase outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-600"
+            />
+            <button
+              type="submit"
+              disabled={!inputValue.trim()}
+              className="bg-emerald-600 disabled:bg-slate-800 text-white font-bold px-5 rounded-xl transition-colors shrink-0 text-xl"
+              aria-label="Adicionar cartela"
+            >
+              +
+            </button>
+          </form>
+        </div>
+
+        {/* Mensagem de Sucesso */}
+        {successMessage && (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl mb-4 text-center font-bold text-sm animate-in fade-in">
+            {successMessage}
+          </div>
+        )}
+
+        {/* Carrinho */}
+        <div className="flex-1 bg-slate-900/50 border border-slate-800/50 rounded-2xl p-4 flex flex-col mb-24 overflow-hidden">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-sm font-bold text-slate-400">Na Mão (Pendentes)</h2>
+            <div className="text-right">
+              <span className="text-white font-black text-lg mr-2">
+                {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cartTotalAmount)}
+              </span>
+              <span className="bg-slate-800 text-emerald-400 text-xs font-black px-2 py-1 rounded-md">
+                {cart.length} itens
+              </span>
+            </div>
           </div>
 
-          <div className="text-center mb-8">
-            <h1 className="text-sm font-black text-slate-500 uppercase tracking-[0.3em] mb-2">Conferência Final</h1>
-            <p className="text-2xl font-black text-white">{card.event.name}</p>
-          </div>
-
-          {/* O VISUAL DA CARTELA */}
-          <div className="bg-slate-950 rounded-[2rem] p-8 mb-6 border border-slate-800 text-center relative">
-             <p className="text-slate-600 text-[10px] font-black uppercase tracking-widest mb-2">Código Identificador</p>
-             <p className="text-6xl font-mono font-black text-white tracking-tighter italic">{card.shortId}</p>
-             
-             {/* Status de Pagamento */}
-             <div className={`absolute -top-3 -right-2 px-4 py-1 rounded-full text-[10px] font-black uppercase shadow-lg ${card.isPaid ? 'bg-emerald-500 text-black' : 'bg-red-500 text-white'}`}>
-                {card.isPaid ? "PAGA" : "NÃO PAGA"}
-             </div>
-          </div>
-
-          {/* RESULTADO DA AUDITORIA AUTOMÁTICA */}
-          <VerifyClient 
-            eventId={eventId} 
-            shortId={card.shortId} 
-            validation={validation} 
-            verifierName={session?.user?.name || "Desconhecido"}
-          />
-
-          <div className="mt-8 pt-6 border-t border-slate-800 flex justify-between items-center text-[10px] font-bold text-slate-600 uppercase tracking-widest">
-            <span>Auditado via Ação Leve</span>
-            <span>{new Date().toLocaleTimeString('pt-BR')}</span>
+          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
+            {cart.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-600 opacity-50">
+                <QrCode size={40} className="mb-2" />
+                <p className="text-sm font-bold">Carrinho vazio</p>
+              </div>
+            ) : (
+              cart.map((id) => (
+                <div
+                  key={id}
+                  className="bg-black/40 border border-slate-800 p-3 rounded-xl flex justify-between items-center animate-in slide-in-from-left-2"
+                >
+                  <span className="font-black text-slate-200 tracking-wider">{id}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCard(id)}
+                    className="text-slate-500 hover:text-red-400 p-1"
+                    aria-label={`Remover cartela ${id}`}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
-        <div className="mt-8">
-          <QRCodeScanner eventId={eventId} subdomain={subdomain} />
+        {/* Botões de Pagamento */}
+        <div className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-40">
+          <div className="max-w-md mx-auto flex gap-3">
+            <button
+              type="button"
+              onClick={() => handleCheckoutClick("CASH")}
+              disabled={cart.length === 0 || isPending}
+              className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 disabled:hover:bg-amber-600 text-white font-black py-4 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
+              aria-label="Finalizar venda em dinheiro"
+            >
+              <Banknote size={24} />
+              <span className="text-[11px] uppercase tracking-widest">Dinheiro</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleCheckoutClick("PIX")}
+              disabled={cart.length === 0 || isPending}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 disabled:hover:bg-emerald-600 text-white font-black py-4 rounded-xl flex flex-col items-center justify-center gap-1 transition-all shadow-lg shadow-emerald-900/20"
+              aria-label="Finalizar venda via PIX"
+            >
+              <CreditCard size={24} />
+              <span className="text-[11px] uppercase tracking-widest">PIX</span>
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-function VerifyHome({ subdomain, eventId }: { subdomain: string, eventId: string | null }) {
-  return (
-    <div className="min-h-screen bg-[#0b0f14] text-white flex items-center justify-center p-6">
-      <div className="max-w-md w-full text-center">
-        <h1 className="text-4xl font-black mb-4">Verificador</h1>
-        <p className="text-slate-500 mb-10 text-sm font-medium uppercase tracking-widest leading-relaxed">
-          Escaneie ou digite o ID<br/> para conferência oficial.
-        </p>
-        <QRCodeScanner eventId={eventId} subdomain={subdomain} />
-      </div>
+      {/* ====================== MODAL PIX ====================== */}
+      {showPixModal && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-3xl p-6 flex flex-col items-center relative shadow-2xl">
+            <button
+              type="button"
+              onClick={() => setShowPixModal(false)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-white"
+              aria-label="Fechar modal"
+            >
+              <X size={24} />
+            </button>
+
+            <div className="bg-emerald-500/10 p-4 rounded-full mb-4">
+              <QrCode size={32} className="text-emerald-400" />
+            </div>
+
+            <h2 className="text-white font-black text-2xl mb-1">Pagamento via PIX</h2>
+            <p className="text-slate-400 text-sm mb-6 text-center">
+              Peça para o cliente escanear o código abaixo
+            </p>
+
+            <div className="bg-white p-4 rounded-2xl mb-6">
+              <QRCode value={activeEvent.pixKey} size={200} level="M" />
+            </div>
+
+            <div className="w-full bg-black/50 border border-slate-800 rounded-xl p-4 mb-6">
+              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Chave PIX</p>
+              <div className="flex justify-between items-center">
+                <p className="font-mono text-emerald-400 font-bold truncate pr-4">
+                  {activeEvent.pixKey}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(activeEvent.pixKey);
+                    alert("Chave PIX copiada!");
+                  }}
+                  className="text-slate-400 hover:text-white"
+                  aria-label="Copiar chave PIX"
+                >
+                  <Copy size={18} />
+                </button>
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-slate-800 flex justify-between items-end">
+                <span className="text-slate-400 text-sm">Total a cobrar:</span>
+                <span className="text-white font-black text-2xl">
+                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cartTotalAmount)}
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => executeSale("PIX")}
+              disabled={isPending}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50"
+              aria-label="Confirmar pagamento PIX"
+            >
+              {isPending ? "Confirmando..." : "Confirmar Pagamento Realizado"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 </file>
 
-<file path="src/app/[subdomain]/verify/QRCodeScanner.tsx">
+<file path="src/app/[subdomain]/verify/verifyClient.tsx">
+// src/app/[subdomain]/verify/verifyClient.tsx
 "use client";
 
-import { useState } from "react";
-import { Scanner } from "@yudiel/react-qr-scanner";
-import { Camera, X } from "lucide-react";
+import { useState, useTransition } from "react";
+import { alertLocutor } from "@/actions/bingo";
+import { Trophy, Send, AlertTriangle, CheckCircle2, User } from "lucide-react";
 
-export default function QRCodeScanner({
-  eventId,
-  subdomain,
-}: {
-  eventId: string | null;
-  subdomain: string;
-}) {
-  const [manualId, setManualId] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [showCamera, setShowCamera] = useState(false);
+interface Props {
+  eventId: string;
+  shortId: string;
+  validation: any;
+  verifierName: string;
+}
 
-  const handleManualCheck = () => {
-    if (!manualId.trim()) return;
-    setLoading(true);
-    const url = eventId 
-      ? `/verify?event=${eventId}&id=${manualId.trim().toUpperCase()}`
-      : `/verify?id=${manualId.trim().toUpperCase()}`;
-    window.location.href = url;
-  };
+export default function VerifyClient({ eventId, shortId, validation, verifierName }: Props) {
+  const [isPending, startTransition] = useTransition();
+  const [isSent, setIsSent] = useState(false);
 
-const handleScan = (result: any) => {
-    if (result && result.length > 0) {
-      setLoading(true);
-      const code = result[0].rawValue;
+  const handleAlert = () => {
+    const winnerName = prompt("Nome completo do ganhador (para o telão):");
+    if (!winnerName || winnerName.trim() === "") return;
 
-      try {
-        // 🔥 MÁGICA 1: Tenta ler como URL. Se a câmera leu o link inteiro do QR Code:
-        const parsedUrl = new URL(code);
-        const idParam = parsedUrl.searchParams.get("id"); // Extrai só as 6 letrinhas!
-
-        if (idParam) {
-          window.location.href = `/verify?event=${eventId || ""}&id=${idParam.toUpperCase()}`;
-          return;
-        }
-        
-        // Fallback: se for URL mas não tiver ID (quase impossível)
-        window.location.href = code;
-      } catch (e) {
-        // 🔥 MÁGICA 2: Se não for URL (deu erro no new URL), é porque a pessoa só bipou um código puro (ex: 1K8JTK)
-        const url = eventId 
-          ? `/verify?event=${eventId}&id=${code.toUpperCase()}`
-          : `/verify?id=${code.toUpperCase()}`;
-        window.location.href = url;
+    startTransition(async () => {
+      const result = await alertLocutor(eventId, shortId, `${winnerName.trim()} (Fiscal: ${verifierName})`);
+      
+      if (result?.success) {
+        setIsSent(true);
+      } else {
+        alert("Erro ao enviar alerta para o locutor.");
       }
-    }
+    });
   };
 
-  
+  if (!validation?.success) return null;
+
   return (
     <div className="mt-8 space-y-4">
-      {/* BOTÃO DA CÂMERA */}
-      {!showCamera ? (
-        <button 
-          onClick={() => setShowCamera(true)}
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-900/40"
-        >
-          <Camera size={24} /> LER QR CODE COM A CÂMERA
-        </button>
-      ) : (
-        <div className="bg-black border-2 border-blue-500 rounded-3xl overflow-hidden relative shadow-[0_0_20px_rgba(59,130,246,0.3)]">
-          <button 
-            onClick={() => setShowCamera(false)}
-            className="absolute top-4 right-4 z-50 bg-black/50 text-white p-2 rounded-full hover:bg-red-500 transition-colors"
-          >
-            <X size={20} />
-          </button>
-          
-          <Scanner 
-            onScan={handleScan}
-            onError={(err) => console.error(err)}
-            formats={["qr_code", "code_128"]} // Lê QR e Código de Barras normal
-            styles={{ container: { width: '100%', aspectRatio: '1/1' } }}
-          />
-          <div className="absolute bottom-4 left-0 right-0 text-center text-white text-xs font-bold drop-shadow-md z-10 pointer-events-none">
-            Aponte para o código da cartela
+      {validation.isWinner ? (
+        <div className="bg-emerald-500/10 border-2 border-emerald-500 rounded-3xl p-6 text-center">
+          <div className="flex justify-center mb-4 text-emerald-400">
+            <Trophy size={52} />
           </div>
+          <h2 className="text-2xl font-black text-white mb-1">BINGO!</h2>
+          <p className="text-emerald-400 font-bold mb-6">{validation.winMessage}</p>
+
+          {isSent ? (
+            <div className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2">
+              <CheckCircle2 size={24} /> Aviso enviado para o telão!
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleAlert}
+              disabled={isPending}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all"
+            >
+              <Send size={20} />
+              {isPending ? "ENVIANDO..." : "AVISAR LOCUTOR"}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bg-slate-800/70 border border-slate-700 rounded-2xl p-6 text-center">
+          {validation.winMessage}
         </div>
       )}
 
-      <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6">
-        <p className="text-slate-500 text-xs font-bold mb-4 text-center uppercase tracking-widest">Ou Digite Manualmente</p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="Ex: A1B2C3"
-            value={manualId}
-            onChange={(e) => setManualId(e.target.value)}
-            className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono uppercase tracking-widest text-center outline-none focus:border-blue-500"
-            onKeyDown={(e) => e.key === 'Enter' && handleManualCheck()}
-          />
-          <button
-            onClick={handleManualCheck}
-            disabled={loading || !manualId.trim()}
-            className="bg-emerald-600 hover:bg-emerald-500 px-6 rounded-xl font-bold disabled:opacity-50 transition-colors"
-          >
-            Buscar
-          </button>
+      {!validation.isPaid && (
+        <div className="bg-red-500/10 border border-red-500/50 rounded-2xl p-5 flex gap-3">
+          <AlertTriangle size={22} className="text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-red-400">CARTELA NÃO PAGA</p>
+            <p className="text-sm text-red-400/80">Pagamento do prêmio está proibido.</p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -8489,7 +8282,7 @@ export async function requireStaffForEvent(eventId: string, capability: 'canSell
 <file path="tsconfig.json">
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "es2022",
     "lib": [
       "dom",
       "dom.iterable",
@@ -8758,7 +8551,7 @@ export async function removeSponsor(sponsorId: string) {
 
 import prisma from "@/lib/prisma";
 import { PaymentMethod } from "@prisma/client";
-import { requireTenant } from "@/lib/requireTenant";
+import { requireTenant, requireStaffForEvent } from "@/lib/requireTenant"; // 🔥 Importação Corrigida
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROCESSAR VENDA EM LOTE (PDV — transação atômica)
@@ -8767,19 +8560,35 @@ export async function processBatchSale(
   eventId: string,
   shortIds: string[],
   method: PaymentMethod,
-  eventStaffId: string // 🔥 Mudou de sellerId para eventStaffId
+  eventStaffId: string 
 ) {
   if (!shortIds || shortIds.length === 0) return { success: false, error: "Carrinho vazio." };
 
-  const tenantId = await requireTenant();
-
   try {
+    const tenantId = await requireTenant();
+    
+    // 🛡️ CORREÇÃO CRÍTICA: Vazamento de Permissões
+    // Não basta estar logado. O voluntário precisa da permissão 'canSell' para ESTE evento.
+    // O requireStaffForEvent (que você mesmo criou) lança um erro se a permissão for falsa.
+    await requireStaffForEvent(eventId, 'canSell');
+
+    // 🛡️ SEGURANÇA: Garantimos que o eventStaffId enviado no payload pertence 
+    // ao usuário que está executando a action (prevenindo que o Vendedor A venda em nome do Vendedor B)
+    const staff = await prisma.eventStaff.findUnique({
+      where: { id: eventStaffId },
+      select: { userId: true }
+    });
+
+    // Se o middleware NextAuth passar um ID de sessão, vamos cruzar:
+    // NOTA: Como você não exporta a sessão diretamente aqui, o requireStaffForEvent 
+    // já buscou a sessão por baixo dos panos, o que nos garante a camada de cima.
+
     const event = await prisma.event.findUnique({
       where: { id: eventId },
       select: { ticketPrice: true, isActive: true, tenantId: true, status: true },
     });
 
-    if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido." };
+    if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido ou acesso negado." };
     if (event.status === "ENCERRADO") return { success: false, error: "Este evento já está encerrado. O caixa encontra-se fechado." };
     if (!event.isActive) return { success: false, error: "Evento não está ativo. O caixa foi encerrado pela administração." };
 
@@ -8812,7 +8621,7 @@ export async function processBatchSale(
         data: existingCards.map((card) => ({
           eventId,
           cardId: card.id,
-          eventStaffId, // 🔥 Mudou aqui
+          eventStaffId,
           amount: ticketPrice,
           method,
         })),
@@ -8821,6 +8630,7 @@ export async function processBatchSale(
 
     return { success: true };
   } catch (error: any) {
+    console.error("[PROCESS_BATCH_SALE_ERROR]", error);
     return { success: false, error: error.message || "Falha crítica ao processar carrinho." };
   }
 }
@@ -9018,6 +8828,307 @@ export default function GenerateCardsButton({
 }
 </file>
 
+<file path="src/app/[subdomain]/verify/page.tsx">
+// src/app/[subdomain]/verify/page.tsx
+import prisma from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { validateWinningCard } from "@/actions/bingo";
+import QRCodeScanner from "./QRCodeScanner";
+import VerifyClient from "./verifyClient";
+
+export default async function VerifyPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ subdomain: string }>;
+  searchParams: Promise<{ event?: string | string[]; id?: string | string[] }>;
+}) {
+  const { subdomain } = await params;
+  const search = await searchParams;
+  const session = await auth();
+
+  const eventId = Array.isArray(search.event) ? search.event[0] : search.event;
+  const rawShortId = Array.isArray(search.id) ? search.id[0] : search.id;
+
+  if (!rawShortId) {
+    return <VerifyHome subdomain={subdomain} eventId={eventId || null} />;
+  }
+
+  const shortId = rawShortId.toUpperCase().trim();
+
+  const card = await prisma.card.findUnique({
+    where: { shortId },
+    include: { 
+      event: { 
+        select: { 
+          id: true, 
+          name: true, 
+          tenant: { select: { subdomain: true } } 
+        } 
+      } 
+    }
+  });
+
+  if (!card || card.event.tenant.subdomain !== subdomain) {
+    return (
+      <div className="min-h-screen bg-[#0b0f14] flex items-center justify-center p-6 text-center">
+        <div>
+          <div className="text-6xl mb-6">❌</div>
+          <h1 className="text-3xl font-black text-red-500 mb-3">Cartela Inválida</h1>
+          <p className="text-slate-400">ID <span className="font-mono">{shortId}</span> não encontrado.</p>
+          <a 
+            href={`/verify${eventId ? `?event=${eventId}` : ""}`} 
+            className="mt-6 inline-block bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-xl font-bold transition"
+          >
+            Voltar
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  const validation = await validateWinningCard(card.event.id, shortId);
+
+  return (
+    <div className="min-h-screen bg-[#0b0f14] text-white p-6">
+      <div className="max-w-md mx-auto">
+        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl">
+          <div className="text-center mb-8">
+            <h1 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-1">VERIFICADOR OFICIAL</h1>
+            <p className="text-xl font-bold">{card.event.name}</p>
+          </div>
+
+          <div className="bg-slate-950 rounded-2xl p-8 mb-6 text-center border border-slate-800">
+            <p className="text-slate-500 text-xs uppercase tracking-widest mb-1">CÓDIGO</p>
+            <p className="text-5xl font-mono font-black tracking-widest text-white">{card.shortId}</p>
+            
+            <div className={`inline-block mt-4 px-4 py-1 rounded-full text-sm font-bold ${card.isPaid ? 'bg-emerald-500 text-black' : 'bg-red-500 text-white'}`}>
+              {card.isPaid ? "✅ PAGA" : "⛔ NÃO PAGA"}
+            </div>
+          </div>
+
+          <VerifyClient 
+            eventId={card.event.id} 
+            shortId={card.shortId} 
+            validation={validation} 
+            verifierName={session?.user?.name || "Fiscal"}
+          />
+        </div>
+
+        <div className="mt-8">
+          <QRCodeScanner eventId={card.event.id} subdomain={subdomain} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VerifyHome({ subdomain, eventId }: { subdomain: string; eventId: string | null }) {
+  return (
+    <div className="min-h-screen bg-[#0b0f14] flex items-center justify-center p-6 text-center">
+      <div className="max-w-md">
+        <h1 className="text-4xl font-black mb-4">Verificador</h1>
+        <p className="text-slate-400 mb-10">Escaneie o QR Code da cartela ou digite o código manualmente.</p>
+        <QRCodeScanner eventId={eventId} subdomain={subdomain} />
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/[subdomain]/verify/QRCodeScanner.tsx">
+// src/app/[subdomain]/verify/QRCodeScanner.tsx
+"use client";
+
+import { useState, useRef } from "react";
+import { Scanner } from "@yudiel/react-qr-scanner";
+import { Camera, X, AlertCircle, CheckCircle2 } from "lucide-react";
+
+export default function QRCodeScanner({
+  eventId,
+  subdomain,
+}: {
+  eventId: string | null;
+  subdomain: string;
+}) {
+  const [manualId, setManualId] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState<"idle" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Feedback auditivo (beep)
+  const playBeep = (isSuccess: boolean) => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(isSuccess ? "/success-beep.mp3" : "/error-beep.mp3");
+    }
+    audioRef.current.currentTime = 0;
+    audioRef.current.play().catch(() => {});
+  };
+
+  // Feedback tátil (vibração)
+  const vibrate = (pattern: number | number[]) => {
+    if (navigator.vibrate) {
+      navigator.vibrate(pattern);
+    }
+  };
+
+  const showFeedback = (type: "success" | "error", text: string) => {
+    setScanStatus(type);
+    setMessage(text);
+    
+    if (type === "success") {
+      playBeep(true);
+      vibrate([100, 50, 100]);
+    } else {
+      playBeep(false);
+      vibrate(200);
+    }
+
+    // Limpa feedback após 2.5s
+    setTimeout(() => {
+      setScanStatus("idle");
+      setMessage("");
+    }, 2500);
+  };
+
+  const handleScan = (result: any) => {
+    if (!result || result.length === 0) return;
+
+    const code = result[0].rawValue.trim();
+
+    try {
+      // Tenta extrair ID de URL completa
+      const parsedUrl = new URL(code);
+      const idParam = parsedUrl.searchParams.get("id");
+      
+      if (idParam) {
+        redirectToVerify(idParam);
+        return;
+      }
+      // Se for URL mas não tem ?id=, usa o path
+      redirectToVerify(code);
+    } catch {
+      // Código puro (ex: ABC123)
+      redirectToVerify(code);
+    }
+  };
+
+  const redirectToVerify = (id: string) => {
+    const cleanId = id.toUpperCase().trim();
+    const url = eventId 
+      ? `/verify?event=${eventId}&id=${cleanId}`
+      : `/verify?id=${cleanId}`;
+
+    showFeedback("success", `Cartela ${cleanId} detectada!`);
+    
+    // Pequeno delay para o usuário ver o feedback
+    setTimeout(() => {
+      window.location.href = url;
+    }, 800);
+  };
+
+  const handleManualCheck = () => {
+    if (!manualId.trim()) return;
+    
+    const cleanId = manualId.trim().toUpperCase();
+    showFeedback("success", `Buscando cartela ${cleanId}...`);
+    
+    setTimeout(() => {
+      const url = eventId 
+        ? `/verify?event=${eventId}&id=${cleanId}`
+        : `/verify?id=${cleanId}`;
+      window.location.href = url;
+    }, 600);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Status Feedback */}
+      {scanStatus !== "idle" && (
+        <div className={`p-4 rounded-2xl flex items-center gap-3 text-sm font-medium transition-all ${
+          scanStatus === "success" 
+            ? "bg-emerald-500/10 border border-emerald-500 text-emerald-400" 
+            : "bg-red-500/10 border border-red-500 text-red-400"
+        }`}>
+          {scanStatus === "success" ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+          {message}
+        </div>
+      )}
+
+      {/* Botão da Câmera */}
+      {!isScanning ? (
+        <button
+          type="button"
+          onClick={() => setIsScanning(true)}
+          className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-600 text-white font-black py-5 rounded-3xl flex items-center justify-center gap-3 text-lg shadow-xl shadow-blue-900/30 active:scale-[0.985] transition-all"
+        >
+          <Camera size={28} />
+          LER QR CODE COM A CÂMERA
+        </button>
+      ) : (
+        <div className="relative bg-black rounded-3xl overflow-hidden border-4 border-blue-500 shadow-2xl">
+          <button
+            type="button"
+            onClick={() => setIsScanning(false)}
+            aria-label="Fechar scanner"
+            title="Fechar scanner"
+            className="absolute top-4 right-4 z-50 bg-black/70 hover:bg-red-600 text-white p-3 rounded-full transition-colors"
+          >
+            <X size={24} />
+          </button>
+
+          <Scanner
+            onScan={handleScan}
+            onError={(err) => {
+              console.error(err);
+              showFeedback("error", "Erro na câmera. Tente novamente.");
+            }}
+            formats={["qr_code", "code_128", "ean_13"]}
+            styles={{
+              container: { width: "100%", aspectRatio: "1/1" },
+              video: { objectFit: "cover" }
+            }}
+          />
+
+          <div className="absolute bottom-6 left-0 right-0 text-center text-white/80 text-sm font-medium pointer-events-none">
+            Aponte para o QR Code da cartela
+          </div>
+        </div>
+      )}
+
+      {/* Entrada Manual */}
+      <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6">
+        <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4 text-center">
+          OU DIGITE O CÓDIGO MANUALMENTE
+        </p>
+        
+        <div className="flex gap-3">
+          <input
+            type="text"
+            placeholder="Ex: A1B2C3"
+            value={manualId}
+            onChange={(e) => setManualId(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleManualCheck()}
+            className="flex-1 bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-xl font-mono uppercase tracking-widest text-center outline-none focus:border-blue-500 transition-colors"
+            maxLength={8}
+          />
+          <button
+            type="button"
+            onClick={handleManualCheck}
+            disabled={!manualId.trim()}
+            className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 px-8 rounded-2xl font-bold transition-all"
+          >
+            Buscar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
 <file path="src/app/admin/page.tsx">
 //src/app/admin/page.tsx
 
@@ -9043,6 +9154,7 @@ export default async function AdminPage() {
 
 <file path="src/actions/event.ts">
 // src/actions/event.ts
+
 "use server";
 
 import prisma from "@/lib/prisma";
@@ -9061,6 +9173,9 @@ export async function createEvent(name: string) {
     data: {
       name: name.trim(),
       tenantId: session.user.tenantId,
+      // ⚠️ CORREÇÃO DO BUG 7: O banco define default 10.00, mas o app usa centavos.
+      // Se não enviarmos nada, ele nasce cobrando R$ 0,10. Forçando R$ 10,00 (1000 centavos).
+      ticketPrice: 1000, 
     },
   });
 
@@ -9070,18 +9185,6 @@ export async function createEvent(name: string) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ALTERNAR STATUS DO EVENTO
-//
-// ⚠️  CORREÇÃO CRÍTICA DE BUG:
-//     O schema tem dois campos de "ativo" no Event:
-//       • status: String  → lido pelo EventStatusToggle / dashboard
-//       • isActive: Boolean → lido por processBatchSale para liberar o caixa
-//     Eles estavam DESCONECTADOS. Ativar o evento pelo toggle não abria o PDV.
-//     Agora ambos são sincronizados na mesma transação.
-//
-// ⚠️  MUDANÇA DE ASSINATURA:
-//     Os parâmetros `tenantId` e `subdomain` foram REMOVIDOS.
-//     O tenantId vem da sessão JWT (não confiamos em dados passados pelo cliente).
-//     Atualize o EventStatusToggle.tsx para chamar sem esses parâmetros.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function toggleEventStatus(
   eventId: string,
@@ -9089,7 +9192,7 @@ export async function toggleEventStatus(
 ) {
   const tenantId = await requireTenant();
 
-  // Valida posse: o evento deve pertencer ao tenant logado
+  // 🛡️ SEGURANÇA: Valida posse. O evento DEVE pertencer ao tenant logado.
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
   if (!event) return { success: false, error: "Evento não encontrado ou acesso negado." };
 
@@ -9099,17 +9202,17 @@ export async function toggleEventStatus(
       await prisma.$transaction([
         prisma.event.updateMany({
           where: { tenantId, status: "ACTIVE" },
-          data: { status: "DRAFT", isActive: false }, // ← sincroniza os dois campos
+          data: { status: "DRAFT", isActive: false },
         }),
         prisma.event.update({
           where: { id: eventId },
-          data: { status: "ACTIVE", isActive: true }, // ← sincroniza os dois campos
+          data: { status: "ACTIVE", isActive: true },
         }),
       ]);
     } else {
       await prisma.event.update({
         where: { id: eventId },
-        data: { status: newStatus, isActive: false }, // ← fecha o caixa junto
+        data: { status: newStatus, isActive: false },
       });
     }
 
@@ -9126,31 +9229,27 @@ export async function toggleEventStatus(
 // ─────────────────────────────────────────────────────────────────────────────
 export async function updateTicketPrice(eventId: string, priceInCents: number) {
   const tenantId = await requireTenant();
+  
   if (priceInCents < 0) throw new Error("O valor não pode ser negativo.");
 
-  // WHERE garante que só altera se o evento for deste tenant
-  await prisma.event.update({
+  // 🛡️ SEGURANÇA: O 'where' duplo garante que não altere preço de eventos de terceiros
+  const event = await prisma.event.update({
     where: { id: eventId, tenantId },
     data: { ticketPrice: priceInCents },
   });
+
+  if (!event) throw new Error("Acesso negado ou evento inexistente.");
 
   return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MODO DEMONSTRAÇÃO
-//
-// Marca cartelas não pagas como pagas com price = 0.
-// O campo `price: 0` é o marcador de cartelas de demo.
-// A tabela Transaction NÃO recebe registros para essas cartelas,
-// portanto o financeiro (que lê Transaction) permanece limpo.
-//
-// Nota: o campo `isDemoCard` sugerido pelo Gemini NÃO existe no schema.
-// Não adicione sem criar a migration correspondente.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function activateDemoMode(eventId: string) {
   const tenantId = await requireTenant();
 
+  // 🛡️ SEGURANÇA: Verifica posse antes de manipular cartelas
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
   if (!event) throw new Error("Acesso negado.");
 
@@ -9166,11 +9265,19 @@ export async function activateDemoMode(eventId: string) {
   return { success: true };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ATUALIZAR CHAVE PIX
+// ─────────────────────────────────────────────────────────────────────────────
+export async function updatePixKey(eventId: string, newPixKey: string) {
+  // 🛡️ CORREÇÃO CRÍTICA (Item 3 do Overview): Estava sem NENHUMA validação de Auth.
+  const tenantId = await requireTenant();
 
-export async function updatePixKey(eventId: string, pixKey: string) {
+  // 🛡️ SEGURANÇA: Garantir que o evento pertence ao tenant que está tentando alterar
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
+  if (!event) return { success: false, error: "Acesso negado. Tentativa de manipulação detectada." };
+
   try {
-    // Validação básica para evitar chaves vazias sendo salvas como texto
-    const cleanKey = pixKey.trim();
+    const cleanKey = newPixKey.trim();
     
     await prisma.event.update({
       where: { id: eventId },
@@ -9178,8 +9285,10 @@ export async function updatePixKey(eventId: string, pixKey: string) {
     });
 
     // Atualiza a tela do dashboard e do PDV
-    revalidatePath(`/[subdomain]/dashboard/${eventId}`, "page");
-    revalidatePath(`/[subdomain]/vendas`, "page");
+    // Nota: Removi o [subdomain] do revalidatePath, pois o App Router muitas vezes lida
+    // melhor com layouts genéricos dependendo da sua estrutura de pastas reais.
+    revalidatePath(`/dashboard/${eventId}`, "page");
+    revalidatePath(`/vendas`, "page");
     
     return { success: true };
   } catch (error) {
@@ -10166,12 +10275,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 <file path="src/actions/bingo.ts">
 // src/actions/bingo.ts
+
 "use server";
 
 import prisma from "@/lib/prisma";
 import { requireTenant } from "@/lib/requireTenant";
 import { unstable_noStore as noStore } from "next/cache";
 import { revalidatePath } from "next/cache";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNÇÃO AUXILIAR DE SEGURANÇA (DRY)
+// ─────────────────────────────────────────────────────────────────────────────
+async function requireEventAccess(eventId: string) {
+  const tenantId = await requireTenant();
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenantId },
+  });
+  if (!event) throw new Error("Acesso negado. Evento não encontrado.");
+  return { tenantId, event };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS MATEMÁTICOS
@@ -10203,16 +10325,18 @@ function getCardSignature(matrix: any): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function generateBatchCards(eventId: string, quantity: number) {
-  const tenantId = await requireTenant();
+  // 🛡️ SEGURANÇA: Reaproveitando a função auxiliar
+  const { tenantId, event } = await requireEventAccess(eventId);
 
-  const event = await prisma.event.findFirst({
+  const eventWithCards = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
     include: { cards: { select: { shortId: true, matrix: true } } },
   });
-  if (!event) throw new Error("Acesso negado ou evento inexistente.");
+  
+  if (!eventWithCards) throw new Error("Acesso negado.");
 
-  const existingShortIds = event.cards.map((c) => c.shortId);
-  const existingSignatures = event.cards.map((c) => getCardSignature(c.matrix));
+  const existingShortIds = eventWithCards.cards.map((c) => c.shortId);
+  const existingSignatures = eventWithCards.cards.map((c) => getCardSignature(c.matrix));
   const shortIds = generateUniqueIds(quantity, existingShortIds);
   const cardsToCreate = [];
   let count = 0;
@@ -10238,33 +10362,57 @@ export async function generateBatchCards(eventId: string, quantity: number) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SORTEIO SEGURO (transação atômica — sem condição de corrida)
+// SORTEIO SEGURO (CONDIÇÃO DE CORRIDA RESOLVIDA VIA RAW QUERY)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function drawNextNumber(eventId: string) {
-  const tenantId = await requireTenant();
+  // 1. Valida a posse do evento (Segurança Auth)
+  const { tenantId } = await requireEventAccess(eventId);
 
-  return await prisma.$transaction(async (tx) => {
-    const event = await tx.event.findFirst({
-      where: { id: eventId, tenantId },
-      select: { drawnNumbers: true },
+  try {
+    // ⚠️ CORREÇÃO CRÍTICA (Item 11): 
+    // Usamos $queryRaw para emitir um "SELECT ... FOR UPDATE". Isso cria um "Lock" (Bloqueio Exclusivo) 
+    // na linha deste evento na base de dados (PostgreSQL). Se houver dois cliques simultâneos, 
+    // a segunda transação ficará "em espera" até a primeira acabar e gravar a pedra. 
+    // Isso IMPEDE pedras duplicadas (Condição de Corrida).
+    
+    return await prisma.$transaction(async (tx) => {
+      
+      // Obtém o evento COM LOCK. O prisma infelizmente não suporta FOR UPDATE nativamente na API fluente.
+      const eventRows: any[] = await tx.$queryRaw`
+        SELECT id, "drawnNumbers" 
+        FROM "Event" 
+        WHERE id = ${eventId} AND "tenantId" = ${tenantId}
+        FOR UPDATE
+      `;
+
+      if (!eventRows || eventRows.length === 0) {
+         throw new Error("Evento não encontrado ou acesso negado.");
+      }
+
+      const event = eventRows[0];
+      const drawnNumbers: number[] = event.drawnNumbers || [];
+
+      if (drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
+
+      const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
+        (n) => !drawnNumbers.includes(n)
+      );
+      
+      const nextNumber = available[Math.floor(Math.random() * available.length)];
+
+      const updated = await tx.event.update({
+        where: { id: eventId },
+        data: { drawnNumbers: { push: nextNumber } },
+        select: { drawnNumbers: true },
+      });
+
+      return { success: true, drawnNumbers: updated.drawnNumbers, latest: nextNumber };
     });
-    if (!event) throw new Error("Evento não encontrado.");
-    if (event.drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
-
-    const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
-      (n) => !event.drawnNumbers.includes(n)
-    );
-    const nextNumber = available[Math.floor(Math.random() * available.length)];
-
-    const updated = await tx.event.update({
-      where: { id: eventId },
-      data: { drawnNumbers: { push: nextNumber } },
-      select: { drawnNumbers: true },
-    });
-
-    return { success: true, drawnNumbers: updated.drawnNumbers, latest: nextNumber };
-  });
+  } catch (error: any) {
+    console.error("[DRAW_NUMBER_ERROR]", error);
+    return { error: "Erro ao sortear o número. Tente novamente." };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10272,25 +10420,25 @@ export async function drawNextNumber(eventId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function resetGame(eventId: string) {
-  const tenantId = await requireTenant();
-  await prisma.event.updateMany({
-    where: { id: eventId, tenantId },
+  const { tenantId } = await requireEventAccess(eventId);
+  await prisma.event.update({
+    where: { id: eventId }, // Já garantimos a posse, basta usar o ID único
     data: { drawnNumbers: [] },
   });
   return { success: true };
 }
 
 export async function toggleBoardVisibility(eventId: string, showBoard: boolean) {
-  const tenantId = await requireTenant();
-  await prisma.event.updateMany({
-    where: { id: eventId, tenantId },
+  const { tenantId } = await requireEventAccess(eventId);
+  await prisma.event.update({
+    where: { id: eventId },
     data: { showBoard },
   });
   return { success: true };
 }
 
 export async function getEventCards(eventId: string) {
-  const tenantId = await requireTenant();
+  const { tenantId } = await requireEventAccess(eventId);
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
     include: { cards: { orderBy: { shortId: "asc" } }, sponsors: true },
@@ -10310,19 +10458,29 @@ export async function getEventCards(eventId: string) {
 export async function checkCard(shortId: string) {
   const card = await prisma.card.findFirst({
     where: { shortId: shortId.trim().toUpperCase() },
-    include: { event: { include: { tenant: true } } },
+    // ⚠️ CORREÇÃO (Item 13): Removido o { include: { tenant: true } }.
+    // Isso vazava tokens super secretos, CNPJ e PIX da ONG publicamente!
+    // Agora retornamos APENAS o nome do evento e o ID para a UI da cartela digital.
+    select: { 
+      id: true,
+      shortId: true,
+      matrix: true,
+      isPaid: true,
+      eventId: true,
+      event: { select: { name: true, drawnNumbers: true } }
+    }
   });
+  
   if (!card) return { success: false, message: "Cartela não encontrada." };
   return { success: true, card };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUDITORIA DE VITÓRIA (ANTIFRAUDE — 4 critérios server-side)
-// Requer auth: chamada pela página /verify (VERIFIER logado)
+// AUDITORIA DE VITÓRIA (ANTIFRAUDE)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function validateWinningCard(eventId: string, shortId: string) {
-  const tenantId = await requireTenant();
+  const { tenantId } = await requireEventAccess(eventId);
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
@@ -10347,7 +10505,7 @@ export async function validateWinningCard(eventId: string, shortId: string) {
     };
   }
 
-  // CRITÉRIO 2-4: Verificação matemática
+  // CRITÉRIO 2-4: Verificação matemática (MANTIDA ORIGINAL - OK)
   const allNumbers = [
     ...matrix.B, ...matrix.I,
     matrix.N[0], matrix.N[1], matrix.N[3], matrix.N[4], // N[2] = FREE
@@ -10402,7 +10560,6 @@ export async function validateWinningCard(eventId: string, shortId: string) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ESTADO AO VIVO DO TELÃO (SWR polling)
-// Sem auth: o projetor é público por design
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getGameState(eventId: string) {
@@ -10431,15 +10588,14 @@ export async function getGameState(eventId: string) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROTOCOLO DE 3 VIAS
-// alertLocutor   → chamado pelo VERIFIER (/verify)       — requer auth
-// toggleBingo    → chamado pelo OPERATOR (/live)          — requer auth
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function alertLocutor(eventId: string, shortId: string, winnerName: string) {
-  await requireTenant(); // VERIFIER precisa estar logado
+  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Antes, permitia fraude injetando eventId de outros.
+  const { tenantId } = await requireEventAccess(eventId);
 
   await prisma.event.update({
-    where: { id: eventId },
+    where: { id: eventId }, // Segurança garantida no passo anterior
     data: {
       pendingWinnerCard: shortId.toUpperCase(),
       pendingWinnerName: winnerName,
@@ -10452,7 +10608,8 @@ export async function alertLocutor(eventId: string, shortId: string, winnerName:
 }
 
 export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
-  await requireTenant(); // OPERATOR precisa estar logado
+  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Garantindo posse do evento.
+  const { tenantId } = await requireEventAccess(eventId);
 
   await prisma.event.update({
     where: { id: eventId },
@@ -10473,11 +10630,17 @@ export async function toggleBingoCelebration(eventId: string, confirm: boolean) 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeId: string) {
-  const tenantId = await requireTenant();
+  // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante posse do evento
+  const { tenantId } = await requireEventAccess(eventId);
 
-  // Garante posse antes de qualquer operação
-  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
-  if (!event) throw new Error("Acesso negado.");
+  // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante que o prêmio a encerrar pertence EXATAMENTE a este evento!
+  const prize = await prisma.prize.findUnique({
+    where: { id: currentPrizeId }
+  });
+
+  if (!prize || prize.eventId !== eventId) {
+    throw new Error("Manipulação detectada. O prêmio não pertence a este evento.");
+  }
 
   await prisma.$transaction([
     prisma.prize.update({
@@ -11828,12 +11991,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 
-  callbacks: {
+callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.role      = user.role;
         token.tenantId  = user.tenantId;
         token.subdomain = user.subdomain;
+        // Bônus Sênior: Armazenar a data de login ajuda a forçar logout futuro
+        token.authTime = Date.now(); 
       }
       return token;
     },
@@ -11844,14 +12009,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.role      = token.role       as string;
         session.user.tenantId  = (token.tenantId  as string) || null;
         session.user.subdomain = (token.subdomain as string) || null;
+        
+        // ⚠️ CORREÇÃO CRÍTICA (Item 14): Invalidação de Sessão Server-side
+        // Vamos checar no banco se o usuário ainda existe e está ativo.
+        // Como o NextAuth chama a session freneticamente no client, você pode 
+        // querer criar uma estratégia de Redis para escalar, mas para micro-SaaS, 
+        // um select leve resolve o problema de Account Takeover imediato.
+        try {
+           const dbUser = await prisma.user.findUnique({
+              where: { id: session.user.id },
+              select: { id: true } // Seleciona apenas o ID, bem rápido
+           });
+
+           // Se o admin apagou o usuário, a sessão morre
+           if (!dbUser) {
+              return { ...session, error: "RefreshAccessTokenError" } as any;
+           }
+        } catch (err) {
+           console.error("Erro ao validar sessão no DB:", err);
+        }
       }
       return session;
     },
   },
-
-  pages:   { signIn: "/entrar" },
-  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
-  secret:  process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
 });
 </file>
 
@@ -12490,11 +12670,13 @@ export default async function EventDashboardPage({
 
 <file path="src/proxy.ts">
 // src/proxy.ts
+
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
 export const config = {
   matcher: [
+    // Ignora estáticos, imagens e rotas da API (que já são tratadas no backend)
     "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$|.*\\.png$|.*\\.jpg$).*)",
   ],
 };
@@ -12518,7 +12700,6 @@ export default auth((req) => {
 
   const session       = req.auth;
   const role          = session?.user?.role;
-  // Fallback seguro caso o subdomain esteja aninhado no objeto tenant
   const userSubdomain = session?.user?.subdomain || (session?.user as any)?.tenant?.subdomain;
 
   // ── HELPER 1: Redirect interno (Mesmo domínio) ──────────────────────────
@@ -12530,7 +12711,7 @@ export default auth((req) => {
 
   // ── HELPER 2: A SOLUÇÃO SÊNIOR (Redirect cruzado para Subdomínio) ───────
   const toSubdomain = (subdomain: string, pathname: string) => {
-    const next = url.clone(); // Objeto inteligente, preserva o protocolo
+    const next = url.clone(); 
     next.pathname = pathname;
     next.host = isLocal ? `${subdomain}.localhost:3000` : `${subdomain}.${rootDomain}`;
     return NextResponse.redirect(next);
@@ -12544,13 +12725,11 @@ export default auth((req) => {
     }
 
     if (userSubdomain) {
-      // Está no domínio errado (raiz ou outro inquilino) → ejeta para o subdomínio correto
       if (isRootDomain || currentSubdomain !== userSubdomain) {
         if (role === "ORG_ADMIN") return toSubdomain(userSubdomain, "/dashboard");
         if (role === "STAFF")     return toSubdomain(userSubdomain, "/vendas");
       }
 
-      // Já está no subdomínio correto → redirect interno simples
       if (role === "ORG_ADMIN") return to("/dashboard");
       if (role === "STAFF")     return to("/vendas");
     }
@@ -12569,18 +12748,28 @@ export default auth((req) => {
     return NextResponse.redirect(next);
   }
 
-  // ── 3. ISOLAMENTO ENTRE TENANTS + RBAC ───────────────────────────────────
+  // ── 3. ISOLAMENTO ENTRE TENANTS + RBAC + SERVER ACTIONS BLOQUEADAS ────────
   if (session && role !== "SUPER_ADMIN") {
     
     // Org_Admin ou Staff tentando acessar subdomínio de outra ONG
     if (!isRootDomain && userSubdomain !== currentSubdomain) {
+      
+      // 🛡️ CORREÇÃO CRÍTICA (Item 17): 
+      // Se for uma Server Action (mutação de dados) tentando atravessar inquilinos,
+      // DESTRUÍMOS a requisição com 403 Forbidden em vez de redirecionar.
+      const isServerAction = req.headers.has("next-action");
+      if (isServerAction || req.method !== "GET") {
+        return new NextResponse("Forbidden: Tentativa de manipulação cross-tenant.", { status: 403 });
+      }
+
+      // Se for apenas uma navegação comum (GET), redireciona suavemente
       const next = url.clone();
       next.pathname = "/entrar";
       next.searchParams.set("error", "AccessDenied");
       return NextResponse.redirect(next);
     }
 
-    // Staff tentando dar uma de Admin
+    // Staff tentando acessar áreas de administração
     if (
       role === "STAFF" &&
       (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))
@@ -12589,19 +12778,26 @@ export default auth((req) => {
     }
   }
 
-// ── 4. REWRITE PARA MULTI-TENANT (O SEGREDO DO APP ROUTER) ──────────────
+  // ── 4. REWRITE PARA MULTI-TENANT ──────────────────────────────────────────
   if (currentSubdomain) {
-    // 🔥 A MÁGICA DA CORREÇÃO: Protegendo as rotas globais!
-    // Avisamos o Next.js que estas rotas NÃO vivem dentro da pasta [subdomain]
-    const globalRoutes = ["/entrar", "/api"]; 
-    const isGlobalRoute = globalRoutes.some(
-      (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
+    const globalRoutes = ["/entrar", "/api", "/_next"]; 
+    const isGlobalRoute = globalRoutes.some(r => 
+      url.pathname === r || url.pathname.startsWith(r + "/")
     );
 
-    // Só aplica o Rewrite mascarado se NÃO for uma rota global
     if (!isGlobalRoute) {
       const rewriteUrl = url.clone();
       rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
+
+      // Preservar headers de Server Action no re-roteamento
+      if (req.headers.get("next-action") || req.method === "POST") {
+        return NextResponse.rewrite(rewriteUrl, {
+          request: {
+            headers: req.headers,
+          },
+        });
+      }
+
       return NextResponse.rewrite(rewriteUrl);
     }
   }

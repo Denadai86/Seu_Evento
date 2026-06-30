@@ -10,6 +10,7 @@ type EventType = { id: string; name: string; isActive: boolean };
 type StaffEventType = { eventId: string; canSell: boolean; canOperate: boolean; canVerify: boolean };
 type StaffMemberType = { id: string; name: string | null; username: string | null; events: StaffEventType[] };
 
+// Nota: tenantId foi mantido nas props caso o componente pai ainda o envie, mas não o usamos mais para chamadas seguras.
 export default function GlobalStaffClient({ staffMembers, events, tenantId }: { staffMembers: StaffMemberType[], events: EventType[], tenantId: string }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -23,7 +24,8 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
   const handleAddStaff = (e: React.FormEvent) => {
     e.preventDefault();
     startTransition(async () => {
-      const res = await createTenantStaff(tenantId, newStaffName);
+      // 🛡️ Ajuste: tenantId removido. Apenas o nome é enviado.
+      const res = await createTenantStaff(newStaffName);
       if (res.success && res.pin) {
         setNewStaffName("");
         setShowAddModal(false);
@@ -47,15 +49,17 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
     });
   };
 
-  const handleEventToggle = (userId: string, eventId: string, currentAssigned: boolean, currentPerms: any) => {
+  const handleEventToggle = (userId: string, eventId: string, currentAssigned: boolean) => {
     startTransition(async () => {
-      // Se não estava no evento, ativa com permissão de venda padrão. Se já estava, remove.
       const newAssigned = !currentAssigned;
-      const perms = newAssigned ? { canSell: true, canOperate: false, canVerify: false } : { canSell: false, canOperate: false, canVerify: false };
+      const perms = newAssigned 
+        ? { canSell: true, canOperate: false, canVerify: false } 
+        : { canSell: false, canOperate: false, canVerify: false };
       
-      await toggleStaffInEvent(tenantId, userId, eventId, newAssigned, perms);
+      // 🛡️ CORREÇÃO DE ASSINATURA: userId, eventId, isAssigned, permissions
+      await toggleStaffInEvent(userId, eventId, newAssigned, perms);
       router.refresh();
-      // Atualiza o estado do modal localmente para ser instantâneo
+      
       if (activeStaffModal) {
         const updatedEvents = newAssigned 
           ? [...activeStaffModal.events, { eventId, ...perms }]
@@ -65,14 +69,24 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
     });
   };
 
-  const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify', currentPerms: any) => {
+  const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify', currentPerms: StaffEventType) => {
     startTransition(async () => {
-      const updatedPerms = { ...currentPerms, [permKey]: !currentPerms[permKey] };
-      await toggleStaffInEvent(tenantId, userId, eventId, true, updatedPerms);
+      // Constrói o objeto estrito de permissões exigido pelo back-end
+      const updatedPerms = { 
+        canSell: currentPerms.canSell,
+        canOperate: currentPerms.canOperate,
+        canVerify: currentPerms.canVerify,
+        [permKey]: !currentPerms[permKey] 
+      };
+
+      // 🛡️ CORREÇÃO DE ASSINATURA: userId, eventId, isAssigned (sempre true aqui), permissions
+      await toggleStaffInEvent(userId, eventId, true, updatedPerms);
       router.refresh();
       
       if (activeStaffModal) {
-        const updatedEvents = activeStaffModal.events.map(e => e.eventId === eventId ? { ...e, ...updatedPerms } : e);
+        const updatedEvents = activeStaffModal.events.map(e => 
+          e.eventId === eventId ? { ...e, ...updatedPerms } : e
+        );
         setActiveStaffModal({ ...activeStaffModal, events: updatedEvents });
       }
     });
@@ -139,7 +153,7 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
                       {/* TOGGLE PRINCIPAL: PARTICIPA DO EVENTO? */}
                       <button 
                         disabled={isPending}
-                        onClick={() => handleEventToggle(activeStaffModal.id, event.id, isAssigned, staffEvent)}
+                        onClick={() => handleEventToggle(activeStaffModal.id, event.id, isAssigned)}
                         className={`px-4 py-2 rounded-xl text-xs font-black transition ${isAssigned ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
                       >
                         {isAssigned ? 'REMOVER DO EVENTO' : '+ INCLUIR NO EVENTO'}
@@ -147,7 +161,7 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
                     </div>
 
                     {/* TOGGLES DE PERMISSÃO */}
-                    {isAssigned && (
+                    {isAssigned && staffEvent && (
                       <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800">
                         <button 
                           onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canSell', staffEvent)}
@@ -178,7 +192,6 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
         </div>
       )}
 
-      {/* OUTROS MODAIS (NOVO STAFF E PIN GERADO) MANTIDOS IGUAIS... */}
       {showAddModal && (
          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
          <div className="bg-[#111827] rounded-3xl p-6 w-full max-w-md relative border border-slate-800">
