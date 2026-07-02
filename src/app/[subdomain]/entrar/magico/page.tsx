@@ -24,7 +24,7 @@ export default function MagicoPage({
     signIn("magic-token", {
       token,
       subdomain: params.subdomain,
-      callbackUrl: `/${params.subdomain}/dashboard`,
+      callbackUrl: `/dashboard`,
       redirect: true,
     }).catch(() => setStatus("error"));
   }, [token, params.subdomain]);
