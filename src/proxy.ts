@@ -1,10 +1,11 @@
+// src/proxy.ts
+
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getRootDomain, isLocalHost, toLogin, toSubdomain, to } from "@/lib/middleware/helpers";
 
 export const config = {
   matcher: [
-    // Atualizado: ignora robots, sitemaps e mais extensões de mídia
     "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp)$).*)",
   ],
 };
@@ -49,7 +50,7 @@ export default auth((req) => {
   const isPublicRoute = publicRoutes.some((r) => url.pathname === r || url.pathname.startsWith(`${r}/`));
 
   if (!isPublicRoute && !session) {
-    return toLogin(url, undefined, url.pathname); // Envia a rota atual como callbackUrl
+    return toLogin(url, undefined, url.pathname);
   }
 
   // ── 4. ISOLAMENTO CROSS-TENANT E RBAC ─────────────────────────────────────
@@ -66,10 +67,12 @@ export default auth((req) => {
     }
   }
 
-  // ── 5. MULTI-TENANT REWRITE (Com Correção de Cache da Edge) ───────────────
+  // ── 5. MULTI-TENANT REWRITE ───────────────────────────────────────────────
   if (currentSubdomain) {
-    const globalRoutes = ["/entrar", "/api", "/_next"];
-    const isGlobalRoute = globalRoutes.some((r) => url.pathname === r || url.pathname.startsWith(r + "/"));
+    // ✅ CORREÇÃO: só /entrar EXATO é global — /entrar/magico cai no rewrite normalmente
+    const isGlobalRoute =
+      url.pathname === "/entrar" ||
+      ["/api", "/_next"].some((r) => url.pathname === r || url.pathname.startsWith(r + "/"));
 
     if (!isGlobalRoute) {
       const rewriteUrl = url.clone();
@@ -79,7 +82,6 @@ export default auth((req) => {
         ? NextResponse.rewrite(rewriteUrl, { request: { headers: req.headers } })
         : NextResponse.rewrite(rewriteUrl);
 
-      // 🔥 O SEGREDINHO SÊNIOR: Impede que a Edge Cache misture respostas de tenants diferentes
       response.headers.set("x-middleware-cache", "no-cache");
       return response;
     }
