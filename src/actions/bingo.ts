@@ -90,55 +90,36 @@ export async function generateBatchCards(eventId: string, quantity: number) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function drawNextNumber(eventId: string) {
-  // 1. Valida a posse do evento (Segurança Auth)
   const { tenantId } = await requireEventAccess(eventId);
 
   try {
-    // ⚠️ CORREÇÃO CRÍTICA (Item 11): 
-    // Usamos $queryRaw para emitir um "SELECT ... FOR UPDATE". Isso cria um "Lock" (Bloqueio Exclusivo) 
-    // na linha deste evento na base de dados (PostgreSQL). Se houver dois cliques simultâneos, 
-    // a segunda transação ficará "em espera" até a primeira acabar e gravar a pedra. 
-    // Isso IMPEDE pedras duplicadas (Condição de Corrida).
-    
-    return await prisma.$transaction(async (tx) => {
-      
-      // Obtém o evento COM LOCK. O prisma infelizmente não suporta FOR UPDATE nativamente na API fluente.
-      const eventRows: any[] = await tx.$queryRaw`
-        SELECT id, "drawnNumbers" 
-        FROM "Event" 
-        WHERE id = ${eventId} AND "tenantId" = ${tenantId}
-        FOR UPDATE
-      `;
-
-      if (!eventRows || eventRows.length === 0) {
-         throw new Error("Evento não encontrado ou acesso negado.");
-      }
-
-      const event = eventRows[0];
-      const drawnNumbers: number[] = event.drawnNumbers || [];
-
-      if (drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
-
-      const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
-        (n) => !drawnNumbers.includes(n)
-      );
-      
-      const nextNumber = available[Math.floor(Math.random() * available.length)];
-
-      const updated = await tx.event.update({
-        where: { id: eventId },
-        data: { drawnNumbers: { push: nextNumber } },
-        select: { drawnNumbers: true },
-      });
-
-      return { success: true, drawnNumbers: updated.drawnNumbers, latest: nextNumber };
+    const event = await prisma.event.findFirst({
+      where: { id: eventId, tenantId },
+      select: { drawnNumbers: true },
     });
+
+    if (!event) throw new Error("Evento não encontrado.");
+
+    const drawnNumbers: number[] = event.drawnNumbers as number[];
+    if (drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
+
+    const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
+      (n) => !drawnNumbers.includes(n)
+    );
+    const nextNumber = available[Math.floor(Math.random() * available.length)];
+
+    const updated = await prisma.event.update({
+      where: { id: eventId },
+      data: { drawnNumbers: { push: nextNumber } },
+      select: { drawnNumbers: true },
+    });
+
+    return { success: true, drawnNumbers: updated.drawnNumbers, latest: nextNumber };
   } catch (error: any) {
     console.error("[DRAW_NUMBER_ERROR]", error);
     return { error: "Erro ao sortear o número. Tente novamente." };
   }
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // GERENCIAMENTO DA MESA
 // ─────────────────────────────────────────────────────────────────────────────
