@@ -13,7 +13,6 @@ export const config = {
 export default auth((req) => {
   const url = req.nextUrl;
   const hostname = req.headers.get("host") || "";
-  const isLocal = isLocalHost(hostname);
   const rootDomain = getRootDomain();
 
   const isRootDomain =
@@ -26,8 +25,16 @@ export default auth((req) => {
   const role = session?.user?.role;
   const userSubdomain = session?.user?.subdomain ?? (session?.user as any)?.tenant?.subdomain;
 
+  // ── ROTAS PÚBLICAS (definidas primeiro — usadas em múltiplos checks abaixo) ──
+  const publicRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
+  const isPublicRoute = publicRoutes.some(
+    (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
+  );
+
   // ── 1. SESSÃO INVÁLIDA ───────────────────────────────────────────────────
-  if ((session as any)?.error === "RefreshAccessTokenError") {
+  // ✅ Só bloqueia rotas protegidas — /projector e /cartela são públicos
+  // e não exigem sessão válida (ex: telão aberto por visitante)
+  if (!isPublicRoute && (session as any)?.error === "RefreshAccessTokenError") {
     return toLogin(url, "session_expired");
   }
 
@@ -45,10 +52,7 @@ export default auth((req) => {
     }
   }
 
-  // ── 3. PROTEÇÃO DE ROTAS PÚBLICAS ─────────────────────────────────────────
-  const publicRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
-  const isPublicRoute = publicRoutes.some((r) => url.pathname === r || url.pathname.startsWith(`${r}/`));
-
+  // ── 3. PROTEÇÃO DE ROTAS PRIVADAS ─────────────────────────────────────────
   if (!isPublicRoute && !session) {
     return toLogin(url, undefined, url.pathname);
   }
@@ -69,7 +73,7 @@ export default auth((req) => {
 
   // ── 5. MULTI-TENANT REWRITE ───────────────────────────────────────────────
   if (currentSubdomain) {
-    // ✅ CORREÇÃO: só /entrar EXATO é global — /entrar/magico cai no rewrite normalmente
+    // /entrar EXATO é global — /entrar/magico cai no rewrite normalmente
     const isGlobalRoute =
       url.pathname === "/entrar" ||
       ["/api", "/_next"].some((r) => url.pathname === r || url.pathname.startsWith(r + "/"));
