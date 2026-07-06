@@ -173,7 +173,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
         )}
 
         {/* Carrinho */}
-        <div className="flex-1 bg-slate-900/50 border border-slate-800/50 rounded-2xl p-4 flex flex-col mb-24 overflow-hidden">
+        <div className="flex-1 bg-slate-900/50 border border-slate-800/50 rounded-2xl p-4 flex flex-col mb-40 overflow-hidden">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold text-slate-400">Na Mão (Pendentes)</h2>
             <div className="text-right">
@@ -214,7 +214,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
         </div>
 
         {/* Botões de Pagamento */}
-        <div className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-40">
+        <div className="fixed bottom-16 left-0 w-full bg-slate-900 border-t border-slate-800 p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-40">
           <div className="max-w-md mx-auto flex gap-3">
             <button
               type="button"

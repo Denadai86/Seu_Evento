@@ -4,6 +4,8 @@ import { auth } from "@/lib/auth";
 import { validateWinningCard } from "@/actions/bingo";
 import QRCodeScanner from "./QRCodeScanner";
 import VerifyClient from "./verifyClient";
+import StaffNav from "@/components/staff/StaffNav";
+import { ScanLine } from "lucide-react";
 
 export default async function VerifyPage({
   params,
@@ -19,39 +21,74 @@ export default async function VerifyPage({
   const eventId = Array.isArray(search.event) ? search.event[0] : search.event;
   const rawShortId = Array.isArray(search.id) ? search.id[0] : search.id;
 
+  // ── SEM ID: tela do scanner ──────────────────────────────────────────────
   if (!rawShortId) {
-    return <VerifyHome subdomain={subdomain} eventId={eventId || null} />;
+    return (
+      <div className="min-h-screen bg-[#0b0f14] flex flex-col font-sans">
+        <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-40 shadow-md">
+          <p className="text-[10px] uppercase font-black tracking-widest text-blue-400">
+            Verificador
+          </p>
+          <p className="text-sm font-bold text-white truncate leading-tight">
+            Escaneie ou digite o código da cartela
+          </p>
+        </header>
+
+        <main className="flex-1 flex flex-col justify-center p-4 pb-20 max-w-md mx-auto w-full">
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-4">
+              <ScanLine size={32} className="text-blue-400" />
+            </div>
+            <p className="text-slate-400 text-sm text-center">
+              Leia o QR Code da cartela ou insira o código manualmente para verificar se é vencedora.
+            </p>
+          </div>
+          <QRCodeScanner eventId={eventId || null} subdomain={subdomain} />
+        </main>
+
+        <StaffNav eventId={eventId} />
+      </div>
+    );
   }
 
+  // ── COM ID: resultado da verificação ─────────────────────────────────────
   const shortId = rawShortId.toUpperCase().trim();
 
   const card = await prisma.card.findUnique({
     where: { shortId },
-    include: { 
-      event: { 
-        select: { 
-          id: true, 
-          name: true, 
-          tenant: { select: { subdomain: true } } 
-        } 
-      } 
-    }
+    include: {
+      event: {
+        select: {
+          id: true,
+          name: true,
+          tenant: { select: { subdomain: true } },
+        },
+      },
+    },
   });
 
   if (!card || card.event.tenant.subdomain !== subdomain) {
     return (
-      <div className="min-h-screen bg-[#0b0f14] flex items-center justify-center p-6 text-center">
-        <div>
-          <div className="text-6xl mb-6">❌</div>
-          <h1 className="text-3xl font-black text-red-500 mb-3">Cartela Inválida</h1>
-          <p className="text-slate-400">ID <span className="font-mono">{shortId}</span> não encontrado.</p>
-          <a 
-            href={`/verify${eventId ? `?event=${eventId}` : ""}`} 
-            className="mt-6 inline-block bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-xl font-bold transition"
+      <div className="min-h-screen bg-[#0b0f14] flex flex-col font-sans">
+        <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-40">
+          <p className="text-[10px] uppercase font-black tracking-widest text-blue-400">Verificador</p>
+        </header>
+
+        <main className="flex-1 flex flex-col items-center justify-center p-6 text-center pb-20">
+          <div className="text-6xl mb-4">❌</div>
+          <h1 className="text-2xl font-black text-red-400 mb-2">Cartela Inválida</h1>
+          <p className="text-slate-400 text-sm mb-8">
+            O código <span className="font-mono text-white">{shortId}</span> não foi encontrado.
+          </p>
+          <a
+            href={`/verify${eventId ? `?event=${eventId}` : ""}`}
+            className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-8 py-3 rounded-xl transition active:scale-95"
           >
-            Voltar
+            Verificar outra
           </a>
-        </div>
+        </main>
+
+        <StaffNav eventId={eventId} />
       </div>
     );
   }
@@ -59,47 +96,49 @@ export default async function VerifyPage({
   const validation = await validateWinningCard(card.event.id, shortId);
 
   return (
-    <div className="min-h-screen bg-[#0b0f14] text-white p-6">
-      <div className="max-w-md mx-auto">
-        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl">
-          <div className="text-center mb-8">
-            <h1 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-1">VERIFICADOR OFICIAL</h1>
-            <p className="text-xl font-bold">{card.event.name}</p>
-          </div>
+    <div className="min-h-screen bg-[#0b0f14] flex flex-col font-sans text-white">
+      <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-40 shadow-md">
+        <p className="text-[10px] uppercase font-black tracking-widest text-blue-400">Verificador</p>
+        <p className="text-sm font-bold text-white truncate leading-tight">
+          {card.event.name}
+        </p>
+      </header>
 
-          <div className="bg-slate-950 rounded-2xl p-8 mb-6 text-center border border-slate-800">
-            <p className="text-slate-500 text-xs uppercase tracking-widest mb-1">CÓDIGO</p>
-            <p className="text-5xl font-mono font-black tracking-widest text-white">{card.shortId}</p>
-            
-            <div className={`inline-block mt-4 px-4 py-1 rounded-full text-sm font-bold ${card.isPaid ? 'bg-emerald-500 text-black' : 'bg-red-500 text-white'}`}>
-              {card.isPaid ? "✅ PAGA" : "⛔ NÃO PAGA"}
-            </div>
-          </div>
+      <main className="flex-1 p-4 pb-24 max-w-md mx-auto w-full space-y-4">
+        {/* Card info */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center shadow-xl">
+          <p className="text-slate-500 text-[10px] uppercase tracking-widest mb-2">Código</p>
+          <p className="text-5xl font-mono font-black tracking-widest">{card.shortId}</p>
 
-          <VerifyClient 
-            eventId={card.event.id} 
-            shortId={card.shortId} 
-            validation={validation} 
-            verifierName={session?.user?.name || "Fiscal"}
-          />
+          <div
+            className={`inline-flex items-center gap-2 mt-4 px-4 py-1.5 rounded-full text-sm font-black ${
+              card.isPaid
+                ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                : "bg-red-500/15 text-red-400 border border-red-500/30"
+            }`}
+          >
+            {card.isPaid ? "✅ PAGA" : "⛔ NÃO PAGA"}
+          </div>
         </div>
 
-        <div className="mt-8">
+        {/* Resultado da validação */}
+        <VerifyClient
+          eventId={card.event.id}
+          shortId={card.shortId}
+          validation={validation}
+          verifierName={session?.user?.name || "Fiscal"}
+        />
+
+        {/* Scanner para próxima cartela */}
+        <div className="pt-2">
+          <p className="text-slate-600 text-xs font-bold uppercase tracking-widest text-center mb-4">
+            Verificar outra cartela
+          </p>
           <QRCodeScanner eventId={card.event.id} subdomain={subdomain} />
         </div>
-      </div>
-    </div>
-  );
-}
+      </main>
 
-function VerifyHome({ subdomain, eventId }: { subdomain: string; eventId: string | null }) {
-  return (
-    <div className="min-h-screen bg-[#0b0f14] flex items-center justify-center p-6 text-center">
-      <div className="max-w-md">
-        <h1 className="text-4xl font-black mb-4">Verificador</h1>
-        <p className="text-slate-400 mb-10">Escaneie o QR Code da cartela ou digite o código manualmente.</p>
-        <QRCodeScanner eventId={eventId} subdomain={subdomain} />
-      </div>
+      <StaffNav eventId={card.event.id} />
     </div>
   );
 }
