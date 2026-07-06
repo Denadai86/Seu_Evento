@@ -39,7 +39,8 @@ export default auth((req) => {
   }
 
   // ── 2. ROTEAMENTO PÓS-LOGIN ──────────────────────────────────────────────
-  if ((url.pathname === "/" || url.pathname === "/entrar") && session) {
+   const hasSessionError = !!(session as any)?.error;
+  if ((url.pathname === "/" || url.pathname === "/entrar") && session && !hasSessionError) {
     if (role === "SUPER_ADMIN") return to(url, "/admin");
 
     if (userSubdomain) {

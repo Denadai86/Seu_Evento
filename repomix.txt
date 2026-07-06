@@ -105,6 +105,7 @@ src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx
 src/app/[subdomain]/dashboard/equipe/page.tsx
 src/app/[subdomain]/dashboard/EventList.tsx
 src/app/[subdomain]/dashboard/page.tsx
+src/app/[subdomain]/entrar/magico/page.tsx
 src/app/[subdomain]/layout.tsx
 src/app/[subdomain]/live/BingoGame.tsx
 src/app/[subdomain]/live/page.tsx
@@ -156,6 +157,7 @@ src/features/event-settings/schema.ts
 src/features/tesouraria/actions.ts
 src/features/tesouraria/components/TreasuryClient.tsx
 src/lib/auth.ts
+src/lib/middleware/helpers.ts
 src/lib/permissions.ts
 src/lib/pix.ts
 src/lib/prisma.ts
@@ -173,59 +175,6 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="src/lib/server-auth.ts">
-import { auth } from "./auth"; // Ajusta para o teu caminho do NextAuth/Auth.js ou outra lib
-import  prisma  from "@/lib/prisma";
-
-/**
- * 1. Garante que existe um utilizador autenticado e devolve a sessão.
- */
-export async function requireAuth() {
-  const session = await auth();
-  if (!session || !session.user || !session.user.id) {
-    throw new Error("Não autenticado. Por favor, inicie sessão.");
-  }
-  return session.user;
-}
-
-/**
- * 2. Garante que o utilizador pertence a um Tenant específico.
- * NUNCA recebas o tenantId do client. Usa sempre o da sessão.
- */
-export async function requireTenant() {
-  const user = await requireAuth();
-  if (!user.tenantId) {
-    throw new Error("Utilizador não está associado a nenhuma organização (Tenant).");
-  }
-  return { user, tenantId: user.tenantId };
-}
-
-/**
- * 3. A Guarda de Ouro: Valida se um evento pertence de facto ao Tenant do utilizador logado.
- * Previne que um atacante passe o eventId de outra ONG no payload.
- */
-export async function requireEventOwnership(eventId: string) {
-  const { user, tenantId } = await requireTenant();
-
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    select: { id: true, tenantId: true } // Otimização: traz apenas o necessário
-  });
-
-  if (!event) {
-    throw new Error("Evento não encontrado.");
-  }
-
-  if (event.tenantId !== tenantId) {
-    // Log de segurança importante aqui (possível tentativa de invasão)
-    console.error(`[ALERTA DE SEGURANÇA] User ${user.id} tentou aceder ao evento ${eventId} do tenant ${event.tenantId}`);
-    throw new Error("Acesso negado. Este evento não pertence à sua organização.");
-  }
-
-  return { user, tenantId, event };
-}
-</file>
 
 <file path=".agent.md">
 name: "SeuEvento Repo Assistant"
@@ -1726,181 +1675,6 @@ export async function nukeDatabase(password: string) {
   } catch (error) {
     console.error("Erro crítico ao resetar banco:", error);
     return { success: false, error: "Falha ao executar a limpeza do banco." };
-  }
-}
-</file>
-
-<file path="src/actions/tesouraria.ts">
-// src/actions/tesouraria.ts
-
-"use server";
-
-import prisma from "@/lib/prisma";
-import { auth } from "@/lib/auth";
-import { requireTenant } from "@/lib/requireTenant";
-import { revalidatePath } from "next/cache";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FUNÇÃO AUXILIAR: VALIDAÇÃO DE SEGURANÇA (DRY - Don't Repeat Yourself)
-// ─────────────────────────────────────────────────────────────────────────────
-async function requireEventAccess(eventId: string) {
-  const tenantId = await requireTenant();
-  
-  // Busca o evento para garantir que pertence à ONG atual e retorna dados úteis (como o preço)
-  const event = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
-    select: { id: true, ticketPrice: true }
-  });
-
-  if (!event) {
-    throw new Error("Acesso negado. Evento não encontrado ou não pertence à sua organização.");
-  }
-
-  return event;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ATRIBUIR CARTELAS PARA O VENDEDOR (STAFF)
-// ─────────────────────────────────────────────────────────────────────────────
-export async function assignCardsToStaff(eventId: string, eventStaffId: string, codes: string[]) {
-  try {
-    // 🛡️ SEGURANÇA: Garante que o evento pertence ao tenant logado
-    await requireEventAccess(eventId);
-
-    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
-
-    // Busca apenas cartelas que existem no evento e estão LIVRES
-    const availableCards = await prisma.card.findMany({
-      where: {
-        eventId,
-        shortId: { in: codes },
-        eventStaffId: null,
-      },
-      select: { id: true, shortId: true },
-    });
-
-    if (availableCards.length === 0) {
-      return { success: false, error: "Nenhuma cartela livre encontrada com os códigos informados." };
-    }
-
-    const cardIds = availableCards.map(c => c.id);
-
-    // Atualiza em lote (MUITO mais rápido que fazer um por um)
-    await prisma.card.updateMany({
-      where: { id: { in: cardIds } },
-      data: { eventStaffId },
-    });
-
-    revalidatePath(`/dashboard/${eventId}/tesouraria`);
-    return { success: true, count: cardIds.length };
-  } catch (error: any) {
-    console.error("[ASSIGN_CARDS_ERROR]", error);
-    return { success: false, error: error.message };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DEVOLVER CARTELAS DO VENDEDOR (STAFF) PARA A TESOURARIA
-// ─────────────────────────────────────────────────────────────────────────────
-export async function returnCardsFromStaff(eventId: string, eventStaffId: string, codes: string[]) {
-  try {
-    // 🛡️ SEGURANÇA: Garante que o evento pertence ao tenant logado
-    await requireEventAccess(eventId);
-
-    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
-
-    // Busca cartelas que estão com ESSE vendedor e NÃO foram pagas
-    const returnableCards = await prisma.card.findMany({
-      where: {
-        eventId,
-        eventStaffId,
-        shortId: { in: codes },
-        isPaid: false, // Regra de Ouro: Cartela paga não volta pro estoque!
-      },
-      select: { id: true },
-    });
-
-    if (returnableCards.length === 0) {
-      return { success: false, error: "Nenhuma cartela válida para devolução (ou já foram pagas)." };
-    }
-
-    const cardIds = returnableCards.map(c => c.id);
-
-    // Remove o vínculo (volta pra fábrica)
-    await prisma.card.updateMany({
-      where: { id: { in: cardIds } },
-      data: { eventStaffId: null },
-    });
-
-    revalidatePath(`/dashboard/${eventId}/tesouraria`);
-    return { success: true, count: cardIds.length };
-  } catch (error: any) {
-    console.error("[RETURN_CARDS_ERROR]", error);
-    return { success: false, error: error.message };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// REGISTRAR PAGAMENTO DE CARTELAS NA TESOURARIA (FECHAMENTO DE CAIXA)
-// ─────────────────────────────────────────────────────────────────────────────
-export async function registerCardPayment(eventId: string, eventStaffId: string, codes: string[]) {
-  try {
-    const session = await auth();
-    if (!session?.user?.id) throw new Error("Usuário não autenticado.");
-
-    // 🛡️ SEGURANÇA: Retorna o evento apenas se pertencer ao tenant e traz o preço atual da cartela
-    const event = await requireEventAccess(eventId);
-
-    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
-
-    // Busca as cartelas que estão com ESSE voluntário e ainda NÃO foram pagas
-    const unpaidCards = await prisma.card.findMany({
-      where: {
-        eventId,
-        eventStaffId,
-        shortId: { in: codes },
-        isPaid: false,
-      },
-      select: { id: true },
-    });
-
-    if (unpaidCards.length === 0) {
-      return { success: false, error: "Nenhuma cartela pendente encontrada com os códigos informados." };
-    }
-
-    const cardIds = unpaidCards.map(c => c.id);
-    
-    // 🧮 CÁLCULO FINANCEIRO: Quantidade de cartelas * Preço do Evento
-    const totalAmountInCents = cardIds.length * event.ticketPrice;
-
-    // ⚠️ CORREÇÃO CRÍTICA (Item 12): Transação ACID adaptada ao seu Schema Prisma Real
-    await prisma.$transaction(async (tx) => {
-      // 1. Baixa as cartelas
-      await tx.card.updateMany({
-        where: { id: { in: cardIds } },
-        data: { 
-          isSold: true, 
-          isPaid: true 
-        },
-      });
-
-      // 2. Cria a Transação vinculando ao EventStaff
-      // O TypeScript agora ficará feliz, pois os campos batem 100% com o schema!
-      await tx.transaction.create({
-        data: {
-          eventId: eventId,
-          eventStaffId: eventStaffId, // O voluntário (EventStaff) a quem as cartelas pertenciam
-          amount: totalAmountInCents, // Valor sendo inserido
-          method: "CASH", // Assumimos dinheiro espécie no acerto direto de tesouraria
-        }
-      });
-    });
-
-    revalidatePath(`/dashboard/${eventId}/tesouraria`);
-    return { success: true, count: cardIds.length };
-  } catch (error: any) {
-    console.error("[REGISTER_PAYMENT_ERROR]", error);
-    return { success: false, error: error.message };
   }
 }
 </file>
@@ -3444,43 +3218,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {children}
       </main>
     </div>
-  );
-}
-</file>
-
-<file path="src/components/auth/LogoutButton.tsx">
-// src/components/auth/LogoutButton.tsx
-
-import { signOut } from "@/lib/auth";
-import { LogOut } from "lucide-react";
-
-interface LogoutButtonProps {
-  className?: string;
-  showText?: boolean;
-}
-
-export default function LogoutButton({ className = "", showText = true }: LogoutButtonProps) {
-  return (
-    <form
-      action={async () => {
-        "use server";
-        // Destrói a sessão no servidor e te joga com segurança para a tela de login
-        await signOut({ redirectTo: "/entrar" });
-      }}
-    >
-      <button
-        type="submit"
-        className={`flex items-center gap-2 p-2 sm:px-4 sm:py-2 bg-slate-800/50 hover:bg-red-500/10 text-slate-400 hover:text-red-400 rounded-xl transition-all font-bold text-sm border border-transparent hover:border-red-500/20 group outline-none focus:ring-2 focus:ring-red-500/20 ${className}`}
-        title="Sair da Conta"
-      >
-        <LogOut 
-          size={18} 
-          className="group-hover:scale-110 transition-transform" 
-        />
-        {/* Esconde o texto no celular (sm:inline) para não quebrar o Header */}
-        {showText && <span className="hidden sm:inline">Sair</span>}
-      </button>
-    </form>
   );
 }
 </file>
@@ -5068,6 +4805,59 @@ export const loginRateLimit = isUpstashConfigured
     };
 </file>
 
+<file path="src/lib/server-auth.ts">
+import { auth } from "./auth"; // Ajusta para o teu caminho do NextAuth/Auth.js ou outra lib
+import  prisma  from "@/lib/prisma";
+
+/**
+ * 1. Garante que existe um utilizador autenticado e devolve a sessão.
+ */
+export async function requireAuth() {
+  const session = await auth();
+  if (!session || !session.user || !session.user.id) {
+    throw new Error("Não autenticado. Por favor, inicie sessão.");
+  }
+  return session.user;
+}
+
+/**
+ * 2. Garante que o utilizador pertence a um Tenant específico.
+ * NUNCA recebas o tenantId do client. Usa sempre o da sessão.
+ */
+export async function requireTenant() {
+  const user = await requireAuth();
+  if (!user.tenantId) {
+    throw new Error("Utilizador não está associado a nenhuma organização (Tenant).");
+  }
+  return { user, tenantId: user.tenantId };
+}
+
+/**
+ * 3. A Guarda de Ouro: Valida se um evento pertence de facto ao Tenant do utilizador logado.
+ * Previne que um atacante passe o eventId de outra ONG no payload.
+ */
+export async function requireEventOwnership(eventId: string) {
+  const { user, tenantId } = await requireTenant();
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { id: true, tenantId: true } // Otimização: traz apenas o necessário
+  });
+
+  if (!event) {
+    throw new Error("Evento não encontrado.");
+  }
+
+  if (event.tenantId !== tenantId) {
+    // Log de segurança importante aqui (possível tentativa de invasão)
+    console.error(`[ALERTA DE SEGURANÇA] User ${user.id} tentou aceder ao evento ${eventId} do tenant ${event.tenantId}`);
+    throw new Error("Acesso negado. Este evento não pertence à sua organização.");
+  }
+
+  return { user, tenantId, event };
+}
+</file>
+
 <file path="src/types/next-auth.d.ts">
 import { DefaultSession } from "next-auth";
 import "next-auth/jwt";
@@ -5447,47 +5237,6 @@ Para garantir que o sistema escale sem virar um "código espaguete" e facilitar 
 *Documento atualizado automaticamente conforme o projeto evolui.*
 </file>
 
-<file path="next.config.ts">
-// next.config.ts
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  images: {
-    remotePatterns: [
-      // Vercel Blob Storage (usado por @vercel/blob para logos de tenants)
-      {
-        protocol: "https",
-        hostname: "**.vercel-storage.com",
-      },
-      // Cloudinary (usado por next-cloudinary para uploads de imagem)
-      {
-        protocol: "https",
-        hostname: "res.cloudinary.com",
-      },
-    ],
-  },
-
-  // Necessário para que Server Actions funcionem corretamente em subdomínios
-  // com domínio wildcard no Vercel. O Next.js precisa saber quais origens
-  // são permitidas para Server Actions cross-origin (CSRF protection).
-  experimental: {
-    serverActions: {
-      allowedOrigins: [
-        // Domínio raiz
-        process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br" || "seu-evento.social.br",
-        // Wildcard de subdomínios: *.acaoleve.dev.br
-        `.${process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br" || "seu-evento.social.br"}`,
-        // Desenvolvimento local
-        "localhost:3000",
-        "*.localhost:3000",
-      ],
-    },
-  },
-};
-
-export default nextConfig;
-</file>
-
 <file path="prisma.config.ts">
 // prisma.config.ts
 import "dotenv/config";
@@ -5547,140 +5296,6 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-</file>
-
-<file path="src/actions/equipe-global.ts">
-// src/actions/equipe-global.ts
-
-"use server";
-
-import prisma from "@/lib/prisma";
-import { hash } from "bcryptjs";
-import { revalidatePath } from "next/cache";
-import { requireTenant } from "@/lib/requireTenant"; // Importação crucial
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CRIAR STAFF (VENDEDOR/VOLUNTÁRIO)
-// ─────────────────────────────────────────────────────────────────────────────
-// ⚠️ MUDANÇA DE ASSINATURA: tenantId removido dos parâmetros!
-export async function createTenantStaff(name: string) {
-  try {
-    // 🛡️ SEGURANÇA: O tenantId vem do servidor. Ninguém consegue forjar.
-    const tenantId = await requireTenant();
-
-    const baseUsername = name.split(" ")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const username = `${baseUsername}${randomSuffix}`;
-    const pin = Math.floor(100000 + Math.random() * 900000).toString();
-    const hashedPin = await hash(pin, 12);
-
-    await prisma.user.create({
-      data: {
-        name: name.trim(),
-        username: username.toUpperCase(),
-        password: hashedPin,
-        role: "STAFF",
-        tenantId: tenantId, // Vinculação garantida ao tenant correto
-      },
-    });
-
-    revalidatePath("/dashboard/equipe");
-    return { success: true, username: username.toUpperCase(), pin };
-  } catch (error: any) {
-    console.error("[CREATE_STAFF_ERROR]", error);
-    return { success: false, error: error.message };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VINCULAR/DESVINCULAR STAFF DE UM EVENTO ESPECÍFICO
-// ─────────────────────────────────────────────────────────────────────────────
-// ⚠️ MUDANÇA DE ASSINATURA: tenantId removido dos parâmetros!
-export async function toggleStaffInEvent(
-  userId: string,
-  eventId: string,
-  isAssigned: boolean,
-  permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean }
-) {
-  try {
-    const tenantId = await requireTenant();
-
-    // 🛡️ SEGURANÇA DUPLA: Temos que garantir que tanto o Evento quanto o Usuário pertencem à ONG logada
-    const [eventExists, userExists] = await Promise.all([
-      prisma.event.findFirst({ where: { id: eventId, tenantId } }),
-      prisma.user.findFirst({ where: { id: userId, tenantId } })
-    ]);
-
-    if (!eventExists) throw new Error("Evento não encontrado ou acesso negado.");
-    if (!userExists) throw new Error("Usuário não encontrado ou não pertence à sua equipe.");
-
-    if (!isAssigned) {
-      await prisma.eventStaff.deleteMany({
-        where: { userId, eventId }, // Já validamos a posse acima, então isso é seguro
-      });
-    } else {
-      // Como você mencionou que pode não haver unique constraint, mantive a sua lógica,
-      // mas agora ela opera sob o guarda-chuva de segurança do servidor.
-      const updated = await prisma.eventStaff.updateMany({
-        where: { userId, eventId },
-        data: {
-          canSell: permissions.canSell,
-          canOperate: permissions.canOperate,
-          canVerify: permissions.canVerify,
-        },
-      });
-
-      if (updated.count === 0) {
-        await prisma.eventStaff.create({
-          data: {
-            userId,
-            eventId,
-            canSell: permissions.canSell,
-            canOperate: permissions.canOperate,
-            canVerify: permissions.canVerify,
-          },
-        });
-      }
-    }
-
-    revalidatePath("/dashboard/equipe");
-    return { success: true };
-  } catch (error: any) {
-    console.error("[TOGGLE_STAFF_ERROR]", error);
-    return { success: false, error: error.message };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RESETAR PIN DE UM MEMBRO DA EQUIPE
-// ─────────────────────────────────────────────────────────────────────────────
-export async function resetGlobalStaffPin(userId: string) {
-  try {
-    const tenantId = await requireTenant();
-
-    // 🛡️ SEGURANÇA: Impede que o Admin da ONG 'A' resete a senha do usuário da ONG 'B'
-    const userToReset = await prisma.user.findFirst({
-      where: { id: userId, tenantId }
-    });
-
-    if (!userToReset) {
-      throw new Error("Acesso negado. O usuário não pertence à sua organização.");
-    }
-
-    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
-    const hashedPin = await hash(newPin, 12);
-
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: { password: hashedPin },
-    });
-
-    return { success: true, newPin, username: user.username };
-  } catch (error: any) {
-    console.error("[RESET_PIN_ERROR]", error);
-    return { success: false, error: error.message };
-  }
-}
 </file>
 
 <file path="src/actions/finance.ts">
@@ -5750,6 +5365,181 @@ export async function getEventFinanceStats(eventId: string): Promise<FinanceStat
       };
     }),
   };
+}
+</file>
+
+<file path="src/actions/tesouraria.ts">
+// src/actions/tesouraria.ts
+
+"use server";
+
+import prisma from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { requireTenant } from "@/lib/requireTenant";
+import { revalidatePath } from "next/cache";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNÇÃO AUXILIAR: VALIDAÇÃO DE SEGURANÇA (DRY - Don't Repeat Yourself)
+// ─────────────────────────────────────────────────────────────────────────────
+async function requireEventAccess(eventId: string) {
+  const tenantId = await requireTenant();
+  
+  // Busca o evento para garantir que pertence à ONG atual e retorna dados úteis (como o preço)
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenantId },
+    select: { id: true, ticketPrice: true }
+  });
+
+  if (!event) {
+    throw new Error("Acesso negado. Evento não encontrado ou não pertence à sua organização.");
+  }
+
+  return event;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATRIBUIR CARTELAS PARA O VENDEDOR (STAFF)
+// ─────────────────────────────────────────────────────────────────────────────
+export async function assignCardsToStaff(eventId: string, eventStaffId: string, codes: string[]) {
+  try {
+    // 🛡️ SEGURANÇA: Garante que o evento pertence ao tenant logado
+    await requireEventAccess(eventId);
+
+    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
+
+    // Busca apenas cartelas que existem no evento e estão LIVRES
+    const availableCards = await prisma.card.findMany({
+      where: {
+        eventId,
+        shortId: { in: codes },
+        eventStaffId: null,
+      },
+      select: { id: true, shortId: true },
+    });
+
+    if (availableCards.length === 0) {
+      return { success: false, error: "Nenhuma cartela livre encontrada com os códigos informados." };
+    }
+
+    const cardIds = availableCards.map(c => c.id);
+
+    // Atualiza em lote (MUITO mais rápido que fazer um por um)
+    await prisma.card.updateMany({
+      where: { id: { in: cardIds } },
+      data: { eventStaffId },
+    });
+
+    revalidatePath(`/dashboard/${eventId}/tesouraria`);
+    return { success: true, count: cardIds.length };
+  } catch (error: any) {
+    console.error("[ASSIGN_CARDS_ERROR]", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEVOLVER CARTELAS DO VENDEDOR (STAFF) PARA A TESOURARIA
+// ─────────────────────────────────────────────────────────────────────────────
+export async function returnCardsFromStaff(eventId: string, eventStaffId: string, codes: string[]) {
+  try {
+    // 🛡️ SEGURANÇA: Garante que o evento pertence ao tenant logado
+    await requireEventAccess(eventId);
+
+    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
+
+    // Busca cartelas que estão com ESSE vendedor e NÃO foram pagas
+    const returnableCards = await prisma.card.findMany({
+      where: {
+        eventId,
+        eventStaffId,
+        shortId: { in: codes },
+        isPaid: false, // Regra de Ouro: Cartela paga não volta pro estoque!
+      },
+      select: { id: true },
+    });
+
+    if (returnableCards.length === 0) {
+      return { success: false, error: "Nenhuma cartela válida para devolução (ou já foram pagas)." };
+    }
+
+    const cardIds = returnableCards.map(c => c.id);
+
+    // Remove o vínculo (volta pra fábrica)
+    await prisma.card.updateMany({
+      where: { id: { in: cardIds } },
+      data: { eventStaffId: null },
+    });
+
+    revalidatePath(`/dashboard/${eventId}/tesouraria`);
+    return { success: true, count: cardIds.length };
+  } catch (error: any) {
+    console.error("[RETURN_CARDS_ERROR]", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGISTRAR PAGAMENTO DE CARTELAS NA TESOURARIA (FECHAMENTO DE CAIXA)
+// ─────────────────────────────────────────────────────────────────────────────
+export async function registerCardPayment(eventId: string, eventStaffId: string, codes: string[]) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) throw new Error("Usuário não autenticado.");
+
+    // 🛡️ SEGURANÇA: Retorna o evento apenas se pertencer ao tenant e traz o preço atual da cartela
+    const event = await requireEventAccess(eventId);
+
+    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
+
+    // Busca as cartelas que estão com ESSE voluntário e ainda NÃO foram pagas
+    const unpaidCards = await prisma.card.findMany({
+      where: {
+        eventId,
+        eventStaffId,
+        shortId: { in: codes },
+        isPaid: false,
+      },
+      select: { id: true },
+    });
+
+    if (unpaidCards.length === 0) {
+      return { success: false, error: "Nenhuma cartela pendente encontrada com os códigos informados." };
+    }
+
+    const cardIds = unpaidCards.map(c => c.id);
+    
+    // 🧮 CÁLCULO FINANCEIRO: Quantidade de cartelas * Preço do Evento
+    const totalAmountInCents = cardIds.length * event.ticketPrice;
+
+    // ⚠️ CORREÇÃO CRÍTICA (Item 12): Transação ACID adaptada ao seu Schema Prisma Real
+    await prisma.$transaction(async (tx) => {
+      // 1. Baixa as cartelas
+      await tx.card.updateMany({
+        where: { id: { in: cardIds } },
+        data: { 
+          isSold: true, 
+          isPaid: true 
+        },
+      });
+
+      // 2. Cria a Transação vinculando ao EventStaff
+      // O TypeScript agora ficará feliz, pois os campos batem 100% com o schema!
+      await tx.transaction.create({
+        data: {
+          eventId: eventId,
+          eventStaffId: eventStaffId, // O voluntário (EventStaff) a quem as cartelas pertenciam
+          amount: totalAmountInCents, // Valor sendo inserido
+          method: "CASH", // Assumimos dinheiro espécie no acerto direto de tesouraria
+        }
+      });
+    });
+
+    revalidatePath(`/dashboard/${eventId}/tesouraria`);
+    return { success: true, count: cardIds.length };
+  } catch (error: any) {
+    console.error("[REGISTER_PAYMENT_ERROR]", error);
+    return { success: false, error: error.message };
+  }
 }
 </file>
 
@@ -6126,221 +5916,6 @@ export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: 
 }
 </file>
 
-<file path="src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx">
-// src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx
-"use client";
-
-import { useState, useTransition } from "react";
-import { createTenantStaff, toggleStaffInEvent, resetGlobalStaffPin } from "@/actions/equipe-global";
-import { UserPlus, Settings2, Key, CheckCircle, Ticket, Mic, Shield } from "lucide-react";
-import { useRouter } from "next/navigation";
-
-type EventType = { id: string; name: string; isActive: boolean };
-type StaffEventType = { eventId: string; canSell: boolean; canOperate: boolean; canVerify: boolean };
-type StaffMemberType = { id: string; name: string | null; username: string | null; events: StaffEventType[] };
-
-export default function GlobalStaffClient({ staffMembers, events, tenantId }: { staffMembers: StaffMemberType[], events: EventType[], tenantId: string }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newStaffName, setNewStaffName] = useState("");
-  const [credentialsModal, setCredentialsModal] = useState<{ username: string; pin: string } | null>(null);
-  
-  // Controle do Modal de Eventos
-  const [activeStaffModal, setActiveStaffModal] = useState<StaffMemberType | null>(null);
-
-  const handleAddStaff = (e: React.FormEvent) => {
-    e.preventDefault();
-    startTransition(async () => {
-      const res = await createTenantStaff(tenantId, newStaffName);
-      if (res.success && res.pin) {
-        setNewStaffName("");
-        setShowAddModal(false);
-        setCredentialsModal({ username: res.username!, pin: res.pin });
-        router.refresh();
-      } else {
-        alert(res.error);
-      }
-    });
-  };
-
-  const handleResetPin = (userId: string, name: string) => {
-    if (!confirm(`Gerar novo PIN para ${name}?`)) return;
-    startTransition(async () => {
-      const res = await resetGlobalStaffPin(userId);
-      if (res.success && res.newPin) {
-        setCredentialsModal({ username: res.username!, pin: res.newPin });
-      } else {
-        alert(res.error);
-      }
-    });
-  };
-
-  const handleEventToggle = (userId: string, eventId: string, currentAssigned: boolean, currentPerms: any) => {
-    startTransition(async () => {
-      // Se não estava no evento, ativa com permissão de venda padrão. Se já estava, remove.
-      const newAssigned = !currentAssigned;
-      const perms = newAssigned ? { canSell: true, canOperate: false, canVerify: false } : { canSell: false, canOperate: false, canVerify: false };
-      
-      await toggleStaffInEvent(tenantId, userId, eventId, newAssigned, perms);
-      router.refresh();
-      // Atualiza o estado do modal localmente para ser instantâneo
-      if (activeStaffModal) {
-        const updatedEvents = newAssigned 
-          ? [...activeStaffModal.events, { eventId, ...perms }]
-          : activeStaffModal.events.filter(e => e.eventId !== eventId);
-        setActiveStaffModal({ ...activeStaffModal, events: updatedEvents });
-      }
-    });
-  };
-
-  const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify', currentPerms: any) => {
-    startTransition(async () => {
-      const updatedPerms = { ...currentPerms, [permKey]: !currentPerms[permKey] };
-      await toggleStaffInEvent(tenantId, userId, eventId, true, updatedPerms);
-      router.refresh();
-      
-      if (activeStaffModal) {
-        const updatedEvents = activeStaffModal.events.map(e => e.eventId === eventId ? { ...e, ...updatedPerms } : e);
-        setActiveStaffModal({ ...activeStaffModal, events: updatedEvents });
-      }
-    });
-  };
-
-  return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-bold text-slate-300">Equipe Cadastrada</h2>
-        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-bold transition shadow-lg shadow-blue-900/20">
-          <UserPlus size={18} /> Novo Voluntário
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {staffMembers.map((staff) => (
-          <div key={staff.id} className="bg-[#111827] border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-blue-500/50 transition">
-            <div>
-              <h3 className="text-lg font-black text-white">{staff.name}</h3>
-              <p className="text-sm font-mono text-blue-400 mb-4">@{staff.username}</p>
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-black/40 px-3 py-1.5 rounded-lg w-max mb-6">
-                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                Ativo em {staff.events.length} evento(s)
-              </div>
-            </div>
-            
-            <div className="flex gap-2 border-t border-slate-800 pt-4">
-              <button 
-                onClick={() => setActiveStaffModal(staff)}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
-              >
-                <Settings2 size={16} /> Gerenciar Eventos
-              </button>
-              <button 
-                onClick={() => handleResetPin(staff.id, staff.name!)}
-                className="p-2 bg-slate-800 hover:bg-amber-900/40 text-amber-500 rounded-xl transition" title="Resetar PIN"
-              >
-                <Key size={18} />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* MODAL: GERENCIAR EVENTOS DO VOLUNTÁRIO */}
-      {activeStaffModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-slate-700 rounded-3xl p-6 w-full max-w-2xl relative max-h-[85vh] flex flex-col">
-            <button onClick={() => setActiveStaffModal(null)} className="absolute top-6 right-6 text-slate-400 hover:text-white font-black text-xl">X</button>
-            
-            <h3 className="text-2xl font-black text-white mb-1">Permissões de {activeStaffModal.name}</h3>
-            <p className="text-slate-400 text-sm mb-6">Ligue o voluntário no evento desejado e defina o que ele pode fazer.</p>
-
-            <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
-              {events.map(event => {
-                const staffEvent = activeStaffModal.events.find(e => e.eventId === event.id);
-                const isAssigned = !!staffEvent;
-
-                return (
-                  <div key={event.id} className={`p-5 rounded-2xl border transition-all ${isAssigned ? 'bg-blue-900/10 border-blue-500/30' : 'bg-black/40 border-slate-800 opacity-60 hover:opacity-100'}`}>
-                    <div className="flex justify-between items-center mb-4">
-                      <p className="font-bold text-white text-lg">{event.name} {event.isActive && <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-md ml-2 align-middle">ATIVO</span>}</p>
-                      
-                      {/* TOGGLE PRINCIPAL: PARTICIPA DO EVENTO? */}
-                      <button 
-                        disabled={isPending}
-                        onClick={() => handleEventToggle(activeStaffModal.id, event.id, isAssigned, staffEvent)}
-                        className={`px-4 py-2 rounded-xl text-xs font-black transition ${isAssigned ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
-                      >
-                        {isAssigned ? 'REMOVER DO EVENTO' : '+ INCLUIR NO EVENTO'}
-                      </button>
-                    </div>
-
-                    {/* TOGGLES DE PERMISSÃO */}
-                    {isAssigned && (
-                      <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800">
-                        <button 
-                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canSell', staffEvent)}
-                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canSell ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
-                        >
-                          <Ticket size={16} /> Vender (PDV)
-                        </button>
-                        <button 
-                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canOperate', staffEvent)}
-                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canOperate ? 'bg-violet-600/20 border-violet-500 text-violet-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
-                        >
-                          <Mic size={16} /> Palco
-                        </button>
-                        <button 
-                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canVerify', staffEvent)}
-                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canVerify ? 'bg-amber-600/20 border-amber-500 text-amber-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
-                        >
-                          <Shield size={16} /> Fiscal
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {events.length === 0 && <p className="text-center text-slate-500 py-10">Crie um evento primeiro para poder alocar a equipe.</p>}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* OUTROS MODAIS (NOVO STAFF E PIN GERADO) MANTIDOS IGUAIS... */}
-      {showAddModal && (
-         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-         <div className="bg-[#111827] rounded-3xl p-6 w-full max-w-md relative border border-slate-800">
-           <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 text-slate-400">X</button>
-           <h3 className="text-xl font-bold text-white mb-4">Novo Voluntário</h3>
-           <form onSubmit={handleAddStaff}>
-             <input required value={newStaffName} onChange={(e) => setNewStaffName(e.target.value)} className="w-full p-4 bg-black border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 mb-4" placeholder="Nome Completo" />
-             <button disabled={isPending} type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl disabled:opacity-50">Confirmar e Gerar Acesso</button>
-           </form>
-         </div>
-       </div>
-      )}
-
-      {credentialsModal && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-emerald-500/30 rounded-3xl p-8 w-full max-w-sm text-center shadow-2xl">
-            <div className="mx-auto w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6">
-              <CheckCircle className="text-emerald-500" size={48} />
-            </div>
-            <h3 className="text-2xl font-black text-white mb-2">Credenciais Geradas!</h3>
-            <div className="bg-black rounded-2xl p-6 mb-8 text-left space-y-4 border border-slate-800">
-              <div><p className="text-xs uppercase text-slate-500 mb-1">USUÁRIO</p><p className="font-mono text-xl font-bold text-white">{credentialsModal.username}</p></div>
-              <div><p className="text-xs uppercase text-slate-500 mb-1">SENHA (PIN)</p><p className="font-mono text-4xl font-black text-emerald-400 tracking-widest">{credentialsModal.pin}</p></div>
-            </div>
-            <button onClick={() => setCredentialsModal(null)} className="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-bold text-white">Entendi, Fechar</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-</file>
-
 <file path="src/app/[subdomain]/dashboard/equipe/page.tsx">
 // src/app/[subdomain]/dashboard/equipe/page.tsx
 import prisma from "@/lib/prisma";
@@ -6479,6 +6054,43 @@ body {
 }
 </file>
 
+<file path="src/components/auth/LogoutButton.tsx">
+// src/components/auth/LogoutButton.tsx
+
+import { signOut } from "@/lib/auth";
+import { LogOut } from "lucide-react";
+
+interface LogoutButtonProps {
+  className?: string;
+  showText?: boolean;
+}
+
+export default function LogoutButton({ className = "", showText = true }: LogoutButtonProps) {
+  return (
+    <form
+      action={async () => {
+        "use server";
+        // Destrói a sessão no servidor e te joga com segurança para a tela de login
+        await signOut({ redirectTo: "/entrar" });
+      }}
+    >
+      <button
+        type="submit"
+        className={`flex items-center gap-2 p-2 sm:px-4 sm:py-2 bg-slate-800/50 hover:bg-red-500/10 text-slate-400 hover:text-red-400 rounded-xl transition-all font-bold text-sm border border-transparent hover:border-red-500/20 group outline-none focus:ring-2 focus:ring-red-500/20 ${className}`}
+        title="Sair da Conta"
+      >
+        <LogOut 
+          size={18} 
+          className="group-hover:scale-110 transition-transform" 
+        />
+        {/* Esconde o texto no celular (sm:inline) para não quebrar o Header */}
+        {showText && <span className="hidden sm:inline">Sair</span>}
+      </button>
+    </form>
+  );
+}
+</file>
+
 <file path="src/config/site.ts">
 import link from "next/link";
 
@@ -6507,6 +6119,235 @@ export const siteConfig = {
     terms: "/termos",
   },
 } as const;
+</file>
+
+<file path="src/lib/middleware/helpers.ts">
+//src/lib/middleware/helpers.ts
+
+import { NextURL } from "next/dist/server/web/next-url";
+import { NextResponse } from "next/server";
+
+export const isLocalHost = (hostname: string) => hostname.includes("localhost");
+
+export const getRootDomain = () => {
+  let root = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
+  return root.replace(/^https?:\/\//, "").replace(/\/$/, "");
+};
+
+// 🔥 HELPER DE LOGIN COM PROTEÇÃO CONTRA OPEN REDIRECT
+export const toLogin = (url: NextURL, error?: string, callbackUrl?: string) => {
+  const next = url.clone();
+  const isLocal = isLocalHost(url.hostname);
+
+  // Força o redirecionamento sempre para a raiz (evita que o login abra no subdomínio)
+  next.hostname = isLocal ? "localhost" : getRootDomain();
+  next.port = isLocal ? "3000" : "";
+  next.pathname = "/entrar";
+
+  if (error) {
+    next.searchParams.set("error", error);
+  }
+
+  if (callbackUrl) {
+    // 🛡️ Segurança: Evita Open Redirect. Só redireciona se for uma rota interna (começa com /)
+    if (callbackUrl.startsWith("/")) {
+      next.searchParams.set("callbackUrl", callbackUrl);
+    }
+  }
+
+  return NextResponse.redirect(next);
+};
+
+// 🔥 HELPER PARA REDIRECIONAR PARA SUBDOMÍNIOS
+export const toSubdomain = (url: NextURL, subdomain: string, pathname: string) => {
+  const next = url.clone();
+  const isLocal = isLocalHost(url.hostname);
+  
+  next.pathname = pathname;
+  next.host = isLocal ? `${subdomain}.localhost:3000` : `${subdomain}.${getRootDomain()}`;
+  
+  return NextResponse.redirect(next);
+};
+
+// 🔥 HELPER DE REDIRECT INTERNO SIMPLES
+export const to = (url: NextURL, pathname: string) => {
+  const next = url.clone();
+  next.pathname = pathname;
+  return NextResponse.redirect(next);
+};
+</file>
+
+<file path="next.config.ts">
+// next.config.ts
+import type { NextConfig } from "next";
+
+const rootDomain = (process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br")
+  .replace(/^https?:\/\//, "")
+  .replace(/\/$/, "");
+
+const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**.vercel-storage.com",
+      },
+      {
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
+    ],
+  },
+
+  experimental: {
+    serverActions: {
+      // Permite Server Actions vindas de qualquer subdomínio do rootDomain.
+      // Necessário porque o middleware reescreve sjose.acaoleve.dev.br/live
+      // para acaoleve.dev.br/sjose/live internamente, causando mismatch de Origin.
+      allowedOrigins: [
+        rootDomain,
+        `*.${rootDomain}`,
+        "localhost:3000",
+      ],
+    },
+  },
+};
+
+export default nextConfig;
+</file>
+
+<file path="src/actions/equipe-global.ts">
+// src/actions/equipe-global.ts
+
+"use server";
+
+import prisma from "@/lib/prisma";
+import { hash } from "bcryptjs";
+import { revalidatePath } from "next/cache";
+import { requireTenant } from "@/lib/requireTenant"; // Importação crucial
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRIAR STAFF (VENDEDOR/VOLUNTÁRIO)
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ MUDANÇA DE ASSINATURA: tenantId removido dos parâmetros!
+export async function createTenantStaff(name: string) {
+  try {
+    // 🛡️ SEGURANÇA: O tenantId vem do servidor. Ninguém consegue forjar.
+    const tenantId = await requireTenant();
+
+    const baseUsername = name.split(" ")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const username = `${baseUsername}${randomSuffix}`;
+    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedPin = await hash(pin, 12);
+
+    await prisma.user.create({
+      data: {
+        name: name.trim(),
+        username: username.toUpperCase(),
+        password: hashedPin,
+        role: "STAFF",
+        tenantId: tenantId, // Vinculação garantida ao tenant correto
+      },
+    });
+
+    revalidatePath("/dashboard/equipe");
+    return { success: true, username: username.toUpperCase(), pin };
+  } catch (error: any) {
+    console.error("[CREATE_STAFF_ERROR]", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VINCULAR/DESVINCULAR STAFF DE UM EVENTO ESPECÍFICO
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ MUDANÇA DE ASSINATURA: tenantId removido dos parâmetros!
+export async function toggleStaffInEvent(
+  userId: string,
+  eventId: string,
+  isAssigned: boolean,
+  permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean }
+) {
+  try {
+    const tenantId = await requireTenant();
+
+    // 🛡️ SEGURANÇA DUPLA: Temos que garantir que tanto o Evento quanto o Usuário pertencem à ONG logada
+    const [eventExists, userExists] = await Promise.all([
+      prisma.event.findFirst({ where: { id: eventId, tenantId } }),
+      prisma.user.findFirst({ where: { id: userId, tenantId } })
+    ]);
+
+    if (!eventExists) throw new Error("Evento não encontrado ou acesso negado.");
+    if (!userExists) throw new Error("Usuário não encontrado ou não pertence à sua equipe.");
+
+    if (!isAssigned) {
+      await prisma.eventStaff.deleteMany({
+        where: { userId, eventId }, // Já validamos a posse acima, então isso é seguro
+      });
+    } else {
+      // Como você mencionou que pode não haver unique constraint, mantive a sua lógica,
+      // mas agora ela opera sob o guarda-chuva de segurança do servidor.
+      const updated = await prisma.eventStaff.updateMany({
+        where: { userId, eventId },
+        data: {
+          canSell: permissions.canSell,
+          canOperate: permissions.canOperate,
+          canVerify: permissions.canVerify,
+        },
+      });
+
+      if (updated.count === 0) {
+        await prisma.eventStaff.create({
+          data: {
+            userId,
+            eventId,
+            canSell: permissions.canSell,
+            canOperate: permissions.canOperate,
+            canVerify: permissions.canVerify,
+          },
+        });
+      }
+    }
+
+    revalidatePath("/dashboard/equipe");
+    return { success: true };
+  } catch (error: any) {
+    console.error("[TOGGLE_STAFF_ERROR]", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESETAR PIN DE UM MEMBRO DA EQUIPE
+// ─────────────────────────────────────────────────────────────────────────────
+export async function resetGlobalStaffPin(userId: string) {
+  try {
+    const tenantId = await requireTenant();
+
+    // 🛡️ SEGURANÇA: Impede que o Admin da ONG 'A' resete a senha do usuário da ONG 'B'
+    const userToReset = await prisma.user.findFirst({
+      where: { id: userId, tenantId }
+    });
+
+    if (!userToReset) {
+      throw new Error("Acesso negado. O usuário não pertence à sua organização.");
+    }
+
+    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedPin = await hash(newPin, 12);
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPin },
+    });
+
+    return { success: true, newPin, username: user.username };
+  } catch (error: any) {
+    console.error("[RESET_PIN_ERROR]", error);
+    return { success: false, error: error.message };
+  }
+}
 </file>
 
 <file path="src/app/[subdomain]/dashboard/[eventId]/PrizeManager.tsx">
@@ -6952,6 +6793,234 @@ export default async function RelatorioPage({
         </div>
 
       </main>
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx">
+// src/app/[subdomain]/dashboard/equipe/GlobalStaffClient.tsx
+"use client";
+
+import { useState, useTransition } from "react";
+import { createTenantStaff, toggleStaffInEvent, resetGlobalStaffPin } from "@/actions/equipe-global";
+import { UserPlus, Settings2, Key, CheckCircle, Ticket, Mic, Shield } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+type EventType = { id: string; name: string; isActive: boolean };
+type StaffEventType = { eventId: string; canSell: boolean; canOperate: boolean; canVerify: boolean };
+type StaffMemberType = { id: string; name: string | null; username: string | null; events: StaffEventType[] };
+
+// Nota: tenantId foi mantido nas props caso o componente pai ainda o envie, mas não o usamos mais para chamadas seguras.
+export default function GlobalStaffClient({ staffMembers, events, tenantId }: { staffMembers: StaffMemberType[], events: EventType[], tenantId: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newStaffName, setNewStaffName] = useState("");
+  const [credentialsModal, setCredentialsModal] = useState<{ username: string; pin: string } | null>(null);
+  
+  // Controle do Modal de Eventos
+  const [activeStaffModal, setActiveStaffModal] = useState<StaffMemberType | null>(null);
+
+  const handleAddStaff = (e: React.FormEvent) => {
+    e.preventDefault();
+    startTransition(async () => {
+      // 🛡️ Ajuste: tenantId removido. Apenas o nome é enviado.
+      const res = await createTenantStaff(newStaffName);
+      if (res.success && res.pin) {
+        setNewStaffName("");
+        setShowAddModal(false);
+        setCredentialsModal({ username: res.username!, pin: res.pin });
+        router.refresh();
+      } else {
+        alert(res.error);
+      }
+    });
+  };
+
+  const handleResetPin = (userId: string, name: string) => {
+    if (!confirm(`Gerar novo PIN para ${name}?`)) return;
+    startTransition(async () => {
+      const res = await resetGlobalStaffPin(userId);
+      if (res.success && res.newPin) {
+        setCredentialsModal({ username: res.username!, pin: res.newPin });
+      } else {
+        alert(res.error);
+      }
+    });
+  };
+
+  const handleEventToggle = (userId: string, eventId: string, currentAssigned: boolean) => {
+    startTransition(async () => {
+      const newAssigned = !currentAssigned;
+      const perms = newAssigned 
+        ? { canSell: true, canOperate: false, canVerify: false } 
+        : { canSell: false, canOperate: false, canVerify: false };
+      
+      // 🛡️ CORREÇÃO DE ASSINATURA: userId, eventId, isAssigned, permissions
+      await toggleStaffInEvent(userId, eventId, newAssigned, perms);
+      router.refresh();
+      
+      if (activeStaffModal) {
+        const updatedEvents = newAssigned 
+          ? [...activeStaffModal.events, { eventId, ...perms }]
+          : activeStaffModal.events.filter(e => e.eventId !== eventId);
+        setActiveStaffModal({ ...activeStaffModal, events: updatedEvents });
+      }
+    });
+  };
+
+  const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify', currentPerms: StaffEventType) => {
+    startTransition(async () => {
+      // Constrói o objeto estrito de permissões exigido pelo back-end
+      const updatedPerms = { 
+        canSell: currentPerms.canSell,
+        canOperate: currentPerms.canOperate,
+        canVerify: currentPerms.canVerify,
+        [permKey]: !currentPerms[permKey] 
+      };
+
+      // 🛡️ CORREÇÃO DE ASSINATURA: userId, eventId, isAssigned (sempre true aqui), permissions
+      await toggleStaffInEvent(userId, eventId, true, updatedPerms);
+      router.refresh();
+      
+      if (activeStaffModal) {
+        const updatedEvents = activeStaffModal.events.map(e => 
+          e.eventId === eventId ? { ...e, ...updatedPerms } : e
+        );
+        setActiveStaffModal({ ...activeStaffModal, events: updatedEvents });
+      }
+    });
+  };
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-slate-300">Equipe Cadastrada</h2>
+        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-bold transition shadow-lg shadow-blue-900/20">
+          <UserPlus size={18} /> Novo Voluntário
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {staffMembers.map((staff) => (
+          <div key={staff.id} className="bg-[#111827] border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-blue-500/50 transition">
+            <div>
+              <h3 className="text-lg font-black text-white">{staff.name}</h3>
+              <p className="text-sm font-mono text-blue-400 mb-4">@{staff.username}</p>
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-black/40 px-3 py-1.5 rounded-lg w-max mb-6">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                Ativo em {staff.events.length} evento(s)
+              </div>
+            </div>
+            
+            <div className="flex gap-2 border-t border-slate-800 pt-4">
+              <button 
+                onClick={() => setActiveStaffModal(staff)}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2"
+              >
+                <Settings2 size={16} /> Gerenciar Eventos
+              </button>
+              <button 
+                onClick={() => handleResetPin(staff.id, staff.name!)}
+                className="p-2 bg-slate-800 hover:bg-amber-900/40 text-amber-500 rounded-xl transition" title="Resetar PIN"
+              >
+                <Key size={18} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* MODAL: GERENCIAR EVENTOS DO VOLUNTÁRIO */}
+      {activeStaffModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-slate-700 rounded-3xl p-6 w-full max-w-2xl relative max-h-[85vh] flex flex-col">
+            <button onClick={() => setActiveStaffModal(null)} className="absolute top-6 right-6 text-slate-400 hover:text-white font-black text-xl">X</button>
+            
+            <h3 className="text-2xl font-black text-white mb-1">Permissões de {activeStaffModal.name}</h3>
+            <p className="text-slate-400 text-sm mb-6">Ligue o voluntário no evento desejado e defina o que ele pode fazer.</p>
+
+            <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
+              {events.map(event => {
+                const staffEvent = activeStaffModal.events.find(e => e.eventId === event.id);
+                const isAssigned = !!staffEvent;
+
+                return (
+                  <div key={event.id} className={`p-5 rounded-2xl border transition-all ${isAssigned ? 'bg-blue-900/10 border-blue-500/30' : 'bg-black/40 border-slate-800 opacity-60 hover:opacity-100'}`}>
+                    <div className="flex justify-between items-center mb-4">
+                      <p className="font-bold text-white text-lg">{event.name} {event.isActive && <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-md ml-2 align-middle">ATIVO</span>}</p>
+                      
+                      {/* TOGGLE PRINCIPAL: PARTICIPA DO EVENTO? */}
+                      <button 
+                        disabled={isPending}
+                        onClick={() => handleEventToggle(activeStaffModal.id, event.id, isAssigned)}
+                        className={`px-4 py-2 rounded-xl text-xs font-black transition ${isAssigned ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
+                      >
+                        {isAssigned ? 'REMOVER DO EVENTO' : '+ INCLUIR NO EVENTO'}
+                      </button>
+                    </div>
+
+                    {/* TOGGLES DE PERMISSÃO */}
+                    {isAssigned && staffEvent && (
+                      <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800">
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canSell', staffEvent)}
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canSell ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                        >
+                          <Ticket size={16} /> Vender (PDV)
+                        </button>
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canOperate', staffEvent)}
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canOperate ? 'bg-violet-600/20 border-violet-500 text-violet-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                        >
+                          <Mic size={16} /> Palco
+                        </button>
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canVerify', staffEvent)}
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canVerify ? 'bg-amber-600/20 border-amber-500 text-amber-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                        >
+                          <Shield size={16} /> Fiscal
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {events.length === 0 && <p className="text-center text-slate-500 py-10">Crie um evento primeiro para poder alocar a equipe.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddModal && (
+         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+         <div className="bg-[#111827] rounded-3xl p-6 w-full max-w-md relative border border-slate-800">
+           <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 text-slate-400">X</button>
+           <h3 className="text-xl font-bold text-white mb-4">Novo Voluntário</h3>
+           <form onSubmit={handleAddStaff}>
+             <input required value={newStaffName} onChange={(e) => setNewStaffName(e.target.value)} className="w-full p-4 bg-black border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 mb-4" placeholder="Nome Completo" />
+             <button disabled={isPending} type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl disabled:opacity-50">Confirmar e Gerar Acesso</button>
+           </form>
+         </div>
+       </div>
+      )}
+
+      {credentialsModal && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-emerald-500/30 rounded-3xl p-8 w-full max-w-sm text-center shadow-2xl">
+            <div className="mx-auto w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6">
+              <CheckCircle className="text-emerald-500" size={48} />
+            </div>
+            <h3 className="text-2xl font-black text-white mb-2">Credenciais Geradas!</h3>
+            <div className="bg-black rounded-2xl p-6 mb-8 text-left space-y-4 border border-slate-800">
+              <div><p className="text-xs uppercase text-slate-500 mb-1">USUÁRIO</p><p className="font-mono text-xl font-bold text-white">{credentialsModal.username}</p></div>
+              <div><p className="text-xs uppercase text-slate-500 mb-1">SENHA (PIN)</p><p className="font-mono text-4xl font-black text-emerald-400 tracking-widest">{credentialsModal.pin}</p></div>
+            </div>
+            <button onClick={() => setCredentialsModal(null)} className="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-bold text-white">Entendi, Fechar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -7735,117 +7804,6 @@ export default function VerifyClient({ eventId, shortId, validation, verifierNam
 }
 </file>
 
-<file path="src/app/entrar/page.tsx">
-// src/app/entrar/page.tsx (ou onde você centralizar a rota unificada)
-"use client";
-
-import { signIn } from "next-auth/react";
-import { useState } from "react";
-import { KeyRound, User } from "lucide-react";
-
-export default function UnifiedLogin() {
-  const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError("");
-
-    try {
-      const res = await signIn("credentials", {
-        redirect: false,
-        email: identifier.trim().toLowerCase(),
-        password: password.trim(),
-      });
-
-
-      if (res?.error) {
-        setError("Credenciais inválidas. Verifique seu acesso.");
-        setIsLoading(false);
-        return;
-      }
-
-      // Deixa o Middleware (proxy.ts) decidir para qual domínio/rota enviar
-      window.location.assign("/");
-      
-    } catch (err) {
-      setError("Erro de comunicação com o servidor.");
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0b0f14] p-4 font-sans">
-      <div className="max-w-md w-full bg-slate-900 p-8 rounded-[2rem] shadow-2xl border border-slate-800">
-        
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
-            <KeyRound size={32} />
-          </div>
-          <h1 className="text-2xl font-black text-white">Acesso à Plataforma</h1>
-          <p className="text-slate-400 text-sm mt-2">
-            Insira seu e-mail ou nome de usuário
-          </p>
-        </div>
-
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">
-              Identificação
-            </label>
-            <div className="relative">
-              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-              <input
-                type="text"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="E-mail ou Usuário"
-                required
-                disabled={isLoading}
-                autoFocus
-                className="w-full bg-black/50 border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white focus:border-emerald-500 outline-none transition-colors placeholder:text-slate-600"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">
-              Código de Acesso
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Senha ou PIN"
-              required
-              disabled={isLoading}
-              className="w-full bg-black/50 border border-slate-700 rounded-xl p-3 text-center text-xl tracking-[0.5em] text-white focus:border-emerald-500 outline-none transition-colors placeholder:text-slate-600 placeholder:text-sm placeholder:tracking-normal"
-            />
-          </div>
-
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-sm text-center font-bold animate-in fade-in">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl transition-all disabled:opacity-50 mt-4 shadow-lg shadow-emerald-900/20"
-          >
-            {isLoading ? "Validando..." : "Entrar no Sistema"}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="src/app/imprimir/page.tsx">
 // src/app/imprimir/page.tsx
 "use client";
@@ -8279,50 +8237,6 @@ export async function requireStaffForEvent(eventId: string, capability: 'canSell
 }
 </file>
 
-<file path="tsconfig.json">
-{
-  "compilerOptions": {
-    "target": "es2022",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "react-jsx",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    }
-  },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
-}
-</file>
-
 <file path="src/actions/prize.ts">
 // src/actions/prize.ts
 "use server";
@@ -8545,97 +8459,6 @@ export async function removeSponsor(sponsorId: string) {
 }
 </file>
 
-<file path="src/actions/venda.ts">
-// src/actions/venda.ts
-"use server";
-
-import prisma from "@/lib/prisma";
-import { PaymentMethod } from "@prisma/client";
-import { requireTenant, requireStaffForEvent } from "@/lib/requireTenant"; // 🔥 Importação Corrigida
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PROCESSAR VENDA EM LOTE (PDV — transação atômica)
-// ─────────────────────────────────────────────────────────────────────────────
-export async function processBatchSale(
-  eventId: string,
-  shortIds: string[],
-  method: PaymentMethod,
-  eventStaffId: string 
-) {
-  if (!shortIds || shortIds.length === 0) return { success: false, error: "Carrinho vazio." };
-
-  try {
-    const tenantId = await requireTenant();
-    
-    // 🛡️ CORREÇÃO CRÍTICA: Vazamento de Permissões
-    // Não basta estar logado. O voluntário precisa da permissão 'canSell' para ESTE evento.
-    // O requireStaffForEvent (que você mesmo criou) lança um erro se a permissão for falsa.
-    await requireStaffForEvent(eventId, 'canSell');
-
-    // 🛡️ SEGURANÇA: Garantimos que o eventStaffId enviado no payload pertence 
-    // ao usuário que está executando a action (prevenindo que o Vendedor A venda em nome do Vendedor B)
-    const staff = await prisma.eventStaff.findUnique({
-      where: { id: eventStaffId },
-      select: { userId: true }
-    });
-
-    // Se o middleware NextAuth passar um ID de sessão, vamos cruzar:
-    // NOTA: Como você não exporta a sessão diretamente aqui, o requireStaffForEvent 
-    // já buscou a sessão por baixo dos panos, o que nos garante a camada de cima.
-
-    const event = await prisma.event.findUnique({
-      where: { id: eventId },
-      select: { ticketPrice: true, isActive: true, tenantId: true, status: true },
-    });
-
-    if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido ou acesso negado." };
-    if (event.status === "ENCERRADO") return { success: false, error: "Este evento já está encerrado. O caixa encontra-se fechado." };
-    if (!event.isActive) return { success: false, error: "Evento não está ativo. O caixa foi encerrado pela administração." };
-
-    const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
-
-    await prisma.$transaction(async (tx) => {
-      const existingCards = await tx.card.findMany({
-        where: { shortId: { in: shortIds }, eventId },
-      });
-
-      if (existingCards.length !== shortIds.length) {
-        throw new Error("Uma ou mais cartelas não pertencem a este evento.");
-      }
-
-      const alreadySold = existingCards.filter((c) => c.isSold);
-      if (alreadySold.length > 0) {
-        throw new Error(
-          `Conflito! Cartelas já vendidas: ${alreadySold.map((c) => c.shortId).join(", ")}`
-        );
-      }
-
-      // Atualiza cartelas
-      await tx.card.updateMany({
-        where: { shortId: { in: shortIds } },
-        data: { isSold: true, isPaid: true, eventStaffId, price: ticketPrice },
-      });
-
-      // Registra caixa financeiro atrelado à escala do funcionário
-      await tx.transaction.createMany({
-        data: existingCards.map((card) => ({
-          eventId,
-          cardId: card.id,
-          eventStaffId,
-          amount: ticketPrice,
-          method,
-        })),
-      });
-    });
-
-    return { success: true };
-  } catch (error: any) {
-    console.error("[PROCESS_BATCH_SALE_ERROR]", error);
-    return { success: false, error: error.message || "Falha crítica ao processar carrinho." };
-  }
-}
-</file>
-
 <file path="src/app/(marketing)/page.tsx">
 // src/app/(marketing)/page.tsx
 
@@ -8823,6 +8646,56 @@ export default function GenerateCardsButton({
   <PrintOptions eventId={eventId} />
 </div>
 
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/[subdomain]/entrar/magico/page.tsx">
+//src/app/[subdomain]/entrar/magico/page.tsx
+
+"use client";
+
+import { useEffect, useState } from "react";
+import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
+
+export default function MagicoPage({
+  params,
+}: {
+  params: { subdomain: string };
+}) {
+  const searchParams = useSearchParams();
+  const token = searchParams.get("t");
+  const [status, setStatus] = useState<"loading" | "error">("loading");
+
+  useEffect(() => {
+    if (!token) {
+      setStatus("error");
+      return;
+    }
+
+    signIn("magic-token", {
+      token,
+      subdomain: params.subdomain,
+      callbackUrl: `/dashboard`,
+      redirect: true,
+    }).catch(() => setStatus("error"));
+  }, [token, params.subdomain]);
+
+  if (status === "error") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-red-500 font-semibold">
+          Link inválido ou expirado. Solicite um novo acesso.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <p className="text-gray-500">Autenticando, aguarde...</p>
     </div>
   );
 }
@@ -9152,148 +9025,283 @@ export default async function AdminPage() {
 }
 </file>
 
-<file path="src/actions/event.ts">
-// src/actions/event.ts
+<file path="src/app/entrar/page.tsx">
+// src/app/entrar/page.tsx (ou onde você centralizar a rota unificada)
 
+"use client";
+
+import { signIn } from "next-auth/react";
+import { useState, Suspense } from "react";
+import { KeyRound, User } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+
+// 📦 Dicionário Centralizado de Mensagens
+const MESSAGES: Record<string, string> = {
+  session_expired: "Sua sessão expirou por segurança. Entre novamente.",
+  AccessDenied: "Você não possui permissão para acessar esta organização.",
+  CredentialsSignin: "Credenciais inválidas. Verifique seu usuário e PIN.",
+};
+
+function LoginForm() {
+  const params = useSearchParams();
+  const callbackUrl = params.get("callbackUrl");
+  const errorParam = params.get("error");
+
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const res = await signIn("credentials", {
+        redirect: false,
+        email: identifier.trim().toLowerCase(),
+        password: password.trim(),
+      });
+
+      if (res?.error) {
+        // Usa o dicionário ou uma mensagem padrão se o NextAuth devolver algo estranho
+        setError(MESSAGES[res.error] || MESSAGES.CredentialsSignin);
+        setIsLoading(false);
+        return;
+      }
+
+      // 🔥 UX SÊNIOR: replace() limpa o login do histórico (se o usuário clicar em "Voltar", ele não cai no login de novo)
+      // E aproveita o callbackUrl para devolver o usuário para onde ele estava tentando ir.
+      window.location.replace(callbackUrl || "/");
+      
+    } catch (err) {
+      setError("Erro de comunicação com o servidor.");
+      setIsLoading(false);
+    }
+  };
+
+  // Se houver erro na URL (vindo do middleware), resgata a mensagem do dicionário
+  const urlErrorMessage = errorParam ? MESSAGES[errorParam] : null;
+
+  return (
+    <div className="max-w-md w-full bg-slate-900 p-8 rounded-[2rem] shadow-2xl border border-slate-800">
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
+          <KeyRound size={32} />
+        </div>
+        <h1 className="text-2xl font-black text-white">Acesso à Plataforma</h1>
+        <p className="text-slate-400 text-sm mt-2">Insira seu e-mail ou nome de usuário</p>
+      </div>
+
+      <form onSubmit={handleLogin} className="space-y-4">
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">
+            Identificação
+          </label>
+          <div className="relative">
+            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+            <input
+              type="text"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="E-mail ou Usuário"
+              required
+              disabled={isLoading}
+              autoFocus
+              className="w-full bg-black/50 border border-slate-700 rounded-xl py-3 pl-12 pr-4 text-white focus:border-emerald-500 outline-none transition-colors placeholder:text-slate-600"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">
+            Código de Acesso
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Senha ou PIN"
+            required
+            disabled={isLoading}
+            className="w-full bg-black/50 border border-slate-700 rounded-xl p-3 text-center text-xl tracking-[0.5em] text-white focus:border-emerald-500 outline-none transition-colors placeholder:text-slate-600 placeholder:text-sm placeholder:tracking-normal"
+          />
+        </div>
+
+        {/* Exibe o erro vindo da URL (Middleware) ou o Erro de submissão do form */}
+        {(urlErrorMessage || error) && (
+          <div className={`p-3 rounded-xl text-sm text-center font-bold animate-in fade-in ${
+            errorParam === "session_expired" 
+              ? "bg-amber-500/10 border border-amber-500/20 text-amber-400" 
+              : "bg-red-500/10 border border-red-500/20 text-red-400"
+          }`}>
+            {error || urlErrorMessage}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl transition-all disabled:opacity-50 mt-4 shadow-lg shadow-emerald-900/20"
+        >
+          {isLoading ? "Validando..." : "Entrar no Sistema"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// 🛡️ Wrapper de Suspense obrigatório no Next.js ao usar useSearchParams no client
+export default function UnifiedLogin() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#0b0f14] p-4 font-sans">
+      <Suspense fallback={<div className="text-white font-bold">Carregando painel de acesso...</div>}>
+        <LoginForm />
+      </Suspense>
+    </div>
+  );
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
+</file>
+
+<file path="src/actions/venda.ts">
+// src/actions/venda.ts
 "use server";
 
 import prisma from "@/lib/prisma";
+import { PaymentMethod } from "@prisma/client";
+import { requireTenant, requireStaffForEvent } from "@/lib/requireTenant"; // 🔥 Importação Corrigida
 import { auth } from "@/lib/auth";
-import { requireTenant } from "@/lib/requireTenant";
-import { revalidatePath } from "next/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CRIAR EVENTO
+// PROCESSAR VENDA EM LOTE (PDV — transação atômica)
 // ─────────────────────────────────────────────────────────────────────────────
-export async function createEvent(name: string) {
-  const session = await auth();
-  if (!session?.user?.tenantId) throw new Error("Não autorizado.");
-
-  const event = await prisma.event.create({
-    data: {
-      name: name.trim(),
-      tenantId: session.user.tenantId,
-      // ⚠️ CORREÇÃO DO BUG 7: O banco define default 10.00, mas o app usa centavos.
-      // Se não enviarmos nada, ele nasce cobrando R$ 0,10. Forçando R$ 10,00 (1000 centavos).
-      ticketPrice: 1000, 
-    },
-  });
-
-  revalidatePath("/dashboard");
-  return { success: true, event };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ALTERNAR STATUS DO EVENTO
-// ─────────────────────────────────────────────────────────────────────────────
-export async function toggleEventStatus(
+export async function processBatchSale(
   eventId: string,
-  newStatus: "ACTIVE" | "DRAFT" | "FINISHED"
+  shortIds: string[],
+  method: PaymentMethod,
+  eventStaffId: string 
 ) {
-  const tenantId = await requireTenant();
-
-  // 🛡️ SEGURANÇA: Valida posse. O evento DEVE pertencer ao tenant logado.
-  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
-  if (!event) return { success: false, error: "Evento não encontrado ou acesso negado." };
+  if (!shortIds || shortIds.length === 0) return { success: false, error: "Carrinho vazio." };
 
   try {
-    if (newStatus === "ACTIVE") {
-      // Garante que apenas 1 evento esteja ativo por vez (desativa os demais)
-      await prisma.$transaction([
-        prisma.event.updateMany({
-          where: { tenantId, status: "ACTIVE" },
-          data: { status: "DRAFT", isActive: false },
-        }),
-        prisma.event.update({
-          where: { id: eventId },
-          data: { status: "ACTIVE", isActive: true },
-        }),
-      ]);
-    } else {
-      await prisma.event.update({
-        where: { id: eventId },
-        data: { status: newStatus, isActive: false },
-      });
-    }
-
-    revalidatePath("/dashboard", "page");
-    return { success: true };
-  } catch (error) {
-    console.error("Erro ao alterar status do evento:", error);
-    return { success: false, error: "Falha ao alterar o status." };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ALTERAR PREÇO DA CARTELA
-// ─────────────────────────────────────────────────────────────────────────────
-export async function updateTicketPrice(eventId: string, priceInCents: number) {
-  const tenantId = await requireTenant();
-  
-  if (priceInCents < 0) throw new Error("O valor não pode ser negativo.");
-
-  // 🛡️ SEGURANÇA: O 'where' duplo garante que não altere preço de eventos de terceiros
-  const event = await prisma.event.update({
-    where: { id: eventId, tenantId },
-    data: { ticketPrice: priceInCents },
-  });
-
-  if (!event) throw new Error("Acesso negado ou evento inexistente.");
-
-  return { success: true };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MODO DEMONSTRAÇÃO
-// ─────────────────────────────────────────────────────────────────────────────
-export async function activateDemoMode(eventId: string) {
-  const tenantId = await requireTenant();
-
-  // 🛡️ SEGURANÇA: Verifica posse antes de manipular cartelas
-  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
-  if (!event) throw new Error("Acesso negado.");
-
-  await prisma.card.updateMany({
-    where: { eventId, isPaid: false },
-    data: {
-      isSold: true,
-      isPaid: true,
-      price: 0, // Marcador de demo — sem Transaction associada
-    },
-  });
-
-  return { success: true };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ATUALIZAR CHAVE PIX
-// ─────────────────────────────────────────────────────────────────────────────
-export async function updatePixKey(eventId: string, newPixKey: string) {
-  // 🛡️ CORREÇÃO CRÍTICA (Item 3 do Overview): Estava sem NENHUMA validação de Auth.
-  const tenantId = await requireTenant();
-
-  // 🛡️ SEGURANÇA: Garantir que o evento pertence ao tenant que está tentando alterar
-  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
-  if (!event) return { success: false, error: "Acesso negado. Tentativa de manipulação detectada." };
-
-  try {
-    const cleanKey = newPixKey.trim();
+    const tenantId = await requireTenant();
     
-    await prisma.event.update({
-      where: { id: eventId },
-      data: { pixKey: cleanKey === "" ? null : cleanKey },
+    // 🛡️ CORREÇÃO CRÍTICA: Vazamento de Permissões
+    // Não basta estar logado. O voluntário precisa da permissão 'canSell' para ESTE evento.
+    // O requireStaffForEvent (que você mesmo criou) lança um erro se a permissão for falsa.
+    await requireStaffForEvent(eventId, 'canSell');
+
+    // 🛡️ SEGURANÇA: Garantimos que o eventStaffId enviado no payload pertence 
+    // ao usuário que está executando a action (prevenindo que o Vendedor A venda em nome do Vendedor B)
+    const session = await auth();
+
+    const staff = await prisma.eventStaff.findUnique({
+      where: { id: eventStaffId },
+      select: { userId: true },
     });
 
-    // Atualiza a tela do dashboard e do PDV
-    // Nota: Removi o [subdomain] do revalidatePath, pois o App Router muitas vezes lida
-    // melhor com layouts genéricos dependendo da sua estrutura de pastas reais.
-    revalidatePath(`/dashboard/${eventId}`, "page");
-    revalidatePath(`/vendas`, "page");
-    
+    if (!staff || staff.userId !== session!.user.id) {
+      return { success: false, error: "Acesso negado. Você não pode vender em nome de outro vendedor." };
+    }
+
+    // Se o middleware NextAuth passar um ID de sessão, vamos cruzar:
+    // NOTA: Como você não exporta a sessão diretamente aqui, o requireStaffForEvent 
+    // já buscou a sessão por baixo dos panos, o que nos garante a camada de cima.
+
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { ticketPrice: true, isActive: true, tenantId: true, status: true },
+    });
+
+    if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido ou acesso negado." };
+    if (event.status === "ENCERRADO") return { success: false, error: "Este evento já está encerrado. O caixa encontra-se fechado." };
+    if (!event.isActive) return { success: false, error: "Evento não está ativo. O caixa foi encerrado pela administração." };
+
+    const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
+
+    await prisma.$transaction(async (tx) => {
+      const existingCards = await tx.card.findMany({
+        where: { shortId: { in: shortIds }, eventId },
+      });
+
+      if (existingCards.length !== shortIds.length) {
+        throw new Error("Uma ou mais cartelas não pertencem a este evento.");
+      }
+
+      const alreadySold = existingCards.filter((c) => c.isSold);
+      if (alreadySold.length > 0) {
+        throw new Error(
+          `Conflito! Cartelas já vendidas: ${alreadySold.map((c) => c.shortId).join(", ")}`
+        );
+      }
+
+      // Atualiza cartelas
+      await tx.card.updateMany({
+        where: { shortId: { in: shortIds } },
+        data: { isSold: true, isPaid: true, eventStaffId, price: ticketPrice },
+      });
+
+      // Registra caixa financeiro atrelado à escala do funcionário
+      await tx.transaction.createMany({
+        data: existingCards.map((card) => ({
+          eventId,
+          cardId: card.id,
+          eventStaffId,
+          amount: ticketPrice,
+          method,
+        })),
+      });
+    });
+
     return { success: true };
-  } catch (error) {
-    console.error("[PIX_KEY_ERROR]", error);
-    return { success: false, error: "Erro ao salvar a chave PIX." };
+  } catch (error: any) {
+    console.error("[PROCESS_BATCH_SALE_ERROR]", error);
+    return { success: false, error: error.message || "Falha crítica ao processar carrinho." };
   }
 }
 </file>
@@ -9943,6 +9951,152 @@ export async function createNewSuperAdmin(data: { name: string; email: string; p
 }
 </file>
 
+<file path="src/actions/event.ts">
+// src/actions/event.ts
+
+"use server";
+
+import prisma from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { requireTenant } from "@/lib/requireTenant";
+import { revalidatePath } from "next/cache";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRIAR EVENTO
+// ─────────────────────────────────────────────────────────────────────────────
+export async function createEvent(name: string) {
+  const session = await auth();
+  if (!session?.user?.tenantId) throw new Error("Não autorizado.");
+
+  const event = await prisma.event.create({
+    data: {
+      name: name.trim(),
+      tenantId: session.user.tenantId,
+      // ⚠️ CORREÇÃO DO BUG 7: O banco define default 10.00, mas o app usa centavos.
+      // Se não enviarmos nada, ele nasce cobrando R$ 0,10. Forçando R$ 10,00 (1000 centavos).
+      ticketPrice: 1000, 
+    },
+  });
+
+  revalidatePath("/dashboard");
+  return { success: true, event };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALTERNAR STATUS DO EVENTO
+// ─────────────────────────────────────────────────────────────────────────────
+export async function toggleEventStatus(
+  eventId: string,
+  newStatus: "ACTIVE" | "DRAFT" | "FINISHED"
+) {
+  const tenantId = await requireTenant();
+
+  // 🛡️ SEGURANÇA: Valida posse. O evento DEVE pertencer ao tenant logado.
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
+  if (!event) return { success: false, error: "Evento não encontrado ou acesso negado." };
+
+  try {
+    if (newStatus === "ACTIVE") {
+      // Garante que apenas 1 evento esteja ativo por vez (desativa os demais)
+      await prisma.$transaction([
+        prisma.event.updateMany({
+          where: { tenantId, status: "ACTIVE" },
+          data: { status: "DRAFT", isActive: false },
+        }),
+        prisma.event.update({
+          where: { id: eventId },
+          data: { status: "ACTIVE", isActive: true },
+        }),
+      ]);
+    } else {
+      await prisma.event.update({
+        where: { id: eventId },
+        data: { status: newStatus, isActive: false },
+      });
+    }
+
+    revalidatePath("/dashboard", "page");
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao alterar status do evento:", error);
+    return { success: false, error: "Falha ao alterar o status." };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALTERAR PREÇO DA CARTELA
+// ─────────────────────────────────────────────────────────────────────────────
+export async function updateTicketPrice(eventId: string, priceInCents: number) {
+  const tenantId = await requireTenant();
+  
+  if (priceInCents < 0) throw new Error("O valor não pode ser negativo.");
+
+  // 🛡️ SEGURANÇA: O 'where' duplo garante que não altere preço de eventos de terceiros
+  const event = await prisma.event.update({
+    where: { id: eventId, tenantId },
+    data: { ticketPrice: priceInCents },
+  });
+
+  if (!event) throw new Error("Acesso negado ou evento inexistente.");
+
+  return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODO DEMONSTRAÇÃO
+// ─────────────────────────────────────────────────────────────────────────────
+export async function activateDemoMode(eventId: string) {
+  const tenantId = await requireTenant();
+
+  // 🛡️ SEGURANÇA: Verifica posse antes de manipular cartelas
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
+  if (!event) throw new Error("Acesso negado.");
+
+  await prisma.card.updateMany({
+    where: { eventId, isPaid: false },
+    data: {
+      isSold: true,
+      isPaid: true,
+      price: 0, // Marcador de demo — sem Transaction associada
+    },
+  });
+
+  return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATUALIZAR CHAVE PIX
+// ─────────────────────────────────────────────────────────────────────────────
+export async function updatePixKey(eventId: string, newPixKey: string) {
+  // 🛡️ CORREÇÃO CRÍTICA (Item 3 do Overview): Estava sem NENHUMA validação de Auth.
+  const tenantId = await requireTenant();
+
+  // 🛡️ SEGURANÇA: Garantir que o evento pertence ao tenant que está tentando alterar
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
+  if (!event) return { success: false, error: "Acesso negado. Tentativa de manipulação detectada." };
+
+  try {
+    const cleanKey = newPixKey.trim();
+    
+    await prisma.event.update({
+      where: { id: eventId },
+      data: { pixKey: cleanKey === "" ? null : cleanKey },
+    });
+
+    // Atualiza a tela do dashboard e do PDV
+    // Nota: Removi o [subdomain] do revalidatePath, pois o App Router muitas vezes lida
+    // melhor com layouts genéricos dependendo da sua estrutura de pastas reais.
+    revalidatePath(`/dashboard/${eventId}`, "page");
+    revalidatePath(`/vendas`, "page");
+    
+    return { success: true };
+  } catch (error) {
+    console.error("[PIX_KEY_ERROR]", error);
+    return { success: false, error: "Erro ao salvar a chave PIX." };
+  }
+}
+</file>
+
 <file path="src/app/[subdomain]/live/page.tsx">
 // src/app/[subdomain]/live/page.tsx
 
@@ -10028,224 +10182,6 @@ export default async function LivePage({
 }
 </file>
 
-<file path="src/app/[subdomain]/projector/ProjectorView.tsx">
-// src/app/[subdomain]/projector/ProjectorView.tsx
-
-"use client";
-
-import { useState, useEffect, useMemo } from "react";
-import useSWR from "swr";
-import { Trophy, Star } from "lucide-react";
-import confetti from "canvas-confetti";
-
-const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Erro na rede");
-  return res.json();
-};
-
-// Helper para pegar a Letra B-I-N-G-O (igual ao BingoGame)
-const formatBall = (num: number | null) => {
-  if (!num) return { letter: "", number: "--" };
-  if (num <= 15) return { letter: "B", number: num };
-  if (num <= 30) return { letter: "I", number: num };
-  if (num <= 45) return { letter: "N", number: num };
-  if (num <= 60) return { letter: "G", number: num };
-  return { letter: "O", number: num };
-};
-
-export default function ProjectorView({ eventId, eventName, initialDrawn, sponsors }: any) {
-  const [displayNumber, setDisplayNumber] = useState<number | null>(
-    initialDrawn?.[initialDrawn.length - 1] || null
-  );
-
-  const { data } = useSWR(`/api/bingo/state?eventId=${eventId}`, fetcher, {
-    refreshInterval: 1500,
-    fallbackData: {
-      drawnNumbers: initialDrawn || [],
-      latest: null,
-      showBoard: true,
-      bingoConfirmed: false,
-      pendingWinnerName: "",
-      currentPrize: null,
-    },
-    // Atualiza o número exibido quando chega um novo sorteio
-    onSuccess: (newData: { latest: any; }) => {
-      const latest = newData?.latest;
-      if (latest && latest !== displayNumber) {
-        setDisplayNumber(latest);
-      }
-    },
-  } as any);
-
-  const drawnNumbers: number[] = data?.drawnNumbers || [];
-  const bingoConfirmed = data?.bingoConfirmed;
-  const winnerName = data?.pendingWinnerName || "Ganhador";
-  const currentPrize = data?.currentPrize;
-  const showBoard = data?.showBoard !== false;
-
-  const currentBall = formatBall(displayNumber);
-
-  const board = useMemo(() => [
-    { letter: "B", range: [1, 15] },
-    { letter: "I", range: [16, 30] },
-    { letter: "N", range: [31, 45] },
-    { letter: "G", range: [46, 60] },
-    { letter: "O", range: [61, 75] },
-  ], []);
-
-  // Confetti ao confirmar bingo
-  useEffect(() => {
-    if (bingoConfirmed) {
-      const duration = 5 * 1000;
-      const animationEnd = Date.now() + duration;
-      const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 200 };
-
-      const interval: any = setInterval(function () {
-        const timeLeft = animationEnd - Date.now();
-        if (timeLeft <= 0) return clearInterval(interval);
-        const particleCount = 50 * (timeLeft / duration);
-        confetti({ ...defaults, particleCount, origin: { x: Math.random(), y: Math.random() - 0.2 } });
-      }, 250);
-    }
-  }, [bingoConfirmed]);
-
-  return (
-    <div className="relative min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#113a20] via-[#081a0e] to-black text-white overflow-hidden font-sans">
-
-      {/* Conteúdo principal — desfoca se houver bingo */}
-      <div className={`transition-all duration-1000 ${bingoConfirmed ? "blur-2xl opacity-20 scale-95 pointer-events-none" : "opacity-100"}`}>
-
-        {/* HEADER */}
-        <div className="flex flex-col items-center pt-12 pb-6 gap-2">
-          <h1 className="text-5xl font-black text-[#fef08a] tracking-widest uppercase drop-shadow-[0_2px_20px_rgba(254,240,138,0.3)]">
-            {eventName}
-          </h1>
-
-          {/* Prêmio atual */}
-          {currentPrize && (
-            <div className="mt-4 flex items-center gap-4 bg-violet-900/40 border border-violet-500/40 px-6 py-4 rounded-2xl">
-              <Trophy size={24} className="text-violet-400 shrink-0" />
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-violet-400 mb-1">
-                  Rodada da Vez • {currentPrize.name}
-                </p>
-                <p className="text-violet-200 font-black text-2xl">
-                  {currentPrize.prizeName}
-                  <span className="text-sm font-normal opacity-60 ml-2">
-                    ({currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"})
-                  </span>
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col xl:flex-row items-center xl:items-start justify-center gap-12 px-8 pb-12">
-
-          {/* BOLA */}
-          <div className="flex flex-col items-center gap-8 shrink-0">
-            <div className="w-72 h-72 rounded-full flex items-center justify-center relative bg-[radial-gradient(circle_at_35%_25%,_#fef08a_0%,_#eab308_25%,_#a16207_80%,_#422006_100%)] shadow-[inset_-16px_-16px_32px_rgba(0,0,0,0.6),_inset_8px_8px_16px_rgba(255,255,255,0.4),_0_30px_60px_rgba(0,0,0,0.7)] border border-[#ca8a04]/30">
-              <div className="flex flex-col items-center justify-center leading-none">
-                <span className="text-4xl font-bold text-black/40 -mb-2 tracking-widest">
-                  {currentBall.letter}
-                </span>
-                <span className="text-[130px] font-black text-black drop-shadow-[0_2px_2px_rgba(255,255,255,0.3)] leading-none">
-                  {currentBall.number}
-                </span>
-              </div>
-            </div>
-
-            <div className="text-center text-[#fef08a]/50 font-mono text-xl">
-              Pedras: <strong className="text-[#fef08a]">{drawnNumbers.length}</strong> / 75
-            </div>
-
-            {/* Sponsors */}
-            {sponsors?.length > 0 && (
-              <div className="flex items-center gap-6 mt-2">
-                {sponsors.slice(0, 4).map((s: any) =>
-                  s.logoUrl ? (
-                    <img key={s.id} src={s.logoUrl} className="h-10 opacity-70 object-contain" alt={s.name} />
-                  ) : null
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* GRADE B-I-N-G-O */}
-          {showBoard && (
-            <div className="flex-1 max-w-3xl bg-black/40 p-8 rounded-3xl border border-emerald-900/50 shadow-2xl backdrop-blur-sm">
-              <div className="flex flex-col gap-3">
-                {board.map((row) => (
-                  <div key={row.letter} className="flex items-center gap-3">
-                    <div className="w-14 h-14 shrink-0 bg-gradient-to-br from-[#fef08a] to-[#ca8a04] text-black rounded-xl flex items-center justify-center text-3xl font-black shadow-lg border border-yellow-200/50">
-                      {row.letter}
-                    </div>
-                    <div className="flex-1 grid grid-cols-15 gap-2">
-                      {Array.from({ length: 15 }, (_, i) => i + row.range[0]).map((num) => {
-                        const isDrawn = drawnNumbers.includes(num);
-                        return (
-                          <div
-                            key={num}
-                            className={`h-14 rounded-lg flex items-center justify-center text-lg font-bold transition-all duration-300 border ${
-                              isDrawn
-                                ? "bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black scale-105 border-yellow-200/50 shadow-[0_0_15px_rgba(202,138,4,0.4)]"
-                                : "bg-black/40 text-emerald-900 border-emerald-900/30"
-                            }`}
-                          >
-                            {num}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 🎊 OVERLAY DE CELEBRAÇÃO */}
-      {bingoConfirmed && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-700">
-          <div className="relative flex flex-col items-center">
-            <div className="absolute -top-24 text-yellow-400 animate-bounce">
-              <Star size={80} fill="currentColor" />
-            </div>
-
-            <div className="text-center space-y-4">
-              <h2 className="text-emerald-400 text-2xl font-black uppercase tracking-[0.5em] animate-pulse">
-                Temos um Ganhador!
-              </h2>
-
-              <div className="relative">
-                <h3 className="text-9xl font-black text-white tracking-tighter drop-shadow-[0_10px_30px_rgba(255,255,255,0.2)]">
-                  {winnerName.split(" (Ref:")[0]}
-                </h3>
-                <div className="absolute -inset-4 bg-emerald-500/20 blur-3xl -z-10 rounded-full" />
-              </div>
-
-              <div className="flex items-center justify-center gap-4 text-yellow-500 pt-8">
-                <div className="h-px w-20 bg-yellow-500/30" />
-                <Trophy size={40} />
-                <div className="h-px w-20 bg-yellow-500/30" />
-              </div>
-
-              {currentPrize && (
-                <p className="text-violet-300 text-xl font-bold mt-4">
-                  🏆 {currentPrize.prizeName}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-</file>
-
 <file path="src/app/layout.tsx">
 // src/app/layout.tsx
 import "./globals.css";
@@ -10273,394 +10209,243 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 </file>
 
-<file path="src/actions/bingo.ts">
-// src/actions/bingo.ts
+<file path="src/app/[subdomain]/projector/ProjectorView.tsx">
+// src/app/[subdomain]/projector/ProjectorView.tsx
+"use client";
 
-"use server";
+import { useState, useEffect, useRef, useMemo } from "react";
+import useSWR from "swr";
+import { Trophy, Star } from "lucide-react";
+import confetti from "canvas-confetti";
 
-import prisma from "@/lib/prisma";
-import { requireTenant } from "@/lib/requireTenant";
-import { unstable_noStore as noStore } from "next/cache";
-import { revalidatePath } from "next/cache";
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Erro na rede");
+  return res.json();
+};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FUNÇÃO AUXILIAR DE SEGURANÇA (DRY)
-// ─────────────────────────────────────────────────────────────────────────────
-async function requireEventAccess(eventId: string) {
-  const tenantId = await requireTenant();
-  const event = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
-  });
-  if (!event) throw new Error("Acesso negado. Evento não encontrado.");
-  return { tenantId, event };
-}
+const formatBall = (num: number | null) => {
+  if (!num) return { letter: "", number: "--" };
+  if (num <= 15) return { letter: "B", number: num };
+  if (num <= 30) return { letter: "I", number: num };
+  if (num <= 45) return { letter: "N", number: num };
+  if (num <= 60) return { letter: "G", number: num };
+  return { letter: "O", number: num };
+};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS MATEMÁTICOS
-// ─────────────────────────────────────────────────────────────────────────────
-
-function generateUniqueIds(count: number, existingIds: string[]): string[] {
-  const ids = new Set<string>();
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  while (ids.size < count) {
-    let id = "";
-    for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
-    if (!existingIds.includes(id)) ids.add(id);
-  }
-  return Array.from(ids);
-}
-
-function generateBingoColumn(min: number, max: number, count: number): number[] {
-  const numbers = new Set<number>();
-  while (numbers.size < count) numbers.add(Math.floor(Math.random() * (max - min + 1)) + min);
-  return Array.from(numbers).sort((a, b) => a - b);
-}
-
-function getCardSignature(matrix: any): string {
-  return [...matrix.B, ...matrix.I, ...matrix.N, ...matrix.G, ...matrix.O].join("-");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GERAÇÃO DE CARTELAS
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function generateBatchCards(eventId: string, quantity: number) {
-  // 🛡️ SEGURANÇA: Reaproveitando a função auxiliar
-  const { tenantId, event } = await requireEventAccess(eventId);
-
-  const eventWithCards = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
-    include: { cards: { select: { shortId: true, matrix: true } } },
-  });
-  
-  if (!eventWithCards) throw new Error("Acesso negado.");
-
-  const existingShortIds = eventWithCards.cards.map((c) => c.shortId);
-  const existingSignatures = eventWithCards.cards.map((c) => getCardSignature(c.matrix));
-  const shortIds = generateUniqueIds(quantity, existingShortIds);
-  const cardsToCreate = [];
-  let count = 0;
-
-  while (count < quantity) {
-    const newMatrix = {
-      B: generateBingoColumn(1, 15, 5),
-      I: generateBingoColumn(16, 30, 5),
-      N: generateBingoColumn(31, 45, 5),
-      G: generateBingoColumn(46, 60, 5),
-      O: generateBingoColumn(61, 75, 5),
-    };
-    const sig = getCardSignature(newMatrix);
-    if (!existingSignatures.includes(sig)) {
-      cardsToCreate.push({ eventId, shortId: shortIds[count], matrix: newMatrix, isSold: false, isPaid: false });
-      existingSignatures.push(sig);
-      count++;
-    }
-  }
-
-  await prisma.card.createMany({ data: cardsToCreate });
-  return { success: true, totalCreated: quantity };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SORTEIO SEGURO (CONDIÇÃO DE CORRIDA RESOLVIDA VIA RAW QUERY)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function drawNextNumber(eventId: string) {
-  // 1. Valida a posse do evento (Segurança Auth)
-  const { tenantId } = await requireEventAccess(eventId);
-
-  try {
-    // ⚠️ CORREÇÃO CRÍTICA (Item 11): 
-    // Usamos $queryRaw para emitir um "SELECT ... FOR UPDATE". Isso cria um "Lock" (Bloqueio Exclusivo) 
-    // na linha deste evento na base de dados (PostgreSQL). Se houver dois cliques simultâneos, 
-    // a segunda transação ficará "em espera" até a primeira acabar e gravar a pedra. 
-    // Isso IMPEDE pedras duplicadas (Condição de Corrida).
-    
-    return await prisma.$transaction(async (tx) => {
-      
-      // Obtém o evento COM LOCK. O prisma infelizmente não suporta FOR UPDATE nativamente na API fluente.
-      const eventRows: any[] = await tx.$queryRaw`
-        SELECT id, "drawnNumbers" 
-        FROM "Event" 
-        WHERE id = ${eventId} AND "tenantId" = ${tenantId}
-        FOR UPDATE
-      `;
-
-      if (!eventRows || eventRows.length === 0) {
-         throw new Error("Evento não encontrado ou acesso negado.");
-      }
-
-      const event = eventRows[0];
-      const drawnNumbers: number[] = event.drawnNumbers || [];
-
-      if (drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
-
-      const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
-        (n) => !drawnNumbers.includes(n)
-      );
-      
-      const nextNumber = available[Math.floor(Math.random() * available.length)];
-
-      const updated = await tx.event.update({
-        where: { id: eventId },
-        data: { drawnNumbers: { push: nextNumber } },
-        select: { drawnNumbers: true },
-      });
-
-      return { success: true, drawnNumbers: updated.drawnNumbers, latest: nextNumber };
-    });
-  } catch (error: any) {
-    console.error("[DRAW_NUMBER_ERROR]", error);
-    return { error: "Erro ao sortear o número. Tente novamente." };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GERENCIAMENTO DA MESA
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function resetGame(eventId: string) {
-  const { tenantId } = await requireEventAccess(eventId);
-  await prisma.event.update({
-    where: { id: eventId }, // Já garantimos a posse, basta usar o ID único
-    data: { drawnNumbers: [] },
-  });
-  return { success: true };
-}
-
-export async function toggleBoardVisibility(eventId: string, showBoard: boolean) {
-  const { tenantId } = await requireEventAccess(eventId);
-  await prisma.event.update({
-    where: { id: eventId },
-    data: { showBoard },
-  });
-  return { success: true };
-}
-
-export async function getEventCards(eventId: string) {
-  const { tenantId } = await requireEventAccess(eventId);
-  const event = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
-    include: { cards: { orderBy: { shortId: "asc" } }, sponsors: true },
-  });
-  if (!event) throw new Error("Evento não encontrado.");
-
-  return {
-    cards: event.cards.map((c) => ({ id: c.id, shortId: c.shortId, matrix: c.matrix as any })),
-    sponsors: event.sponsors.map((s) => ({ id: s.id, name: s.name, logoUrl: s.logoUrl ?? undefined })),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSULTA PÚBLICA — sem auth (usada pela cartela digital do jogador)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function checkCard(shortId: string) {
-  const card = await prisma.card.findFirst({
-    where: { shortId: shortId.trim().toUpperCase() },
-    // ⚠️ CORREÇÃO (Item 13): Removido o { include: { tenant: true } }.
-    // Isso vazava tokens super secretos, CNPJ e PIX da ONG publicamente!
-    // Agora retornamos APENAS o nome do evento e o ID para a UI da cartela digital.
-    select: { 
-      id: true,
-      shortId: true,
-      matrix: true,
-      isPaid: true,
-      eventId: true,
-      event: { select: { name: true, drawnNumbers: true } }
-    }
-  });
-  
-  if (!card) return { success: false, message: "Cartela não encontrada." };
-  return { success: true, card };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AUDITORIA DE VITÓRIA (ANTIFRAUDE)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function validateWinningCard(eventId: string, shortId: string) {
-  const { tenantId } = await requireEventAccess(eventId);
-
-  const event = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
-    include: {
-      cards: { where: { shortId: shortId.trim().toUpperCase() } },
-      prizes: { where: { isCompleted: false }, orderBy: { order: "asc" } },
-    },
-  });
-
-  if (!event) return { success: false, error: "Evento não encontrado." };
-  if (event.cards.length === 0) return { success: false, error: "Cartela não existe neste evento." };
-
-  const card = event.cards[0];
-  const drawn = event.drawnNumbers as number[];
-  const matrix = card.matrix as any;
-
-  // CRITÉRIO 1: Pagamento obrigatório
-  if (!card.isPaid) {
-    return {
-      success: false,
-      error: "⚠️ CARTELA NÃO PAGA! O pagamento precisa ser baixado no caixa antes de participar.",
-    };
-  }
-
-  // CRITÉRIO 2-4: Verificação matemática (MANTIDA ORIGINAL - OK)
-  const allNumbers = [
-    ...matrix.B, ...matrix.I,
-    matrix.N[0], matrix.N[1], matrix.N[3], matrix.N[4], // N[2] = FREE
-    ...matrix.G, ...matrix.O,
-  ];
-  const isFullHouse = allNumbers.every((n) => drawn.includes(n));
-
-  const hasHorizontalQuina = [0, 1, 2, 3, 4].some((row) =>
-    ["B", "I", "N", "G", "O"].every((col) => {
-      if (col === "N" && row === 2) return true;
-      return drawn.includes(matrix[col][row]);
-    })
+export default function ProjectorView({ eventId, eventName, initialDrawn, sponsors }: any) {
+  // ✅ FIX 1: useRef para rastrear o último número sem stale closure
+  const latestRef = useRef<number | null>(
+    initialDrawn?.[initialDrawn.length - 1] ?? null
   );
-  const hasVerticalQuina = ["B", "I", "N", "G", "O"].some((col) =>
-    [0, 1, 2, 3, 4].every((row) => {
-      if (col === "N" && row === 2) return true;
-      return drawn.includes(matrix[col][row]);
-    })
+  const [displayNumber, setDisplayNumber] = useState<number | null>(
+    initialDrawn?.[initialDrawn.length - 1] ?? null
   );
-  const hasDiag1 = [matrix.B[0], matrix.I[1], matrix.G[3], matrix.O[4]].every((n) => drawn.includes(n));
-  const hasDiag2 = [matrix.B[4], matrix.I[3], matrix.G[1], matrix.O[0]].every((n) => drawn.includes(n));
-  const hasQuina = hasHorizontalQuina || hasVerticalQuina || hasDiag1 || hasDiag2;
+  // ✅ FIX 2: estado de animação que dispara keyframe ao sortear número novo
+  const [ballKey, setBallKey] = useState(0);
 
-  const currentPrize = event.prizes[0] || null;
-  let isWinner = false;
-  let winMessage = "";
-
-  if (currentPrize) {
-    if (currentPrize.type === "QUINA" && hasQuina) {
-      isWinner = true;
-      winMessage = `🎉 BINGO! Quina confirmada — ${currentPrize.prizeName}`;
-    } else if (currentPrize.type === "FULL_HOUSE" && isFullHouse) {
-      isWinner = true;
-      winMessage = `🎉 BINGO! Cartela cheia — ${currentPrize.prizeName}`;
-    } else {
-      winMessage = `Cartela válida, mas ainda não bateu ${currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"}.`;
-    }
-  }
-
-  return {
-    success: true,
-    cardId: card.shortId,
-    isPaid: card.isPaid,
-    isFullHouse,
-    hasQuina,
-    isWinner,
-    winMessage,
-    currentPrize,
-    stats: { hasHorizontalQuina, hasVerticalQuina, hasDiag1, hasDiag2, drawnCount: drawn.length },
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ESTADO AO VIVO DO TELÃO (SWR polling)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function getGameState(eventId: string) {
-  noStore();
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    select: {
-      drawnNumbers: true,
+  const { data } = useSWR(`/api/bingo/state?eventId=${eventId}`, fetcher, {
+    refreshInterval: 1500,
+    fallbackData: {
+      drawnNumbers: initialDrawn || [],
+      latest: null,
       showBoard: true,
-      pendingWinnerCard: true,
-      pendingWinnerName: true,
-      bingoConfirmed: true,
-    },
-  });
-  if (!event) return null;
-
-  return {
-    drawnNumbers: event.drawnNumbers || [],
-    latest: event.drawnNumbers[event.drawnNumbers.length - 1] || null,
-    showBoard: event.showBoard,
-    pendingWinnerCard: event.pendingWinnerCard,
-    pendingWinnerName: event.pendingWinnerName,
-    bingoConfirmed: event.bingoConfirmed,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PROTOCOLO DE 3 VIAS
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function alertLocutor(eventId: string, shortId: string, winnerName: string) {
-  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Antes, permitia fraude injetando eventId de outros.
-  const { tenantId } = await requireEventAccess(eventId);
-
-  await prisma.event.update({
-    where: { id: eventId }, // Segurança garantida no passo anterior
-    data: {
-      pendingWinnerCard: shortId.toUpperCase(),
-      pendingWinnerName: winnerName,
       bingoConfirmed: false,
+      pendingWinnerName: "",
+      currentPrize: null,
     },
   });
 
-  revalidatePath("/", "layout");
-  return { success: true };
-}
+  // ✅ FIX 1+2: useEffect detecta número novo via ref (sem stale closure)
+  // e dispara animação incrementando a key da bola (força remount + CSS animation)
+  useEffect(() => {
+    const latest = data?.latest;
+    if (latest && latest !== latestRef.current) {
+      latestRef.current = latest;
+      setDisplayNumber(latest);
+      setBallKey((k) => k + 1); // ← remonta a bola → dispara @keyframes ballRoll
+    }
+  }, [data?.latest]);
 
-export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
-  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Garantindo posse do evento.
-  const { tenantId } = await requireEventAccess(eventId);
+  const drawnNumbers: number[] = data?.drawnNumbers || [];
+  const bingoConfirmed = data?.bingoConfirmed;
+  const winnerName = data?.pendingWinnerName || "Ganhador";
+  const currentPrize = data?.currentPrize;
+  const showBoard = data?.showBoard !== false;
+  const currentBall = formatBall(displayNumber);
 
-  await prisma.event.update({
-    where: { id: eventId },
-    data: {
-      bingoConfirmed: confirm,
-      pendingWinnerCard: null,
-      pendingWinnerName: null,
-      bingoConfirmedAt: confirm ? new Date() : null,
-    },
-  });
+  const board = useMemo(() => [
+    { letter: "B", range: [1, 15] },
+    { letter: "I", range: [16, 30] },
+    { letter: "N", range: [31, 45] },
+    { letter: "G", range: [46, 60] },
+    { letter: "O", range: [61, 75] },
+  ], []);
 
-  revalidatePath("/", "layout");
-  return { success: true };
-}
+  // Confetti ao confirmar bingo
+  useEffect(() => {
+    if (!bingoConfirmed) return;
+    const duration = 5 * 1000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 200 };
+    const interval = setInterval(() => {
+      const timeLeft = animationEnd - Date.now();
+      if (timeLeft <= 0) return clearInterval(interval);
+      const particleCount = 50 * (timeLeft / duration);
+      confetti({ ...defaults, particleCount, origin: { x: Math.random(), y: Math.random() - 0.2 } });
+    }, 250);
+    return () => clearInterval(interval);
+  }, [bingoConfirmed]);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ENCERRAR RODADA E AVANÇAR PARA A PRÓXIMA
-// ─────────────────────────────────────────────────────────────────────────────
+  return (
+    <>
+      {/* ✅ FIX 2: keyframes injetados via <style> — sem necessidade de config Tailwind */}
+      <style>{`
+        @keyframes ballRoll {
+          0%   { transform: scale(0.6) rotate(-200deg); opacity: 0.3; }
+          55%  { transform: scale(1.08) rotate(12deg);  opacity: 1;   }
+          75%  { transform: scale(0.96) rotate(-4deg);  opacity: 1;   }
+          100% { transform: scale(1)   rotate(0deg);    opacity: 1;   }
+        }
+        .ball-animate {
+          animation: ballRoll 0.65s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+        }
+      `}</style>
 
-export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeId: string) {
-  // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante posse do evento
-  const { tenantId } = await requireEventAccess(eventId);
+      <div className="relative min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#113a20] via-[#081a0e] to-black text-white overflow-hidden font-sans">
 
-  // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante que o prêmio a encerrar pertence EXATAMENTE a este evento!
-  const prize = await prisma.prize.findUnique({
-    where: { id: currentPrizeId }
-  });
+        {/* Conteúdo principal — desfoca se houver bingo */}
+        <div className={`transition-all duration-1000 ${bingoConfirmed ? "blur-2xl opacity-20 scale-95 pointer-events-none" : "opacity-100"}`}>
 
-  if (!prize || prize.eventId !== eventId) {
-    throw new Error("Manipulação detectada. O prêmio não pertence a este evento.");
-  }
+          {/* HEADER */}
+          <div className="flex flex-col items-center pt-12 pb-6 gap-2">
+            <h1 className="text-5xl font-black text-[#fef08a] tracking-widest uppercase drop-shadow-[0_2px_20px_rgba(254,240,138,0.3)]">
+              {eventName}
+            </h1>
 
-  await prisma.$transaction([
-    prisma.prize.update({
-      where: { id: currentPrizeId },
-      data: { isCompleted: true },
-    }),
-    prisma.event.update({
-      where: { id: eventId },
-      data: {
-        drawnNumbers: [],
-        pendingWinnerCard: null,
-        pendingWinnerName: null,
-        bingoConfirmed: false,
-        bingoConfirmedAt: null,
-      },
-    }),
-  ]);
+            {currentPrize && (
+              <div className="mt-4 flex items-center gap-4 bg-violet-900/40 border border-violet-500/40 px-6 py-4 rounded-2xl">
+                <Trophy size={24} className="text-violet-400 shrink-0" />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest text-violet-400 mb-1">
+                    Rodada da Vez • {currentPrize.name}
+                  </p>
+                  <p className="text-violet-200 font-black text-2xl">
+                    {currentPrize.prizeName}
+                    <span className="text-sm font-normal opacity-60 ml-2">
+                      ({currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"})
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
 
-  revalidatePath("/", "layout");
-  return { success: true };
+          <div className="flex flex-col xl:flex-row items-center xl:items-start justify-center gap-12 px-8 pb-12">
+
+            {/* BOLA */}
+            <div className="flex flex-col items-center gap-8 shrink-0">
+              {/*
+                key={ballKey} força React a remontar o elemento quando um novo número chega.
+                O remount reinicia o CSS animation, produzindo o efeito de rolagem a cada sorteio.
+              */}
+              <div
+                key={ballKey}
+                className="ball-animate w-72 h-72 rounded-full flex items-center justify-center relative bg-[radial-gradient(circle_at_35%_25%,_#fef08a_0%,_#eab308_25%,_#a16207_80%,_#422006_100%)] shadow-[inset_-16px_-16px_32px_rgba(0,0,0,0.6),_inset_8px_8px_16px_rgba(255,255,255,0.4),_0_30px_60px_rgba(0,0,0,0.7)] border border-[#ca8a04]/30"
+              >
+                <div className="flex flex-col items-center justify-center leading-none">
+                  <span className="text-4xl font-bold text-black/40 -mb-2 tracking-widest">
+                    {currentBall.letter}
+                  </span>
+                  <span className="text-[130px] font-black text-black drop-shadow-[0_2px_2px_rgba(255,255,255,0.3)] leading-none">
+                    {currentBall.number}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-center text-[#fef08a]/50 font-mono text-xl">
+                Pedras: <strong className="text-[#fef08a]">{drawnNumbers.length}</strong> / 75
+              </div>
+
+              {sponsors?.length > 0 && (
+                <div className="flex items-center gap-6 mt-2">
+                  {sponsors.slice(0, 4).map((s: any) =>
+                    s.logoUrl ? (
+                      <img key={s.id} src={s.logoUrl} className="h-10 opacity-70 object-contain" alt={s.name} />
+                    ) : null
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* GRADE B-I-N-G-O */}
+            {showBoard && (
+              <div className="flex-1 max-w-3xl bg-black/40 p-8 rounded-3xl border border-emerald-900/50 shadow-2xl backdrop-blur-sm">
+                <div className="flex flex-col gap-3">
+                  {board.map((row) => (
+                    <div key={row.letter} className="flex items-center gap-3">
+                      <div className="w-14 h-14 shrink-0 bg-gradient-to-br from-[#fef08a] to-[#ca8a04] text-black rounded-xl flex items-center justify-center text-3xl font-black shadow-lg border border-yellow-200/50">
+                        {row.letter}
+                      </div>
+                      <div className="flex-1 grid grid-cols-15 gap-2">
+                        {Array.from({ length: 15 }, (_, i) => i + row.range[0]).map((num) => {
+                          const isDrawn = drawnNumbers.includes(num);
+                          return (
+                            <div
+                              key={num}
+                              className={`h-14 rounded-lg flex items-center justify-center text-lg font-bold transition-all duration-300 border ${
+                                isDrawn
+                                  ? "bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black scale-105 border-yellow-200/50 shadow-[0_0_15px_rgba(202,138,4,0.4)]"
+                                  : "bg-black/40 text-emerald-900 border-emerald-900/30"
+                              }`}
+                            >
+                              {num}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 🎊 OVERLAY DE CELEBRAÇÃO */}
+        {bingoConfirmed && (
+          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-700">
+            <div className="relative flex flex-col items-center">
+              <div className="absolute -top-24 text-yellow-400 animate-bounce">
+                <Star size={80} fill="currentColor" />
+              </div>
+              <div className="text-center space-y-4">
+                <h2 className="text-emerald-400 text-2xl font-black uppercase tracking-[0.5em] animate-pulse">
+                  Temos um Ganhador!
+                </h2>
+                <div className="relative">
+                  <h3 className="text-9xl font-black text-white tracking-tighter drop-shadow-[0_10px_30px_rgba(255,255,255,0.2)]">
+                    {winnerName.split(" (Ref:")[0]}
+                  </h3>
+                  <div className="absolute -inset-4 bg-emerald-500/20 blur-3xl -z-10 rounded-full" />
+                </div>
+                <div className="flex items-center justify-center gap-4 text-yellow-500 pt-8">
+                  <div className="h-px w-20 bg-yellow-500/30" />
+                  <Trophy size={40} />
+                  <div className="h-px w-20 bg-yellow-500/30" />
+                </div>
+                {currentPrize && (
+                  <p className="text-violet-300 text-xl font-bold mt-4">
+                    🏆 {currentPrize.prizeName}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
 </file>
 
@@ -11581,6 +11366,378 @@ const maskDocument = (value: string) => {
 };
 </file>
 
+<file path="src/actions/bingo.ts">
+// src/actions/bingo.ts
+
+"use server";
+
+import prisma from "@/lib/prisma";
+import { requireTenant } from "@/lib/requireTenant";
+import { unstable_noStore as noStore } from "next/cache";
+import { revalidatePath } from "next/cache";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNÇÃO AUXILIAR DE SEGURANÇA (DRY)
+// ─────────────────────────────────────────────────────────────────────────────
+async function requireEventAccess(eventId: string) {
+  const tenantId = await requireTenant();
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenantId },
+  });
+  if (!event) throw new Error("Acesso negado. Evento não encontrado.");
+  return { tenantId, event };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS MATEMÁTICOS
+// ─────────────────────────────────────────────────────────────────────────────
+
+function generateUniqueIds(count: number, existingIds: string[]): string[] {
+  const ids = new Set<string>();
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  while (ids.size < count) {
+    let id = "";
+    for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
+    if (!existingIds.includes(id)) ids.add(id);
+  }
+  return Array.from(ids);
+}
+
+function generateBingoColumn(min: number, max: number, count: number): number[] {
+  const numbers = new Set<number>();
+  while (numbers.size < count) numbers.add(Math.floor(Math.random() * (max - min + 1)) + min);
+  return Array.from(numbers).sort((a, b) => a - b);
+}
+
+function getCardSignature(matrix: any): string {
+  return [...matrix.B, ...matrix.I, ...matrix.N, ...matrix.G, ...matrix.O].join("-");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GERAÇÃO DE CARTELAS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function generateBatchCards(eventId: string, quantity: number) {
+  // 🛡️ SEGURANÇA: Reaproveitando a função auxiliar
+  const { tenantId, event } = await requireEventAccess(eventId);
+
+  const eventWithCards = await prisma.event.findFirst({
+    where: { id: eventId, tenantId },
+    include: { cards: { select: { shortId: true, matrix: true } } },
+  });
+  
+  if (!eventWithCards) throw new Error("Acesso negado.");
+
+  const existingShortIds = eventWithCards.cards.map((c) => c.shortId);
+  const existingSignatures = eventWithCards.cards.map((c) => getCardSignature(c.matrix));
+  const shortIds = generateUniqueIds(quantity, existingShortIds);
+  const cardsToCreate = [];
+  let count = 0;
+
+  while (count < quantity) {
+    const newMatrix = {
+      B: generateBingoColumn(1, 15, 5),
+      I: generateBingoColumn(16, 30, 5),
+      N: generateBingoColumn(31, 45, 5),
+      G: generateBingoColumn(46, 60, 5),
+      O: generateBingoColumn(61, 75, 5),
+    };
+    const sig = getCardSignature(newMatrix);
+    if (!existingSignatures.includes(sig)) {
+      cardsToCreate.push({ eventId, shortId: shortIds[count], matrix: newMatrix, isSold: false, isPaid: false });
+      existingSignatures.push(sig);
+      count++;
+    }
+  }
+
+  await prisma.card.createMany({ data: cardsToCreate });
+  return { success: true, totalCreated: quantity };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SORTEIO SEGURO (CONDIÇÃO DE CORRIDA RESOLVIDA VIA RAW QUERY)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function drawNextNumber(eventId: string) {
+  const { tenantId } = await requireEventAccess(eventId);
+
+  try {
+    const event = await prisma.event.findFirst({
+      where: { id: eventId, tenantId },
+      select: { drawnNumbers: true },
+    });
+
+    if (!event) throw new Error("Evento não encontrado.");
+
+    const drawnNumbers: number[] = event.drawnNumbers as number[];
+    if (drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
+
+    const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
+      (n) => !drawnNumbers.includes(n)
+    );
+    const nextNumber = available[Math.floor(Math.random() * available.length)];
+
+    const updated = await prisma.event.update({
+      where: { id: eventId },
+      data: { drawnNumbers: { push: nextNumber } },
+      select: { drawnNumbers: true },
+    });
+
+    return { success: true, drawnNumbers: updated.drawnNumbers, latest: nextNumber };
+  } catch (error: any) {
+    console.error("[DRAW_NUMBER_ERROR]", error);
+    return { error: "Erro ao sortear o número. Tente novamente." };
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// GERENCIAMENTO DA MESA
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function resetGame(eventId: string) {
+  const { tenantId } = await requireEventAccess(eventId);
+  await prisma.event.update({
+    where: { id: eventId }, // Já garantimos a posse, basta usar o ID único
+    data: { drawnNumbers: [] },
+  });
+  return { success: true };
+}
+
+export async function toggleBoardVisibility(eventId: string, showBoard: boolean) {
+  const { tenantId } = await requireEventAccess(eventId);
+  await prisma.event.update({
+    where: { id: eventId },
+    data: { showBoard },
+  });
+  return { success: true };
+}
+
+export async function getEventCards(eventId: string) {
+  const { tenantId } = await requireEventAccess(eventId);
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenantId },
+    include: { cards: { orderBy: { shortId: "asc" } }, sponsors: true },
+  });
+  if (!event) throw new Error("Evento não encontrado.");
+
+  return {
+    cards: event.cards.map((c) => ({ id: c.id, shortId: c.shortId, matrix: c.matrix as any })),
+    sponsors: event.sponsors.map((s) => ({ id: s.id, name: s.name, logoUrl: s.logoUrl ?? undefined })),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSULTA PÚBLICA — sem auth (usada pela cartela digital do jogador)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function checkCard(shortId: string) {
+  const card = await prisma.card.findFirst({
+    where: { shortId: shortId.trim().toUpperCase() },
+    // ⚠️ CORREÇÃO (Item 13): Removido o { include: { tenant: true } }.
+    // Isso vazava tokens super secretos, CNPJ e PIX da ONG publicamente!
+    // Agora retornamos APENAS o nome do evento e o ID para a UI da cartela digital.
+    select: { 
+      id: true,
+      shortId: true,
+      matrix: true,
+      isPaid: true,
+      eventId: true,
+      event: { select: { name: true, drawnNumbers: true } }
+    }
+  });
+  
+  if (!card) return { success: false, message: "Cartela não encontrada." };
+  return { success: true, card };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDITORIA DE VITÓRIA (ANTIFRAUDE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function validateWinningCard(eventId: string, shortId: string) {
+  const { tenantId } = await requireEventAccess(eventId);
+
+  const event = await prisma.event.findFirst({
+    where: { id: eventId, tenantId },
+    include: {
+      cards: { where: { shortId: shortId.trim().toUpperCase() } },
+      prizes: { where: { isCompleted: false }, orderBy: { order: "asc" } },
+    },
+  });
+
+  if (!event) return { success: false, error: "Evento não encontrado." };
+  if (event.cards.length === 0) return { success: false, error: "Cartela não existe neste evento." };
+
+  const card = event.cards[0];
+  const drawn = event.drawnNumbers as number[];
+  const matrix = card.matrix as any;
+
+  // CRITÉRIO 1: Pagamento obrigatório
+  if (!card.isPaid) {
+    return {
+      success: false,
+      error: "⚠️ CARTELA NÃO PAGA! O pagamento precisa ser baixado no caixa antes de participar.",
+    };
+  }
+
+  // CRITÉRIO 2-4: Verificação matemática (MANTIDA ORIGINAL - OK)
+  const allNumbers = [
+    ...matrix.B, ...matrix.I,
+    matrix.N[0], matrix.N[1], matrix.N[3], matrix.N[4], // N[2] = FREE
+    ...matrix.G, ...matrix.O,
+  ];
+  const isFullHouse = allNumbers.every((n) => drawn.includes(n));
+
+  const hasHorizontalQuina = [0, 1, 2, 3, 4].some((row) =>
+    ["B", "I", "N", "G", "O"].every((col) => {
+      if (col === "N" && row === 2) return true;
+      return drawn.includes(matrix[col][row]);
+    })
+  );
+  const hasVerticalQuina = ["B", "I", "N", "G", "O"].some((col) =>
+    [0, 1, 2, 3, 4].every((row) => {
+      if (col === "N" && row === 2) return true;
+      return drawn.includes(matrix[col][row]);
+    })
+  );
+  const hasDiag1 = [matrix.B[0], matrix.I[1], matrix.G[3], matrix.O[4]].every((n) => drawn.includes(n));
+  const hasDiag2 = [matrix.B[4], matrix.I[3], matrix.G[1], matrix.O[0]].every((n) => drawn.includes(n));
+  const hasQuina = hasHorizontalQuina || hasVerticalQuina || hasDiag1 || hasDiag2;
+
+  const currentPrize = event.prizes[0] || null;
+  let isWinner = false;
+  let winMessage = "";
+
+  if (currentPrize) {
+    if (currentPrize.type === "QUINA" && hasQuina) {
+      isWinner = true;
+      winMessage = `🎉 BINGO! Quina confirmada — ${currentPrize.prizeName}`;
+    } else if (currentPrize.type === "FULL_HOUSE" && isFullHouse) {
+      isWinner = true;
+      winMessage = `🎉 BINGO! Cartela cheia — ${currentPrize.prizeName}`;
+    } else {
+      winMessage = `Cartela válida, mas ainda não bateu ${currentPrize.type === "QUINA" ? "Quina" : "Cartela Cheia"}.`;
+    }
+  }
+
+  return {
+    success: true,
+    cardId: card.shortId,
+    isPaid: card.isPaid,
+    isFullHouse,
+    hasQuina,
+    isWinner,
+    winMessage,
+    currentPrize,
+    stats: { hasHorizontalQuina, hasVerticalQuina, hasDiag1, hasDiag2, drawnCount: drawn.length },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ESTADO AO VIVO DO TELÃO (SWR polling)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getGameState(eventId: string) {
+  noStore();
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: {
+      drawnNumbers: true,
+      showBoard: true,
+      pendingWinnerCard: true,
+      pendingWinnerName: true,
+      bingoConfirmed: true,
+    },
+  });
+  if (!event) return null;
+
+  return {
+    drawnNumbers: event.drawnNumbers || [],
+    latest: event.drawnNumbers[event.drawnNumbers.length - 1] || null,
+    showBoard: event.showBoard,
+    pendingWinnerCard: event.pendingWinnerCard,
+    pendingWinnerName: event.pendingWinnerName,
+    bingoConfirmed: event.bingoConfirmed,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROTOCOLO DE 3 VIAS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function alertLocutor(eventId: string, shortId: string, winnerName: string) {
+  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Antes, permitia fraude injetando eventId de outros.
+  const { tenantId } = await requireEventAccess(eventId);
+
+  await prisma.event.update({
+    where: { id: eventId }, // Segurança garantida no passo anterior
+    data: {
+      pendingWinnerCard: shortId.toUpperCase(),
+      pendingWinnerName: winnerName,
+      bingoConfirmed: false,
+    },
+  });
+
+  revalidatePath("/", "layout");
+  return { success: true };
+}
+
+export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
+  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Garantindo posse do evento.
+  const { tenantId } = await requireEventAccess(eventId);
+
+  await prisma.event.update({
+    where: { id: eventId },
+    data: {
+      bingoConfirmed: confirm,
+      pendingWinnerCard: null,
+      pendingWinnerName: null,
+      bingoConfirmedAt: confirm ? new Date() : null,
+    },
+  });
+
+  revalidatePath("/", "layout");
+  return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENCERRAR RODADA E AVANÇAR PARA A PRÓXIMA
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeId: string) {
+  // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante posse do evento
+  const { tenantId } = await requireEventAccess(eventId);
+
+  // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante que o prêmio a encerrar pertence EXATAMENTE a este evento!
+  const prize = await prisma.prize.findUnique({
+    where: { id: currentPrizeId }
+  });
+
+  if (!prize || prize.eventId !== eventId) {
+    throw new Error("Manipulação detectada. O prêmio não pertence a este evento.");
+  }
+
+  await prisma.$transaction([
+    prisma.prize.update({
+      where: { id: currentPrizeId },
+      data: { isCompleted: true },
+    }),
+    prisma.event.update({
+      where: { id: eventId },
+      data: {
+        drawnNumbers: [],
+        pendingWinnerCard: null,
+        pendingWinnerName: null,
+        bingoConfirmed: false,
+        bingoConfirmedAt: null,
+      },
+    }),
+  ]);
+
+  revalidatePath("/", "layout");
+  return { success: true };
+}
+</file>
+
 <file path="src/app/[subdomain]/dashboard/page.tsx">
 // src/app/[subdomain]/dashboard/page.tsx
 import prisma from "@/lib/prisma";
@@ -11861,19 +12018,19 @@ function KpiCard({
 
 <file path="src/lib/auth.ts">
 // src/lib/auth.ts
+
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/prisma";
 import { compare } from "bcryptjs";
+import { loginRateLimit } from "@/lib/ratelimit"; // Certifique-se de que este arquivo exista
 
 // Extrai domínio de uma URL, removendo protocolo se existir
 const extractDomain = (url: string) => {
   try {
-    // Se for URL com protocolo, extrai host
     if (url.includes("://")) {
       return new URL(url).hostname;
     }
-    // Senão, retorna como está
     return url;
   } catch {
     return url;
@@ -11891,66 +12048,43 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true, // ← obrigatório em produção atrás de proxy reverso
 
   providers: [
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 1. LOGIN PADRÃO (E-mail/Usuário + Senha/PIN)
+    // ─────────────────────────────────────────────────────────────────────────────
     CredentialsProvider({
+      id: "credentials",
       name: "Credentials",
       credentials: {
         email:    { label: "E-mail ou Usuário", type: "text" },
         password: { label: "Senha ou PIN",      type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         try {
-          console.error("🔐🔐🔐 [AUTH] authorize() CHAMADO 🔐🔐🔐");
-          
-          if (!credentials?.email || !credentials?.password) {
-            console.error("❌ [AUTH] Credenciais não informadas.", { email: !!credentials?.email, password: !!credentials?.password });
-            return null;
-          }
+          if (!credentials?.email || !credentials?.password) return null;
 
           const identifier = (credentials.email as string).trim().toLowerCase();
           const rawPassword = credentials.password as string;
-          
-          console.error(`🔍 [AUTH] Procurando usuário: "${identifier}"`);
+
+          // 🛡️ PROTEÇÃO CONTRA FORÇA BRUTA (Rate Limit restaurado)
+          if (loginRateLimit) {
+            const { success } = await loginRateLimit.limit(`login_${identifier}`);
+            if (!success) throw new Error("Muitas tentativas. Tente novamente mais tarde.");
+          }
 
           const user = await prisma.user.findFirst({
             where: {
               OR: [
-                { email:    identifier },
+                { email: identifier },
                 { username: identifier.toUpperCase() },
               ],
             },
           });
 
-          if (!user) {
-            console.error(`❌ [AUTH] Usuário NÃO encontrado no banco: "${identifier}"`);
-            console.error(`❌ [AUTH] Procurados com: email="${identifier}" ou username="${identifier.toUpperCase()}"`);
-            return null;
-          }
+          if (!user || !user.password) return null;
 
-          console.error(`✅ [AUTH] Usuário ENCONTRADO: ${user.email}`);
+          const isPasswordValid = await compare(rawPassword, user.password);
+          if (!isPasswordValid) return null;
 
-          if (!user.password) {
-            console.error(`❌ [AUTH] Usuário encontrado mas SEM SENHA: ${user.email}`);
-            return null;
-          }
-
-          console.error(`🔐 [AUTH] Comparando senha... (hash primeiros 20 chars: ${user.password.substring(0, 20)})`);
-          
-          let isPasswordValid = false;
-          try {
-            isPasswordValid = await compare(rawPassword, user.password);
-          } catch (compareError) {
-            console.error(`❌ [AUTH] ERRO ao comparar senha:`, compareError);
-            return null;
-          }
-          
-          if (!isPasswordValid) {
-            console.error(`❌ [AUTH] Senha INCORRETA para: ${identifier}`);
-            return null;
-          }
-
-          console.error(`✅✅✅ [AUTH] Login SUCESSO: ${user.email}`);
-
-          // Busca subdomain do tenant para o middleware rotear corretamente
           let subdomain: string | null = null;
           if (user.tenantId) {
             const tenant = await prisma.tenant.findUnique({
@@ -11967,12 +12101,82 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             role:      user.role,
             tenantId:  user.tenantId,
             subdomain,
+            // 🛡️ HASH SNIPPET: Salva um pedaço da senha no token para invalidação futura
+            hashSnippet: user.password.substring(0, 10) 
           };
         } catch (err: any) {
-          console.error("❌ [AUTH] ERRO NÃO TRATADO:", err?.message || err);
-          console.error("❌ [AUTH] Stack:", err?.stack);
+          console.error("❌ [AUTH ERROR]:", err?.message);
           return null;
         }
+      },
+    }),
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 2. LOGIN VIA MAGIC TOKEN (Uso Único / Handoff / Onboarding)
+    // ─────────────────────────────────────────────────────────────────────────────
+    CredentialsProvider({
+      id: "magic-token",
+      name: "Magic Token",
+      credentials: {
+        token: { type: "text" },
+        subdomain: { type: "text" },
+      },
+      async authorize(credentials, req) {
+        const headers = req?.headers as Headers | undefined;
+        const ip =
+          headers?.get("x-forwarded-for") ||
+          headers?.get("x-real-ip") ||
+          "anonymous";
+
+        // 🛡️ Rate limit: 5 tentativas por IP a cada 60 segundos
+        if (loginRateLimit) {
+          const { success, remaining } = await loginRateLimit.limit(
+            `login:${ip}`
+          );
+          if (!success) {
+            throw new Error(
+              `Muitas tentativas. Aguarde um momento e tente novamente.`
+            );
+          }
+        }
+
+        if (!credentials?.token || !credentials?.subdomain) return null;
+
+        // Busca tenant pelo subdomain + token (Garante que ambos combinam)
+        const tenant = await prisma.tenant.findFirst({
+          where: {
+            subdomain: credentials.subdomain as string,
+            token: credentials.token as string,
+          },
+          include: {
+            users: {
+              where: { role: "ORG_ADMIN" },
+              take: 1,
+            },
+          },
+        });
+
+        if (!tenant || !tenant.token) return null;
+
+        // 🔥 SEGURANÇA SÊNIOR: Invalida o token imediatamente (Consumível)
+        await prisma.tenant.update({
+          where: { id: tenant.id },
+          data: { token: null },
+        });
+
+        const user = tenant.users[0];
+        if (!user) return null;
+
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          tenantId: tenant.id,
+          subdomain: tenant.subdomain,
+          // Como o login é sem senha, injetamos o snippet real se houver senha, ou um fallback seguro.
+          hashSnippet: user.password ? user.password.substring(0, 10) : "no-pass"
+        };
       },
     }),
   ],
@@ -11991,14 +12195,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 
-callbacks: {
+  callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role      = user.role;
-        token.tenantId  = user.tenantId;
-        token.subdomain = user.subdomain;
-        // Bônus Sênior: Armazenar a data de login ajuda a forçar logout futuro
-        token.authTime = Date.now(); 
+        token.role        = user.role;
+        token.tenantId    = user.tenantId;
+        token.subdomain   = user.subdomain;
+        token.authTime    = Date.now(); 
+        token.hashSnippet = (user as any).hashSnippet; // Guarda o estado da senha
       }
       return token;
     },
@@ -12010,19 +12214,16 @@ callbacks: {
         session.user.tenantId  = (token.tenantId  as string) || null;
         session.user.subdomain = (token.subdomain as string) || null;
         
-        // ⚠️ CORREÇÃO CRÍTICA (Item 14): Invalidação de Sessão Server-side
-        // Vamos checar no banco se o usuário ainda existe e está ativo.
-        // Como o NextAuth chama a session freneticamente no client, você pode 
-        // querer criar uma estratégia de Redis para escalar, mas para micro-SaaS, 
-        // um select leve resolve o problema de Account Takeover imediato.
+        // ⚠️ INVALIDEZ DE SESSÃO EM TEMPO REAL
         try {
            const dbUser = await prisma.user.findUnique({
               where: { id: session.user.id },
-              select: { id: true } // Seleciona apenas o ID, bem rápido
+              select: { id: true, password: true } 
            });
 
-           // Se o admin apagou o usuário, a sessão morre
-           if (!dbUser) {
+           // Se o admin apagou o usuário OU resetou o PIN (hash mudou), a sessão morre
+           const currentSnippet = dbUser?.password ? dbUser.password.substring(0, 10) : "no-pass";
+           if (!dbUser || currentSnippet !== token.hashSnippet) {
               return { ...session, error: "RefreshAccessTokenError" } as any;
            }
         } catch (err) {
@@ -12032,6 +12233,10 @@ callbacks: {
       return session;
     },
   },
+
+  pages:   { signIn: "/entrar" },
+  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
+  secret:  process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
 });
 </file>
 
@@ -12673,23 +12878,18 @@ export default async function EventDashboardPage({
 
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getRootDomain, isLocalHost, toLogin, toSubdomain, to } from "@/lib/middleware/helpers";
 
 export const config = {
   matcher: [
-    // Ignora estáticos, imagens e rotas da API (que já são tratadas no backend)
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$|.*\\.png$|.*\\.jpg$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp)$).*)",
   ],
 };
 
 export default auth((req) => {
-  const url      = req.nextUrl; 
+  const url = req.nextUrl;
   const hostname = req.headers.get("host") || "";
-
-  const isLocal    = hostname.includes("localhost");
-  
-  // 🔥 A TRAVA DE SEGURANÇA: Remove protocolos (http:// ou https://) e barras finais que possam vir do .env
-  let rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
-  rootDomain = rootDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const rootDomain = getRootDomain();
 
   const isRootDomain =
     hostname === rootDomain ||
@@ -12697,108 +12897,73 @@ export default auth((req) => {
     hostname === "localhost:3000";
 
   const currentSubdomain = isRootDomain ? null : hostname.split(".")[0];
+  const session = req.auth;
+  const role = session?.user?.role;
+  const userSubdomain = session?.user?.subdomain ?? (session?.user as any)?.tenant?.subdomain;
 
-  const session       = req.auth;
-  const role          = session?.user?.role;
-  const userSubdomain = session?.user?.subdomain || (session?.user as any)?.tenant?.subdomain;
-
-  // ── HELPER 1: Redirect interno (Mesmo domínio) ──────────────────────────
-  const to = (pathname: string) => {
-    const next = url.clone();
-    next.pathname = pathname;
-    return NextResponse.redirect(next);
-  };
-
-  // ── HELPER 2: A SOLUÇÃO SÊNIOR (Redirect cruzado para Subdomínio) ───────
-  const toSubdomain = (subdomain: string, pathname: string) => {
-    const next = url.clone(); 
-    next.pathname = pathname;
-    next.host = isLocal ? `${subdomain}.localhost:3000` : `${subdomain}.${rootDomain}`;
-    return NextResponse.redirect(next);
-  };
-
-  // ── 1. PÓS-LOGIN ─────────────────────────────────────────────────────────
-  if ((url.pathname === "/" || url.pathname === "/entrar") && session) {
-
-    if (role === "SUPER_ADMIN") {
-      return to("/admin");
-    }
-
-    if (userSubdomain) {
-      if (isRootDomain || currentSubdomain !== userSubdomain) {
-        if (role === "ORG_ADMIN") return toSubdomain(userSubdomain, "/dashboard");
-        if (role === "STAFF")     return toSubdomain(userSubdomain, "/vendas");
-      }
-
-      if (role === "ORG_ADMIN") return to("/dashboard");
-      if (role === "STAFF")     return to("/vendas");
-    }
-  }
-
-  // ── 2. PROTEÇÃO DE ROTAS ──────────────────────────────────────────────────
+  // ── ROTAS PÚBLICAS (definidas primeiro — usadas em múltiplos checks abaixo) ──
   const publicRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
   const isPublicRoute = publicRoutes.some(
     (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
   );
 
-  if (!isPublicRoute && !session) {
-    const next = url.clone();
-    next.pathname = "/entrar";
-    next.searchParams.set("callbackUrl", url.pathname);
-    return NextResponse.redirect(next);
+  // ── 1. SESSÃO INVÁLIDA ───────────────────────────────────────────────────
+  // ✅ Só bloqueia rotas protegidas — /projector e /cartela são públicos
+  // e não exigem sessão válida (ex: telão aberto por visitante)
+  if (!isPublicRoute && (session as any)?.error === "RefreshAccessTokenError") {
+    return toLogin(url, "session_expired");
   }
 
-  // ── 3. ISOLAMENTO ENTRE TENANTS + RBAC + SERVER ACTIONS BLOQUEADAS ────────
+  // ── 2. ROTEAMENTO PÓS-LOGIN ──────────────────────────────────────────────
+  if ((url.pathname === "/" || url.pathname === "/entrar") && session) {
+    if (role === "SUPER_ADMIN") return to(url, "/admin");
+
+    if (userSubdomain) {
+      if (isRootDomain || currentSubdomain !== userSubdomain) {
+        if (role === "ORG_ADMIN") return toSubdomain(url, userSubdomain, "/dashboard");
+        if (role === "STAFF")     return toSubdomain(url, userSubdomain, "/vendas");
+      }
+      if (role === "ORG_ADMIN") return to(url, "/dashboard");
+      if (role === "STAFF")     return to(url, "/vendas");
+    }
+  }
+
+  // ── 3. PROTEÇÃO DE ROTAS PRIVADAS ─────────────────────────────────────────
+  if (!isPublicRoute && !session) {
+    return toLogin(url, undefined, url.pathname);
+  }
+
+  // ── 4. ISOLAMENTO CROSS-TENANT E RBAC ─────────────────────────────────────
   if (session && role !== "SUPER_ADMIN") {
-    
-    // Org_Admin ou Staff tentando acessar subdomínio de outra ONG
     if (!isRootDomain && userSubdomain !== currentSubdomain) {
-      
-      // 🛡️ CORREÇÃO CRÍTICA (Item 17): 
-      // Se for uma Server Action (mutação de dados) tentando atravessar inquilinos,
-      // DESTRUÍMOS a requisição com 403 Forbidden em vez de redirecionar.
-      const isServerAction = req.headers.has("next-action");
-      if (isServerAction || req.method !== "GET") {
+      if (req.headers.has("next-action") || req.method !== "GET") {
         return new NextResponse("Forbidden: Tentativa de manipulação cross-tenant.", { status: 403 });
       }
-
-      // Se for apenas uma navegação comum (GET), redireciona suavemente
-      const next = url.clone();
-      next.pathname = "/entrar";
-      next.searchParams.set("error", "AccessDenied");
-      return NextResponse.redirect(next);
+      return toLogin(url, "AccessDenied");
     }
 
-    // Staff tentando acessar áreas de administração
-    if (
-      role === "STAFF" &&
-      (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))
-    ) {
-      return to("/vendas");
+    if (role === "STAFF" && (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))) {
+      return to(url, "/vendas");
     }
   }
 
-  // ── 4. REWRITE PARA MULTI-TENANT ──────────────────────────────────────────
+  // ── 5. MULTI-TENANT REWRITE ───────────────────────────────────────────────
   if (currentSubdomain) {
-    const globalRoutes = ["/entrar", "/api", "/_next"]; 
-    const isGlobalRoute = globalRoutes.some(r => 
-      url.pathname === r || url.pathname.startsWith(r + "/")
-    );
+    // /entrar EXATO é global — /entrar/magico cai no rewrite normalmente
+    const isGlobalRoute =
+      url.pathname === "/entrar" ||
+      ["/api", "/_next"].some((r) => url.pathname === r || url.pathname.startsWith(r + "/"));
 
     if (!isGlobalRoute) {
       const rewriteUrl = url.clone();
       rewriteUrl.pathname = `/${currentSubdomain}${url.pathname}`;
 
-      // Preservar headers de Server Action no re-roteamento
-      if (req.headers.get("next-action") || req.method === "POST") {
-        return NextResponse.rewrite(rewriteUrl, {
-          request: {
-            headers: req.headers,
-          },
-        });
-      }
+      const response = (req.headers.has("next-action") || req.method === "POST")
+        ? NextResponse.rewrite(rewriteUrl, { request: { headers: req.headers } })
+        : NextResponse.rewrite(rewriteUrl);
 
-      return NextResponse.rewrite(rewriteUrl);
+      response.headers.set("x-middleware-cache", "no-cache");
+      return response;
     }
   }
 

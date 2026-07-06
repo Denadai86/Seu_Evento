@@ -1,13 +1,11 @@
-// src/app/entrar/page.tsx (ou onde você centralizar a rota unificada)
-
+// src/app/entrar/page.tsx
 "use client";
 
-import { signIn } from "next-auth/react";
-import { useState, Suspense } from "react";
-import { KeyRound, User } from "lucide-react";
+import { signIn, signOut } from "next-auth/react";
+import { useState, useEffect, Suspense } from "react";
+import { KeyRound, User, Eye, EyeOff } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
-// 📦 Dicionário Centralizado de Mensagens
 const MESSAGES: Record<string, string> = {
   session_expired: "Sua sessão expirou por segurança. Entre novamente.",
   AccessDenied: "Você não possui permissão para acessar esta organização.",
@@ -21,8 +19,18 @@ function LoginForm() {
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // ✅ FIX LOOP: apaga o cookie corrompido sem redirecionar.
+  // Sem isso, o middleware vê a sessão como "presente" e entra em loop
+  // redirecionando /entrar → /dashboard → /entrar → ...
+  useEffect(() => {
+    if (errorParam === "session_expired") {
+      signOut({ redirect: false });
+    }
+  }, [errorParam]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,24 +45,21 @@ function LoginForm() {
       });
 
       if (res?.error) {
-        // Usa o dicionário ou uma mensagem padrão se o NextAuth devolver algo estranho
         setError(MESSAGES[res.error] || MESSAGES.CredentialsSignin);
         setIsLoading(false);
         return;
       }
 
-      // 🔥 UX SÊNIOR: replace() limpa o login do histórico (se o usuário clicar em "Voltar", ele não cai no login de novo)
-      // E aproveita o callbackUrl para devolver o usuário para onde ele estava tentando ir.
+      // replace() limpa o login do histórico — voltar não cai no login de novo
       window.location.replace(callbackUrl || "/");
-      
-    } catch (err) {
+    } catch {
       setError("Erro de comunicação com o servidor.");
       setIsLoading(false);
     }
   };
 
-  // Se houver erro na URL (vindo do middleware), resgata a mensagem do dicionário
   const urlErrorMessage = errorParam ? MESSAGES[errorParam] : null;
+  const isSessionExpired = errorParam === "session_expired";
 
   return (
     <div className="max-w-md w-full bg-slate-900 p-8 rounded-[2rem] shadow-2xl border border-slate-800">
@@ -67,6 +72,7 @@ function LoginForm() {
       </div>
 
       <form onSubmit={handleLogin} className="space-y-4">
+        {/* IDENTIFICAÇÃO */}
         <div className="space-y-1">
           <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">
             Identificação
@@ -86,28 +92,48 @@ function LoginForm() {
           </div>
         </div>
 
+        {/* SENHA / PIN */}
         <div className="space-y-1">
           <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">
             Código de Acesso
           </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Senha ou PIN"
-            required
-            disabled={isLoading}
-            className="w-full bg-black/50 border border-slate-700 rounded-xl p-3 text-center text-xl tracking-[0.5em] text-white focus:border-emerald-500 outline-none transition-colors placeholder:text-slate-600 placeholder:text-sm placeholder:tracking-normal"
-          />
+          {/*
+            ✅ FIX BOTÃO OLHO: o input fica dentro de um wrapper relativo.
+            O botão usa `type="button"` (evita submit acidental) e posição absoluta
+            com z-index garantido — nunca some, independente do estado do input.
+          */}
+          <div className="relative">
+            <input
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Senha ou PIN"
+              required
+              disabled={isLoading}
+              className="w-full bg-black/50 border border-slate-700 rounded-xl py-3 pl-4 pr-12 text-white text-center text-xl tracking-[0.5em] focus:border-emerald-500 outline-none transition-colors placeholder:text-slate-600 placeholder:text-sm placeholder:tracking-normal"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              disabled={isLoading}
+              tabIndex={-1}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-400 transition-colors disabled:opacity-40"
+              aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
         </div>
 
-        {/* Exibe o erro vindo da URL (Middleware) ou o Erro de submissão do form */}
+        {/* MENSAGEM DE ERRO */}
         {(urlErrorMessage || error) && (
-          <div className={`p-3 rounded-xl text-sm text-center font-bold animate-in fade-in ${
-            errorParam === "session_expired" 
-              ? "bg-amber-500/10 border border-amber-500/20 text-amber-400" 
-              : "bg-red-500/10 border border-red-500/20 text-red-400"
-          }`}>
+          <div
+            className={`p-3 rounded-xl text-sm text-center font-bold animate-in fade-in ${
+              isSessionExpired
+                ? "bg-amber-500/10 border border-amber-500/20 text-amber-400"
+                : "bg-red-500/10 border border-red-500/20 text-red-400"
+            }`}
+          >
             {error || urlErrorMessage}
           </div>
         )}
@@ -124,11 +150,14 @@ function LoginForm() {
   );
 }
 
-// 🛡️ Wrapper de Suspense obrigatório no Next.js ao usar useSearchParams no client
 export default function UnifiedLogin() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0b0f14] p-4 font-sans">
-      <Suspense fallback={<div className="text-white font-bold">Carregando painel de acesso...</div>}>
+      <Suspense
+        fallback={
+          <div className="text-white font-bold">Carregando painel de acesso...</div>
+        }
+      >
         <LoginForm />
       </Suspense>
     </div>
