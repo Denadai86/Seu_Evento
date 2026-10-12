@@ -1,12 +1,12 @@
-// src/actions/closeEvent.ts
 "use server";
+// src/actions/closeEvent.ts
 
 import prisma from "@/lib/prisma";
-import { requireTenant } from "@/lib/requireTenant";
+import { requireOrgAdmin } from "@/lib/requireTenant";
 import { revalidatePath } from "next/cache";
 
 export async function closeEventAndGenerateReport(eventId: string) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },

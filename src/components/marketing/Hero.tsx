@@ -1,6 +1,7 @@
 // src/components/marketing/Hero.tsx
 
 import { siteConfig } from "@/config/site";
+import { plans } from "@/config/plans";
 
 export default function Hero() {
   return (
@@ -36,7 +37,7 @@ export default function Hero() {
             href={siteConfig.urls.pricing}
             className="bg-orange-500 hover:bg-orange-600 px-8 py-4 rounded-xl font-bold"
           >
-            Começar por R$97
+            Começar por R${plans[0].price}
           </a>
 
           <a

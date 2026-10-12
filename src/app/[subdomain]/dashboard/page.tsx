@@ -105,12 +105,11 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
           <div className="lg:col-span-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-3xl font-black text-white">Meus Eventos</h2>
-              <Link 
-                href="/dashboard/novo-evento" 
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-3 rounded-2xl transition-all shadow-lg shadow-emerald-900/20"
-              >
-                <Plus size={20} /> Novo Evento
-              </Link>
+              {tenant.eventCredits !== null && (
+                <span className="text-sm font-bold text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-xl">
+                  {tenant.eventCredits} {tenant.eventCredits === 1 ? "evento restante" : "eventos restantes"} no plano
+                </span>
+              )}
             </div>
             <EventList initialEvents={tenant.events} />
           </div>

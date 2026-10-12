@@ -1,6 +1,9 @@
 import Navbar from "@/components/marketing/Navbar";
 import Link from "next/link";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { siteConfig } from "@/config/site";
+
+export const metadata = { title: "Política de Privacidade" };
 
 export default function PrivacidadePage() {
   return (
@@ -20,7 +23,7 @@ export default function PrivacidadePage() {
             <h1 className="text-4xl font-black text-slate-900">Políticas de Privacidade</h1>
           </div>
           
-          <p className="text-slate-500 mb-10">Última atualização: {new Date().toLocaleDateString('pt-BR')}</p>
+          <p className="text-slate-500 mb-10">Última atualização: {siteConfig.legalUpdatedAt}</p>
 
           <div className="space-y-8 text-slate-700 leading-relaxed">
             <section>
@@ -40,12 +43,27 @@ export default function PrivacidadePage() {
 
             <section>
               <h2 className="text-2xl font-bold text-slate-900 mb-4">3. Compartilhamento de Dados</h2>
-              <p>Não compartilhamos informações de identificação pessoal publicamente ou com terceiros, exceto quando exigido por lei. Os dados dos seus vendedores e do faturamento do seu evento são criptografados e acessíveis estritamente por você (Organizador).</p>
+              <p>Não vendemos dados pessoais. Para operar o serviço usamos provedores de infraestrutura que tratam dados em nosso nome: hospedagem da aplicação, banco de dados, limitação de tentativas de login e, quando contratado, processamento de pagamento. Parte desses provedores opera em servidores fora do Brasil, como nos Estados Unidos. Os dados do seu evento (vendas, voluntários e financeiro) são acessados por você e pela sua equipe, conforme as permissões que você define. A equipe da plataforma acessa esses dados apenas para suporte técnico e segurança.</p>
             </section>
 
             <section>
               <h2 className="text-2xl font-bold text-slate-900 mb-4">4. Direitos do Usuário</h2>
               <p>Você é livre para recusar a nossa solicitação de informações pessoais, entendendo que talvez não possamos fornecer alguns dos serviços desejados. A qualquer momento, você pode solicitar a exclusão definitiva da sua conta e do histórico dos seus eventos entrando em contato com nosso suporte.</p>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">5. Dados dos participantes dos seus eventos</h2>
+              <p>Em relação aos dados de compradores, voluntários e ganhadores que você registra no sistema, o Organizador decide como e para quê usá-los (controlador) e o Seu Evento atua como operador, tratando esses dados somente para prestar o serviço contratado.</p>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">6. Cookies e terceiros</h2>
+              <p>Usamos apenas o cookie necessário para manter o seu login. Não usamos cookies de publicidade nem ferramentas de análise de terceiros. As fontes de texto são carregadas do Google Fonts, o que pode expor o seu endereço IP ao Google.</p>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">7. Seus direitos (LGPD) e contato</h2>
+              <p>Nos termos da Lei nº 13.709/2018 (LGPD), você pode pedir confirmação de tratamento, acesso, correção, eliminação e portabilidade dos seus dados. Fale conosco pelo <a href={siteConfig.urls.whatsapp} target="_blank" rel="noopener noreferrer" className="underline">WhatsApp</a>{siteConfig.company.email && <> ou pelo e-mail <a href={`mailto:${siteConfig.company.email}`} className="underline">{siteConfig.company.email}</a></>}.{siteConfig.company.legalName && <> Responsável: {siteConfig.company.legalName}{siteConfig.company.cnpj && `, CNPJ ${siteConfig.company.cnpj}`}.</>}</p>
             </section>
           </div>
         </div>

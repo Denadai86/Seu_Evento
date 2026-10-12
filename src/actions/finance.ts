@@ -1,8 +1,9 @@
-// src/actions/finance.ts
 "use server";
 
+// src/actions/finance.ts
+
 import prisma from "@/lib/prisma";
-import { requireTenant } from "@/lib/requireTenant";
+import { requireOrgAdmin } from "@/lib/requireTenant";
 
 export interface FinanceStats {
   totalRevenue: number;
@@ -11,7 +12,7 @@ export interface FinanceStats {
 }
 
 export async function getEventFinanceStats(eventId: string): Promise<FinanceStats> {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
   if (!event) throw new Error("Evento não encontrado ou acesso negado.");

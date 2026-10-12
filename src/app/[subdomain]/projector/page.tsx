@@ -24,7 +24,7 @@ export default async function ProjectorPage({
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     include: {
-      sponsors: true,
+      sponsors: { orderBy: [{ order: "asc" }, { id: "asc" }] },
       tenant: true, // 🔥 IMPORTANTE
     },
   });

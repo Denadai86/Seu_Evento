@@ -1,6 +1,8 @@
+//src/lib/permissions.ts
+
 import { auth } from "@/lib/auth";
 
-export async function requireRole(roles: ("SUPER_ADMIN" | "ORG_ADMIN" | "OPERATOR")[]) {
+export async function requireRole(roles: ("SUPER_ADMIN" | "ORG_ADMIN" | "STAFF")[]) {
   const session = await auth();
 
   if (!session) {

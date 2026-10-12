@@ -1,5 +1,6 @@
-// src/actions/venda.ts
 "use server";
+
+// src/actions/venda.ts
 
 import prisma from "@/lib/prisma";
 import { PaymentMethod } from "@prisma/client";
@@ -31,10 +32,10 @@ export async function processBatchSale(
 
     const staff = await prisma.eventStaff.findUnique({
       where: { id: eventStaffId },
-      select: { userId: true },
+      select: { userId: true, eventId: true },
     });
 
-    if (!staff || staff.userId !== session!.user.id) {
+    if (!staff || staff.userId !== session!.user.id || staff.eventId !== eventId) {
       return { success: false, error: "Acesso negado. Você não pode vender em nome de outro vendedor." };
     }
 
@@ -48,7 +49,8 @@ export async function processBatchSale(
     });
 
     if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido ou acesso negado." };
-    if (event.status === "ENCERRADO") return { success: false, error: "Este evento já está encerrado. O caixa encontra-se fechado." };
+    // closeEvent grava "FINISHED"; "ENCERRADO" fica por compatibilidade com dados antigos
+    if (event.status === "ENCERRADO" || event.status === "FINISHED") return { success: false, error: "Este evento já está encerrado. O caixa encontra-se fechado." };
     if (!event.isActive) return { success: false, error: "Evento não está ativo. O caixa foi encerrado pela administração." };
 
     const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
@@ -69,11 +71,17 @@ export async function processBatchSale(
         );
       }
 
-      // Atualiza cartelas
-      await tx.card.updateMany({
-        where: { shortId: { in: shortIds } },
+      // Atualiza cartelas — 🔒 só as que AINDA não foram vendidas (isSold: false no próprio UPDATE).
+      // A checagem acima não basta: dois caixas no mesmo instante passariam os dois por ela.
+      const marked = await tx.card.updateMany({
+        where: { shortId: { in: shortIds }, eventId, isSold: false },
         data: { isSold: true, isPaid: true, eventStaffId, price: ticketPrice },
       });
+
+      if (marked.count !== shortIds.length) {
+        // Desfaz a transação inteira: nada é vendido nem cobrado pela metade.
+        throw new Error("Conflito! Outra venda ocupou uma ou mais cartelas agora há pouco. Atualize a lista e tente de novo.");
+      }
 
       // Registra caixa financeiro atrelado à escala do funcionário
       await tx.transaction.createMany({

@@ -1,6 +1,7 @@
 // src/components/marketing/Pricing.tsx
 
 import { plans } from "@/config/plans";
+import { whatsappLink } from "@/config/site";
 
 export default function Pricing() {
   return (
@@ -59,18 +60,26 @@ export default function Pricing() {
                 ))}
               </ul>
 
-              <button
-                className={`mt-8 w-full py-4 rounded-xl font-bold transition ${
+              <a
+                href={whatsappLink(`Olá! Tenho interesse no plano "${plan.name}" do Seu Evento.`)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`mt-8 block w-full text-center py-4 rounded-xl font-bold transition ${
                   plan.featured
                     ? "bg-orange-500 hover:bg-orange-600"
-                    : "border border-white/10"
+                    : "border border-white/10 hover:bg-white/5"
                 }`}
               >
                 {plan.cta}
-              </button>
+              </a>
             </div>
           ))}
         </div>
+
+        <p className="mt-10 text-center text-sm text-zinc-500">
+          A contratação é feita pelo WhatsApp: você escolhe o plano, combina o pagamento
+          e liberamos o seu acesso depois da confirmação.
+        </p>
 
       </div>
     </section>

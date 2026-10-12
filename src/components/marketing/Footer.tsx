@@ -95,7 +95,17 @@ export default function Footer() {
         <div className="border-t border-white/8 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-zinc-600">
 
           <span>
-            © {new Date().getFullYear()} {siteConfig.name}
+            © {new Date().getFullYear()} {siteConfig.company.legalName || `${siteConfig.name} (${siteConfig.developer})`}
+            {siteConfig.company.cnpj && ` · CNPJ ${siteConfig.company.cnpj}`}
+            {siteConfig.company.city && ` · ${siteConfig.company.city}`}
+            {siteConfig.company.email && (
+              <>
+                {" · "}
+                <a href={`mailto:${siteConfig.company.email}`} className="hover:text-zinc-400 underline-offset-2 hover:underline">
+                  {siteConfig.company.email}
+                </a>
+              </>
+            )}
           </span>
 
           <span>

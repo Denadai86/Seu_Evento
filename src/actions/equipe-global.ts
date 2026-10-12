@@ -1,11 +1,12 @@
-// src/actions/equipe-global.ts
-
 "use server";
+
+// src/actions/equipe-global.ts
 
 import prisma from "@/lib/prisma";
 import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
-import { requireTenant } from "@/lib/requireTenant"; // Importação crucial
+import { requireOrgAdmin } from "@/lib/requireTenant"; // Importação crucial
+import { secureInt } from "@/lib/random";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CRIAR STAFF (VENDEDOR/VOLUNTÁRIO)
@@ -14,12 +15,12 @@ import { requireTenant } from "@/lib/requireTenant"; // Importação crucial
 export async function createTenantStaff(name: string) {
   try {
     // 🛡️ SEGURANÇA: O tenantId vem do servidor. Ninguém consegue forjar.
-    const tenantId = await requireTenant();
+    const tenantId = await requireOrgAdmin();
 
     const baseUsername = name.split(" ")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const randomSuffix = secureInt(1000, 9999);
     const username = `${baseUsername}${randomSuffix}`;
-    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    const pin = secureInt(100000, 999999).toString();
     const hashedPin = await hash(pin, 12);
 
     await prisma.user.create({
@@ -51,7 +52,7 @@ export async function toggleStaffInEvent(
   permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean }
 ) {
   try {
-    const tenantId = await requireTenant();
+    const tenantId = await requireOrgAdmin();
 
     // 🛡️ SEGURANÇA DUPLA: Temos que garantir que tanto o Evento quanto o Usuário pertencem à ONG logada
     const [eventExists, userExists] = await Promise.all([
@@ -104,7 +105,7 @@ export async function toggleStaffInEvent(
 // ─────────────────────────────────────────────────────────────────────────────
 export async function resetGlobalStaffPin(userId: string) {
   try {
-    const tenantId = await requireTenant();
+    const tenantId = await requireOrgAdmin();
 
     // 🛡️ SEGURANÇA: Impede que o Admin da ONG 'A' resete a senha do usuário da ONG 'B'
     const userToReset = await prisma.user.findFirst({
@@ -115,7 +116,7 @@ export async function resetGlobalStaffPin(userId: string) {
       throw new Error("Acesso negado. O usuário não pertence à sua organização.");
     }
 
-    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const newPin = secureInt(100000, 999999).toString();
     const hashedPin = await hash(newPin, 12);
 
     const user = await prisma.user.update({

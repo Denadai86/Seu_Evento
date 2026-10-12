@@ -1,23 +1,21 @@
-// src/actions/bingo.ts
-
 "use server";
 
+// src/actions/bingo.ts
+
 import prisma from "@/lib/prisma";
-import { requireTenant } from "@/lib/requireTenant";
+import { requireTenant, requireEventAdmin, requireEventCapability } from "@/lib/requireTenant";
+import { auth } from "@/lib/auth";
+import { secureInt, securePick } from "@/lib/random";
+import { SPONSOR_SELECT, sponsorOrderBy, resolveSponsorSlots } from "@/lib/sponsorRotation";
 import { unstable_noStore as noStore } from "next/cache";
 import { revalidatePath } from "next/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FUNÇÃO AUXILIAR DE SEGURANÇA (DRY)
 // ─────────────────────────────────────────────────────────────────────────────
-async function requireEventAccess(eventId: string) {
-  const tenantId = await requireTenant();
-  const event = await prisma.event.findFirst({
-    where: { id: eventId, tenantId },
-  });
-  if (!event) throw new Error("Acesso negado. Evento não encontrado.");
-  return { tenantId, event };
-}
+// As guardas por papel ficam em @/lib/requireTenant:
+//   requireEventAdmin(eventId)                    → só ORG_ADMIN
+//   requireEventCapability(eventId, "canOperate") → ORG_ADMIN ou staff com a capacidade
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS MATEMÁTICOS
@@ -28,7 +26,7 @@ function generateUniqueIds(count: number, existingIds: string[]): string[] {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   while (ids.size < count) {
     let id = "";
-    for (let i = 0; i < 6; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
+    for (let i = 0; i < 6; i++) id += chars.charAt(secureInt(0, chars.length - 1));
     if (!existingIds.includes(id)) ids.add(id);
   }
   return Array.from(ids);
@@ -36,7 +34,7 @@ function generateUniqueIds(count: number, existingIds: string[]): string[] {
 
 function generateBingoColumn(min: number, max: number, count: number): number[] {
   const numbers = new Set<number>();
-  while (numbers.size < count) numbers.add(Math.floor(Math.random() * (max - min + 1)) + min);
+  while (numbers.size < count) numbers.add(secureInt(min, max));
   return Array.from(numbers).sort((a, b) => a - b);
 }
 
@@ -50,7 +48,7 @@ function getCardSignature(matrix: any): string {
 
 export async function generateBatchCards(eventId: string, quantity: number) {
   // 🛡️ SEGURANÇA: Reaproveitando a função auxiliar
-  const { tenantId, event } = await requireEventAccess(eventId);
+  const { tenantId, event } = await requireEventAdmin(eventId);
 
   const eventWithCards = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
@@ -90,31 +88,60 @@ export async function generateBatchCards(eventId: string, quantity: number) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function drawNextNumber(eventId: string) {
-  const { tenantId } = await requireEventAccess(eventId);
+  const { tenantId } = await requireEventCapability(eventId, "canOperate");
 
   try {
-    const event = await prisma.event.findFirst({
-      where: { id: eventId, tenantId },
-      select: { drawnNumbers: true },
-    });
+    // 🔒 COMPARE-AND-SWAP: o sponsorCursor sobe a CADA pedra, então serve de "versão" da linha.
+    // Se dois cliques (ou duas abas) sorteiam ao mesmo tempo, só um update passa
+    // (count === 1); o outro relê o estado e sorteia de novo — nunca repete pedra.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const event = await prisma.event.findFirst({
+        where: { id: eventId, tenantId },
+        select: { drawnNumbers: true, sponsorCursor: true },
+      });
 
-    if (!event) throw new Error("Evento não encontrado.");
+      if (!event) throw new Error("Evento não encontrado.");
 
-    const drawnNumbers: number[] = event.drawnNumbers as number[];
-    if (drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
+      const drawnNumbers: number[] = event.drawnNumbers as number[];
+      if (drawnNumbers.length >= 75) return { error: "Todas as pedras já foram sorteadas!" };
 
-    const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
-      (n) => !drawnNumbers.includes(n)
-    );
-    const nextNumber = available[Math.floor(Math.random() * available.length)];
+      const available = Array.from({ length: 75 }, (_, i) => i + 1).filter(
+        (n) => !drawnNumbers.includes(n)
+      );
+      const nextNumber = securePick(available);
 
-    const updated = await prisma.event.update({
-      where: { id: eventId },
-      data: { drawnNumbers: { push: nextNumber } },
-      select: { drawnNumbers: true },
-    });
+      // Pedra e cursor de patrocinadores avançam no MESMO update (atômico).
+      const swapped = await prisma.event.updateMany({
+        where: { id: eventId, tenantId, sponsorCursor: event.sponsorCursor },
+        data: {
+          drawnNumbers: { push: nextNumber },
+          sponsorCursor: { increment: 1 },
+        },
+      });
 
-    return { success: true, drawnNumbers: updated.drawnNumbers, latest: nextNumber };
+      if (swapped.count === 0) continue; // alguém sorteou no meio: relê e tenta de novo
+
+      const sponsors = await prisma.sponsor.findMany({
+        where: { eventId },
+        orderBy: sponsorOrderBy(),
+        select: SPONSOR_SELECT,
+      });
+      const { currentSponsor, nextSponsor } = resolveSponsorSlots(
+        sponsors,
+        event.sponsorCursor + 1,
+        true
+      );
+
+      return {
+        success: true,
+        drawnNumbers: [...drawnNumbers, nextNumber],
+        latest: nextNumber,
+        currentSponsor,
+        nextSponsor,
+      };
+    }
+
+    return { error: "Sorteio simultâneo detectado. Tente novamente." };
   } catch (error: any) {
     console.error("[DRAW_NUMBER_ERROR]", error);
     return { error: "Erro ao sortear o número. Tente novamente." };
@@ -125,7 +152,7 @@ export async function drawNextNumber(eventId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function resetGame(eventId: string) {
-  const { tenantId } = await requireEventAccess(eventId);
+  const { tenantId } = await requireEventCapability(eventId, "canOperate");
   await prisma.event.update({
     where: { id: eventId }, // Já garantimos a posse, basta usar o ID único
     data: { drawnNumbers: [] },
@@ -134,7 +161,7 @@ export async function resetGame(eventId: string) {
 }
 
 export async function toggleBoardVisibility(eventId: string, showBoard: boolean) {
-  const { tenantId } = await requireEventAccess(eventId);
+  const { tenantId } = await requireEventCapability(eventId, "canOperate");
   await prisma.event.update({
     where: { id: eventId },
     data: { showBoard },
@@ -143,7 +170,7 @@ export async function toggleBoardVisibility(eventId: string, showBoard: boolean)
 }
 
 export async function getEventCards(eventId: string) {
-  const { tenantId } = await requireEventAccess(eventId);
+  const { tenantId } = await requireEventCapability(eventId, ["canOperate", "canVerify"]);
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
     include: { cards: { orderBy: { shortId: "asc" } }, sponsors: true },
@@ -185,7 +212,12 @@ export async function checkCard(shortId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function validateWinningCard(eventId: string, shortId: string) {
-  const { tenantId } = await requireEventAccess(eventId);
+  let tenantId: string;
+  try {
+    ({ tenantId } = await requireEventCapability(eventId, ["canOperate", "canVerify"]));
+  } catch (e: any) {
+    return { success: false, error: e?.message ?? "Sem permissão." };
+  }
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
@@ -263,47 +295,35 @@ export async function validateWinningCard(eventId: string, shortId: string) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ESTADO AO VIVO DO TELÃO (SWR polling)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function getGameState(eventId: string) {
-  noStore();
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    select: {
-      drawnNumbers: true,
-      showBoard: true,
-      pendingWinnerCard: true,
-      pendingWinnerName: true,
-      bingoConfirmed: true,
-    },
-  });
-  if (!event) return null;
-
-  return {
-    drawnNumbers: event.drawnNumbers || [],
-    latest: event.drawnNumbers[event.drawnNumbers.length - 1] || null,
-    showBoard: event.showBoard,
-    pendingWinnerCard: event.pendingWinnerCard,
-    pendingWinnerName: event.pendingWinnerName,
-    bingoConfirmed: event.bingoConfirmed,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PROTOCOLO DE 3 VIAS
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function alertLocutor(eventId: string, shortId: string, winnerName: string) {
-  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Antes, permitia fraude injetando eventId de outros.
-  const { tenantId } = await requireEventAccess(eventId);
+  const { tenantId } = await requireEventCapability(eventId, "canVerify");
 
-  await prisma.event.update({
-    where: { id: eventId }, // Segurança garantida no passo anterior
+  // 🛡️ A cartela é conferida AQUI: o navegador não decide quem ganhou.
+  const validation = await validateWinningCard(eventId, shortId);
+  if (!validation.success) {
+    return { success: false, error: validation.error ?? "Cartela inválida." };
+  }
+  if (!validation.isWinner) {
+    return { success: false, error: "Esta cartela não está vencendo a rodada atual." };
+  }
+
+  // O dono da cartela não é guardado no sistema: o fiscal digita o nome. Limpa e limita.
+  const cleanName = String(winnerName ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+  if (!cleanName) return { success: false, error: "Informe o nome do ganhador." };
+
+  // O "Fiscal" vem da SESSÃO, nunca do navegador.
+  const session = await auth();
+  const fiscal = String(session?.user?.name ?? "Fiscal").slice(0, 40);
+
+  await prisma.event.updateMany({
+    where: { id: eventId, tenantId },
     data: {
-      pendingWinnerCard: shortId.toUpperCase(),
-      pendingWinnerName: winnerName,
+      pendingWinnerCard: validation.cardId ?? shortId.trim().toUpperCase(),
+      pendingWinnerName: `${cleanName} (Fiscal: ${fiscal})`,
       bingoConfirmed: false,
     },
   });
@@ -314,7 +334,7 @@ export async function alertLocutor(eventId: string, shortId: string, winnerName:
 
 export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
   // ⚠️ CORREÇÃO CRÍTICA (Item 4): Garantindo posse do evento.
-  const { tenantId } = await requireEventAccess(eventId);
+  const { tenantId } = await requireEventCapability(eventId, "canOperate");
 
   await prisma.event.update({
     where: { id: eventId },
@@ -336,7 +356,7 @@ export async function toggleBingoCelebration(eventId: string, confirm: boolean) 
 
 export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeId: string) {
   // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante posse do evento
-  const { tenantId } = await requireEventAccess(eventId);
+  const { tenantId } = await requireEventCapability(eventId, "canOperate");
 
   // ⚠️ CORREÇÃO CRÍTICA (Item 5): Garante que o prêmio a encerrar pertence EXATAMENTE a este evento!
   const prize = await prisma.prize.findUnique({

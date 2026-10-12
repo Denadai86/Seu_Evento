@@ -1,10 +1,27 @@
 ///src/app/(marketing)/layout.tsx
 
 import type { Metadata } from "next";
+import { siteConfig } from "@/config/site";
+
+const title = "Seu Evento | Gestão de Bingos e Sorteios Profissionais";
+const description =
+  "Plataforma completa para Paróquias, ONGs e Empresas. Crie cartelas, gerencie vendas e tenha um telão interativo incrível.";
 
 export const metadata: Metadata = {
-  title: "Seu Evento | Gestão de Bingos e Sorteios Profissionais",
-  description: "Plataforma completa para Paróquias, ONGs e Empresas. Crie cartelas, gerencie vendas e tenha um telão interativo incrível.",
+  metadataBase: new URL(siteConfig.url),
+  title: { default: title, template: "%s | Seu Evento" },
+  description,
+  alternates: { canonical: "/" },
+  // Prévia do link quando compartilhado no WhatsApp, Facebook, etc.
+  openGraph: {
+    type: "website",
+    locale: "pt_BR",
+    url: "/",
+    siteName: "Seu Evento",
+    title,
+    description,
+  },
+  twitter: { card: "summary_large_image", title, description },
 };
 
 export default function MarketingLayout({

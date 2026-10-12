@@ -1,5 +1,6 @@
-// src/app/[subdomain]/verify/verifyClient.tsx
 "use client";
+
+// src/app/[subdomain]/verify/verifyClient.tsx
 
 import { useState, useTransition } from "react";
 import { alertLocutor } from "@/actions/bingo";
@@ -21,12 +22,12 @@ export default function VerifyClient({ eventId, shortId, validation, verifierNam
     if (!winnerName || winnerName.trim() === "") return;
 
     startTransition(async () => {
-      const result = await alertLocutor(eventId, shortId, `${winnerName.trim()} (Fiscal: ${verifierName})`);
+      const result = await alertLocutor(eventId, shortId, winnerName.trim());
       
       if (result?.success) {
         setIsSent(true);
       } else {
-        alert("Erro ao enviar alerta para o locutor.");
+        alert(result?.error || "Erro ao enviar alerta para o locutor.");
       }
     });
   };

@@ -27,7 +27,7 @@ export default function EventList({
         const res = await createEvent(name);
 
         if (!res.success) {
-          alert("Erro ao criar evento");
+          alert(res.error ?? "Erro ao criar evento");
         }
         // NÃO precisa setState → revalidatePath resolve
       } catch (err) {

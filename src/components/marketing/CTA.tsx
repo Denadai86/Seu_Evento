@@ -1,7 +1,8 @@
 // src/components/marketing/CTA.tsx
 // Melhorado — headline mais específico, preço no botão, garantia de devolução
 
-import {siteConfig} from "@/config/site";
+import { siteConfig } from "@/config/site";
+import { plans } from "@/config/plans";
 
 export default function CTA() {
   return (
@@ -24,7 +25,7 @@ export default function CTA() {
             </h2>
 
             <p className="mt-6 text-zinc-400 text-lg max-w-xl mx-auto leading-relaxed">
-              Configure em 10 minutos. Seu evento roda com telão profissional, caixa por voluntário e fechamento automático — por menos de 2% do que você vai arrecadar.
+              Configure em 10 minutos. Seu evento roda com telão profissional, caixa por voluntário e fechamento automático.
             </p>
 
             <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -32,7 +33,7 @@ export default function CTA() {
                 href={siteConfig.urls.pricing}
                 className="bg-orange-500 hover:bg-orange-600 active:scale-95 transition-all px-10 py-5 rounded-2xl font-black text-lg shadow-xl shadow-orange-500/25"
               >
-                Começar por R$97 →
+                Começar por R${plans[0].price} →
               </a>
               <a
                 href={siteConfig.urls.whatsapp}
@@ -46,7 +47,7 @@ export default function CTA() {
 
             {/* Garantia */}
             <p className="mt-6 text-sm text-zinc-500">
-              🔒 Garantia de 7 dias — se não funcionar para você, devolvemos 100% do valor. Sem pergunta.
+              🔒 Garantia de 7 dias — se não for para você, devolvemos 100% do valor, sem perguntas. Se nenhuma cartela tiver sido vendida, você tem até 30 dias.
             </p>
           </div>
 

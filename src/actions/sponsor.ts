@@ -1,8 +1,9 @@
-// src/actions/sponsor.ts
 "use server";
 
+// src/actions/sponsor.ts
+
 import prisma from "@/lib/prisma";
-import { requireTenant } from "@/lib/requireTenant";
+import { requireOrgAdmin } from "@/lib/requireTenant";
 import { revalidatePath } from "next/cache";
 import { put } from "@vercel/blob";
 
@@ -10,7 +11,7 @@ import { put } from "@vercel/blob";
 // UPLOAD DE LOGO PARA VERCEL BLOB
 // ─────────────────────────────────────────────────────────────────────────────
 export async function uploadSponsorLogo(formData: FormData) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   const file = formData.get("file") as File;
   if (!file) throw new Error("Nenhum arquivo enviado.");
@@ -39,7 +40,7 @@ export async function addSponsor(
     type: "QUINA" | "FULL_HOUSE";
   }
 ) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
@@ -93,7 +94,7 @@ export async function updateSponsor(
   contribution: number = 0,
   logoUrl?: string
 ) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   const sponsor = await prisma.sponsor.findFirst({
     where: { id: sponsorId, event: { tenantId } },
@@ -118,7 +119,7 @@ export async function updateSponsor(
 // REMOVER PATROCINADOR
 // ─────────────────────────────────────────────────────────────────────────────
 export async function removeSponsor(sponsorId: string) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   const sponsor = await prisma.sponsor.findFirst({
     where: { id: sponsorId, event: { tenantId } },

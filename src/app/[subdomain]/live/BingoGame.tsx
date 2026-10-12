@@ -1,5 +1,6 @@
-// src/app/[subdomain]/live/BingoGame.tsx
 "use client";
+
+// src/app/[subdomain]/live/BingoGame.tsx
 
 import { useState, useTransition, useMemo, useEffect } from "react";
 import useSWR from "swr";
@@ -14,8 +15,40 @@ import {
   completeCurrentPrizeAndNext 
 } from "@/actions/bingo";
 import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy, LogOut } from "lucide-react";
+import { notifyProjector } from "@/lib/projectorSync";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
+
+type SponsorView = { id: string; name: string; logoUrl: string | null } | null;
+
+// Linha do painel de patrocinadores da mesa do locutor
+function SponsorRow({ label, sponsor, highlight }: { label: string; sponsor: SponsorView; highlight?: boolean }) {
+  return (
+    <div
+      className={`flex items-center gap-4 rounded-2xl border px-4 py-3 ${
+        highlight
+          ? "border-[#ca8a04] bg-[#ca8a04]/10 shadow-[0_0_20px_rgba(202,138,4,0.2)]"
+          : "border-emerald-900/40 bg-black/30"
+      }`}
+    >
+      <div className="w-14 h-14 shrink-0 rounded-xl bg-black/40 border border-emerald-900/40 flex items-center justify-center overflow-hidden">
+        {sponsor?.logoUrl ? (
+          <img src={sponsor.logoUrl} alt={sponsor.name} className="max-h-12 max-w-12 object-contain" />
+        ) : (
+          <span className="text-emerald-900 text-xs font-bold">—</span>
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className={`text-[10px] font-black uppercase tracking-widest ${highlight ? "text-[#fef08a]" : "text-emerald-400/50"}`}>
+          {label}
+        </p>
+        <p className={`font-black truncate ${highlight ? "text-xl text-white" : "text-base text-emerald-100/70"}`}>
+          {sponsor ? sponsor.name : "—"}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 interface BingoGameProps {
   eventId: string;
@@ -54,9 +87,18 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
     refreshInterval: 1500, 
   });
 
+  // Atualiza a mesa E avisa o telão (mesmo navegador) no mesmo instante
+  const refresh = () => {
+    mutate();
+    notifyProjector(eventId);
+  };
+
   const drawnNumbers: number[] = data?.drawnNumbers || [];
   const showBoard = data?.showBoard !== false;
   const currentPrize = data?.currentPrize || null;
+  const currentSponsor: SponsorView = data?.currentSponsor ?? null;
+  const nextSponsor: SponsorView = data?.nextSponsor ?? null;
+  const sponsorCount: number = data?.sponsors?.length ?? sponsors.length;
 
   const board = useMemo(() => [
     { letter: "B", range: [1, 15] },
@@ -81,23 +123,48 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
     }).filter(c => c.remaining <= 4).sort((a, b) => a.remaining - b.remaining).slice(0, 10);
   }, [cards, drawnNumbers]);
 
-  const animateDraw = async (finalNumber: number) => {
-    setSpinning(true);
-    for (let i = 0; i < 12; i++) {
-      await new Promise((r) => setTimeout(r, 60));
-      setDisplayNumber(Math.floor(Math.random() * 75) + 1);
-    }
-    setDisplayNumber(finalNumber);
-    setSpinning(false);
-  };
-
   const handleDraw = () => {
     startTransition(async () => {
+      const previousNumber = displayNumber;
+
+      // 🎰 O giro começa NO CLIQUE (antes ele só começava depois da resposta do servidor).
+      setSpinning(true);
+      const spinTimer = setInterval(() => setDisplayNumber(Math.floor(Math.random() * 75) + 1), 60);
+      const minSpin = new Promise((r) => setTimeout(r, 500));
+
       const res = await drawNextNumber(eventId);
+
+      // 📡 Avisa o telão ASSIM que o servidor confirma — sem esperar o fim do giro daqui.
       if (res?.success) {
-        await animateDraw(res.latest);
-        mutate();
+        notifyProjector(eventId, {
+          type: "draw",
+          drawnNumbers: res.drawnNumbers,
+          currentSponsor: res.currentSponsor,
+          nextSponsor: res.nextSponsor,
+        });
       }
+
+      await minSpin;
+      clearInterval(spinTimer);
+
+      if (res?.success) {
+        setDisplayNumber(res.latest);
+        // Atualiza a mesa na hora com o que o servidor devolveu e revalida em seguida
+        mutate(
+          (prev: any) => ({
+            ...(prev ?? {}),
+            drawnNumbers: res.drawnNumbers,
+            currentSponsor: res.currentSponsor,
+            nextSponsor: res.nextSponsor,
+          }),
+          { revalidate: true }
+        );
+      } else {
+        setDisplayNumber(previousNumber); // falhou: volta a mostrar a última pedra de verdade
+        if (res?.error) alert(res.error);
+      }
+
+      setSpinning(false);
     });
   };
 
@@ -107,14 +174,14 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
       await resetGame(eventId);
       setDisplayNumber(null);
       setAuditResult(null);
-      mutate();
+      refresh();
     });
   };
 
   const handleToggleBoard = () => {
     startTransition(async () => {
       await toggleBoardVisibility(eventId, !showBoard);
-      mutate();
+      refresh();
     });
   };
 
@@ -125,7 +192,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
       if (res.success) {
         setDisplayNumber(null);
         setAuditResult(null);
-        mutate();
+        refresh();
       }
     });
   };
@@ -219,10 +286,10 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
               <p className="text-2xl font-black">Cartela {data.pendingWinnerCard} — {data.pendingWinnerName}</p>
             </div>
             <div className="flex gap-2 w-full md:w-auto">
-              <button onClick={() => toggleBingoCelebration(eventId, false).then(() => mutate())} className="flex-1 md:flex-none bg-black text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-800">
+              <button onClick={() => toggleBingoCelebration(eventId, false).then(() => refresh())} className="flex-1 md:flex-none bg-black text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-800">
                 Falso Alarme (Limpar)
               </button>
-              <button onClick={() => toggleBingoCelebration(eventId, true).then(() => mutate())} className="flex-1 md:flex-none bg-white text-black px-6 py-3 rounded-xl font-black text-lg shadow-xl hover:scale-105 transition-transform">
+              <button onClick={() => toggleBingoCelebration(eventId, true).then(() => refresh())} className="flex-1 md:flex-none bg-white text-black px-6 py-3 rounded-xl font-black text-lg shadow-xl hover:scale-105 transition-transform">
                 🎉 SOLTAR TELÃO!
               </button>
             </div>
@@ -299,8 +366,23 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
           </div>
         </div>
 
+        {/* COLUNA CENTRAL: patrocinador (acima) + grade de pedras */}
+        <div className="xl:col-span-2 flex flex-col gap-6">
+        {/* PATROCINADOR: o que está no ar e o que vem na PRÓXIMA pedra (lado a lado, na ordem do tempo) */}
+        <div className="bg-black/40 p-5 rounded-3xl border border-emerald-900/50 shadow-xl backdrop-blur-sm">
+          <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-4">Patrocinador da Pedra</h2>
+          {sponsorCount === 0 ? (
+            <p className="text-center text-emerald-900/70 text-xs py-3">Nenhum patrocinador cadastrado neste evento.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <SponsorRow label="No ar agora" sponsor={currentSponsor} />
+              <SponsorRow label="Próxima pedra — anuncie antes de sortear" sponsor={nextSponsor} highlight />
+            </div>
+          )}
+        </div>
+
         {/* PAINEL GERAL */}
-        <div className="xl:col-span-2 bg-black/40 p-6 md:p-8 rounded-3xl border border-emerald-900/50 shadow-2xl backdrop-blur-sm h-fit">
+        <div className="bg-black/40 p-6 md:p-8 rounded-3xl border border-emerald-900/50 shadow-2xl backdrop-blur-sm h-fit">
           <div className="flex flex-col gap-4">
             {board.map((row) => (
               <div key={row.letter} className="flex items-center gap-2 md:gap-4">
@@ -314,6 +396,7 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
               </div>
             ))}
           </div>
+        </div>
         </div>
 
         {/* RANKING */}

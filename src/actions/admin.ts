@@ -81,7 +81,7 @@ export async function createTenantExpress(data: {
   adminName: string;
   adminEmail: string;
   adminPass: string;
-  planType: "SINGLE_EVENT" | "ANNUAL";
+  planType: "SINGLE_EVENT" | "THREE_EVENTS" | "ANNUAL";
   eventDate?: string;
 }) {
   try {
@@ -100,7 +100,8 @@ export async function createTenantExpress(data: {
 
     // Calculando a validade do ambiente
     let calculatedExpiration: Date | null = null;
-    if (data.planType === "ANNUAL") {
+    if (data.planType === "ANNUAL" || data.planType === "THREE_EVENTS") {
+      // Anual e 3 Eventos: 12 meses de acesso
       const d = new Date();
       d.setFullYear(d.getFullYear() + 1);
       calculatedExpiration = d;
@@ -122,6 +123,8 @@ export async function createTenantExpress(data: {
           active: true,
           planType: data.planType,
           expiresAt: calculatedExpiration,
+          // Evento Único = 1, 3 Eventos = 3, Anual = ilimitado (null)
+          eventCredits: data.planType === "SINGLE_EVENT" ? 1 : data.planType === "THREE_EVENTS" ? 3 : null,
         },
       });
 
@@ -142,6 +145,31 @@ export async function createTenantExpress(data: {
   } catch (error: any) {
     console.error("[CREATE_TENANT_ERROR]", error);
     return { success: false, error: error.message || "Erro interno ao provisionar o cliente." };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3.1 CRÉDITOS DE EVENTO (renovação / ampliação de plano)
+// ─────────────────────────────────────────────────────────────────────────────
+export async function addEventCredits(tenantId: string, amount: number) {
+  try {
+    await requireGodMode();
+    if (!Number.isInteger(amount) || amount < 1 || amount > 50) {
+      return { success: false, error: "Quantidade inválida." };
+    }
+
+    // Só tenants com limite (eventCredits != null). Plano ilimitado não tem o que somar.
+    const updated = await prisma.tenant.updateMany({
+      where: { id: tenantId, eventCredits: { not: null } },
+      data: { eventCredits: { increment: amount } },
+    });
+    if (updated.count === 0) return { success: false, error: "Este cliente tem eventos ilimitados." };
+
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("[ADD_CREDITS_ERROR]", error);
+    return { success: false, error: error.message || "Erro ao adicionar eventos." };
   }
 }
 

@@ -4,7 +4,7 @@ import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/prisma";
 import { compare } from "bcryptjs";
-import { loginRateLimit } from "@/lib/ratelimit"; // Certifique-se de que este arquivo exista
+import { checkLoginRateLimit, getClientIp } from "@/lib/ratelimit";
 
 // Extrai domínio de uma URL, removendo protocolo se existir
 const extractDomain = (url: string) => {
@@ -47,9 +47,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const rawPassword = credentials.password as string;
 
           // 🛡️ PROTEÇÃO CONTRA FORÇA BRUTA (Rate Limit restaurado)
-          if (loginRateLimit) {
-            const { success } = await loginRateLimit.limit(`login_${identifier}`);
-            if (!success) throw new Error("Muitas tentativas. Tente novamente mais tarde.");
+          const clientIp = getClientIp(req?.headers as Headers | undefined);
+          if (
+            !(await checkLoginRateLimit("identifier", identifier)) ||
+            !(await checkLoginRateLimit("ip", clientIp))
+          ) {
+            throw new Error("Muitas tentativas. Tente novamente mais tarde.");
           }
 
           const user = await prisma.user.findFirst({
@@ -103,22 +106,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         subdomain: { type: "text" },
       },
       async authorize(credentials, req) {
-        const headers = req?.headers as Headers | undefined;
-        const ip =
-          headers?.get("x-forwarded-for") ||
-          headers?.get("x-real-ip") ||
-          "anonymous";
+        const ip = getClientIp(req?.headers as Headers | undefined);
 
-        // 🛡️ Rate limit: 5 tentativas por IP a cada 60 segundos
-        if (loginRateLimit) {
-          const { success, remaining } = await loginRateLimit.limit(
-            `login:${ip}`
+        // 🛡️ Rate limit do link mágico: por IP
+        if (!(await checkLoginRateLimit("magic", ip))) {
+          throw new Error(
+            `Muitas tentativas. Aguarde um momento e tente novamente.`
           );
-          if (!success) {
-            throw new Error(
-              `Muitas tentativas. Aguarde um momento e tente novamente.`
-            );
-          }
         }
 
         if (!credentials?.token || !credentials?.subdomain) return null;

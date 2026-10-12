@@ -7,7 +7,7 @@ export default function Audience() {
       icon: "⛪",
       title: "Igrejas e Paróquias",
       description:
-        "O bingo beneficente é a principal fonte de renda dos projetos sociais. Com o SeuEvento, a tesoureira tem o fechamento de caixa pronto antes de apagar as luzes do salão paroquial.",
+        "O bingo beneficente é a principal fonte de renda dos projetos sociais. Com o Seu Evento, a tesoureira tem o fechamento de caixa pronto antes de apagar as luzes do salão paroquial.",
       highlight: "Relatório pronto em 1 clique",
     },
     {
@@ -28,7 +28,7 @@ export default function Audience() {
       icon: "🎪",
       title: "Eventos Especiais",
       description:
-        "Festa junina, arraiá beneficente, rifas de fim de ano. O SeuEvento adapta ao seu formato — quina, cartela cheia, ou as duas rodadas na mesma noite.",
+        "Festa junina, arraiá beneficente, rifas de fim de ano. O Seu Evento adapta ao seu formato — quina, cartela cheia, ou as duas rodadas na mesma noite.",
       highlight: "Múltiplas rodadas num evento",
     },
   ];
@@ -45,7 +45,7 @@ export default function Audience() {
             Feito para quem arrecada<br />com propósito.
           </h2>
           <p className="mt-5 text-zinc-400 text-lg">
-            Não importa o tamanho do evento. Se tem voluntário, cartela e um prêmio no final, o SeuEvento resolve.
+            Não importa o tamanho do evento. Se tem voluntário, cartela e um prêmio no final, o Seu Evento resolve.
           </p>
         </div>
 

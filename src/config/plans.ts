@@ -8,13 +8,15 @@ export type Plan = {
   cta: string;
 };
 
+// ⚠️ Fonte única dos preços exibidos no site. O texto do Hero/CTA usa `plans[0].price`.
 export const plans: Plan[] = [
   {
     id: "single",
     name: "Evento Único",
-    price: 97,
+    price: 199,
     features: [
       "1 evento",
+      "Acesso até 7 dias após a data do evento",
       "Cartelas ilimitadas",
       "Telão ao vivo",
       "Relatórios",
@@ -24,11 +26,12 @@ export const plans: Plan[] = [
   {
     id: "pack",
     name: "3 Eventos",
-    price: 237,
+    price: 299,
     featured: true,
     featuredLabel: "MAIS ESCOLHIDO",
     features: [
       "3 eventos completos",
+      "Válido por 12 meses",
       "Controle por voluntário",
       "Fiscal anti-fraude",
       "Relatórios financeiros",
@@ -39,9 +42,9 @@ export const plans: Plan[] = [
   {
     id: "annual",
     name: "Anual",
-    price: 397,
+    price: 499,
     features: [
-      "Eventos ilimitados",
+      "Eventos ilimitados por 12 meses",
       "Equipe ilimitada",
       "Todos os recursos",
       "Melhor custo-benefício",

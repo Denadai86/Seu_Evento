@@ -8,13 +8,14 @@ import {
   getTenantsList, 
   toggleTenantSuspension, 
   createTenantExpress,
+  addEventCredits,
   resetTenantAdminPassword,
   getImpersonationToken
 } from "@/actions/admin";
 import { 
   Building, Users, Ticket, BadgeDollarSign, 
   RefreshCcw, Power, Plus, ShieldCheck, ExternalLink, X,
-  Key, Copy, Eye, AlertOctagon 
+  Key, Copy, Eye 
 } from "lucide-react";
 import PlatformSettings from "./_components/PlatformSettings";
 
@@ -38,7 +39,7 @@ export default function AdminClient() {
       adminName: "", 
       adminEmail: "", 
       adminPass: "",
-      planType: "SINGLE_EVENT" as "SINGLE_EVENT" | "ANNUAL", 
+      planType: "SINGLE_EVENT" as "SINGLE_EVENT" | "THREE_EVENTS" | "ANNUAL", 
       eventDate: "" 
     });
   const [passwordModal, setPasswordModal] = useState<{name: string, email: string, pass: string} | null>(null);
@@ -67,6 +68,15 @@ export default function AdminClient() {
     if (!confirm(currentStatus ? "Suspender este cliente?" : "Reativar este cliente?")) return;
     startTransition(async () => {
       await toggleTenantSuspension(id, currentStatus);
+      loadData();
+    });
+  };
+
+  const handleAddCredit = (tenantId: string, tenantName: string) => {
+    if (!confirm(`Adicionar 1 evento ao plano de ${tenantName}?`)) return;
+    startTransition(async () => {
+      const res = await addEventCredits(tenantId, 1);
+      if (!res.success) alert(res.error);
       loadData();
     });
   };
@@ -137,13 +147,6 @@ export default function AdminClient() {
         </div>
         
         <div className="flex flex-wrap gap-3">
-          <Link 
-            href="/admin/danger" 
-            className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-4 py-2.5 rounded-xl transition font-bold text-sm"
-          >
-            <AlertOctagon size={16} /> Danger Zone
-          </Link>
-
           <button 
             type="button"
             aria-label="Atualizar lista de clientes"
@@ -204,8 +207,23 @@ export default function AdminClient() {
                   </td>
                   <td className="p-5">
                     <span className="bg-slate-900 text-slate-300 px-2 py-1 rounded text-xs font-bold mr-2">
-                      {tenant.planType === "ANNUAL" ? "ANUAL" : "EVENTO ÚNICO"}
+                      {tenant.planType === "ANNUAL" ? "ANUAL" : tenant.planType === "THREE_EVENTS" ? "3 EVENTOS" : "EVENTO ÚNICO"}
                     </span>
+                    <p className="text-xs text-slate-400 mt-2 flex items-center gap-2">
+                      {tenant.eventCredits === null || tenant.eventCredits === undefined
+                        ? "Eventos ilimitados"
+                        : `${tenant.eventCredits} evento(s) restante(s)`}
+                      {tenant.eventCredits !== null && tenant.eventCredits !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() => handleAddCredit(tenant.id, tenant.name)}
+                          className="px-2 py-0.5 rounded bg-slate-700 hover:bg-emerald-600 text-slate-200 text-[10px] font-bold transition"
+                          title="Adicionar 1 evento ao plano"
+                        >
+                          +1
+                        </button>
+                      )}
+                    </p>
                     <p className="text-xs text-slate-400 mt-2">
                       {tenant.expiresAt ? `Expira: ${new Date(tenant.expiresAt).toLocaleDateString()}` : 'Vitalício'}
                     </p>
@@ -405,6 +423,7 @@ export default function AdminClient() {
                             className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors appearance-none"
                           >
                             <option value="SINGLE_EVENT">Evento Único (Data Fixa)</option>
+                            <option value="THREE_EVENTS">3 Eventos (12 meses)</option>
                             <option value="ANNUAL">Licença Anual (Múltiplos)</option>
                           </select>
                         </div>
@@ -418,7 +437,7 @@ export default function AdminClient() {
                             value={formData.eventDate} 
                             onChange={e => setFormData({...formData, eventDate: e.target.value})} 
                             required={formData.planType === 'SINGLE_EVENT'} 
-                            disabled={formData.planType === 'ANNUAL'}
+                            disabled={formData.planType !== 'SINGLE_EVENT'}
                             className="w-full p-3.5 bg-slate-800/50 border border-slate-700 text-white rounded-xl outline-none focus:border-emerald-500 transition-colors disabled:opacity-50" 
                           />
                         </div>

@@ -4,28 +4,57 @@
 
 import prisma from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import { requireTenant } from "@/lib/requireTenant";
+import { requireOrgAdmin } from "@/lib/requireTenant";
 import { revalidatePath } from "next/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CRIAR EVENTO
 // ─────────────────────────────────────────────────────────────────────────────
 export async function createEvent(name: string) {
-  const session = await auth();
-  if (!session?.user?.tenantId) throw new Error("Não autorizado.");
+  const tenantId = await requireOrgAdmin();
 
-  const event = await prisma.event.create({
-    data: {
-      name: name.trim(),
-      tenantId: session.user.tenantId,
-      // ⚠️ CORREÇÃO DO BUG 7: O banco define default 10.00, mas o app usa centavos.
-      // Se não enviarmos nada, ele nasce cobrando R$ 0,10. Forçando R$ 10,00 (1000 centavos).
-      ticketPrice: 1000, 
-    },
-  });
+  const cleanName = name.trim();
+  if (!cleanName) return { success: false, error: "Informe o nome do evento." };
 
-  revalidatePath("/dashboard");
-  return { success: true, event };
+  try {
+    // Leitura do crédito, baixa e criação do evento na MESMA transação:
+    // dois cliques ao mesmo tempo não criam um evento a mais do que o plano permite.
+    const event = await prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { eventCredits: true },
+      });
+
+      // eventCredits null = ilimitado (Anual e clientes antigos)
+      if (tenant?.eventCredits !== null && tenant?.eventCredits !== undefined) {
+        const used = await tx.tenant.updateMany({
+          where: { id: tenantId, eventCredits: { gt: 0 } },
+          data: { eventCredits: { decrement: 1 } },
+        });
+        if (used.count === 0) throw new Error("NO_EVENT_CREDITS");
+      }
+
+      return tx.event.create({
+        data: {
+          name: cleanName,
+          tenantId,
+          // ⚠️ O banco define default 10.00, mas o app usa centavos: forçamos R$ 10,00 (1000 centavos).
+          ticketPrice: 1000,
+        },
+      });
+    });
+
+    revalidatePath("/dashboard");
+    return { success: true, event };
+  } catch (error: any) {
+    if (error?.message === "NO_EVENT_CREDITS") {
+      return {
+        success: false,
+        error: "Seu plano não tem mais eventos disponíveis. Fale com o suporte pelo WhatsApp para renovar ou ampliar.",
+      };
+    }
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,7 +64,7 @@ export async function toggleEventStatus(
   eventId: string,
   newStatus: "ACTIVE" | "DRAFT" | "FINISHED"
 ) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   // 🛡️ SEGURANÇA: Valida posse. O evento DEVE pertencer ao tenant logado.
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
@@ -73,7 +102,7 @@ export async function toggleEventStatus(
 // ALTERAR PREÇO DA CARTELA
 // ─────────────────────────────────────────────────────────────────────────────
 export async function updateTicketPrice(eventId: string, priceInCents: number) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
   
   if (priceInCents < 0) throw new Error("O valor não pode ser negativo.");
 
@@ -92,11 +121,21 @@ export async function updateTicketPrice(eventId: string, priceInCents: number) {
 // MODO DEMONSTRAÇÃO
 // ─────────────────────────────────────────────────────────────────────────────
 export async function activateDemoMode(eventId: string) {
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   // 🛡️ SEGURANÇA: Verifica posse antes de manipular cartelas
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });
   if (!event) throw new Error("Acesso negado.");
+
+  // 🛑 O modo demo marca TUDO como pago, sem Transaction. Num evento real isso apagaria a conciliação
+  // do caixa. Só roda em evento que ainda não teve nenhuma venda nem pagamento.
+  const [paidCards, transactions] = await Promise.all([
+    prisma.card.count({ where: { eventId, isPaid: true } }),
+    prisma.transaction.count({ where: { eventId } }),
+  ]);
+  if (paidCards > 0 || transactions > 0) {
+    throw new Error("Modo demonstração só pode ser usado em evento sem vendas nem pagamentos.");
+  }
 
   await prisma.card.updateMany({
     where: { eventId, isPaid: false },
@@ -115,7 +154,7 @@ export async function activateDemoMode(eventId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function updatePixKey(eventId: string, newPixKey: string) {
   // 🛡️ CORREÇÃO CRÍTICA (Item 3 do Overview): Estava sem NENHUMA validação de Auth.
-  const tenantId = await requireTenant();
+  const tenantId = await requireOrgAdmin();
 
   // 🛡️ SEGURANÇA: Garantir que o evento pertence ao tenant que está tentando alterar
   const event = await prisma.event.findFirst({ where: { id: eventId, tenantId } });

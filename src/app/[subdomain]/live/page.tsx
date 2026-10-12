@@ -53,7 +53,7 @@ export default async function LivePage({
   const event = await prisma.event.findUnique({
     where: { id: eventIdToLoad },
     include: {
-      sponsors: true,
+      sponsors: { orderBy: [{ order: "asc" }, { id: "asc" }] },
       tenant: true,
     },
   });

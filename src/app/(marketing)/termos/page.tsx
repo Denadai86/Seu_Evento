@@ -1,6 +1,9 @@
 import Navbar from "@/components/marketing/Navbar";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { siteConfig } from "@/config/site";
+
+export const metadata = { title: "Termos de Uso" };
 
 export default function TermosPage() {
   return (
@@ -14,7 +17,7 @@ export default function TermosPage() {
           </Link>
 
           <h1 className="text-4xl font-black text-slate-900 mb-4">Termos de Uso</h1>
-          <p className="text-slate-500 mb-10">Última atualização: {new Date().toLocaleDateString('pt-BR')}</p>
+          <p className="text-slate-500 mb-10">Última atualização: {siteConfig.legalUpdatedAt}</p>
 
           <div className="space-y-8 text-slate-700 leading-relaxed">
             <section>
@@ -33,17 +36,22 @@ export default function TermosPage() {
 
             <section>
               <h2 className="text-2xl font-bold text-slate-900 mb-4">3. Pagamentos e Assinaturas</h2>
-              <p>O uso das funcionalidades premium (planos Único e Anual) exige o pagamento prévio. Os valores não são reembolsáveis após a geração matemática das cartelas do evento, devido ao consumo de infraestrutura de nuvem.</p>
+              <p>O uso da plataforma exige o pagamento prévio de um dos planos: Evento Único (1 evento, com acesso até 7 dias após a data do evento), 3 Eventos (3 eventos em até 12 meses) ou Anual (eventos ilimitados por 12 meses), contados a partir da liberação do acesso.</p>
+              <p className="mt-3"><strong>Garantia e reembolso.</strong> Em até 7 dias corridos após a confirmação do pagamento, você pode pedir o reembolso integral, sem precisar de justificativa. Em até 30 dias corridos, o reembolso integral também é devido se nenhuma cartela tiver sido vendida no sistema. Fora dessas hipóteses, os valores não são reembolsáveis. O pedido é feito pelo WhatsApp.</p>
             </section>
 
             <section>
               <h2 className="text-2xl font-bold text-slate-900 mb-4">4. Limitação de Responsabilidade</h2>
-              <p>Em nenhum caso a "Ação Leve" será responsável por quaisquer danos (incluindo falhas de internet no local do evento, perda de dados ou lucros cessantes) decorrentes do uso ou da incapacidade de usar os materiais da plataforma.</p>
+              <p>Em nenhum caso o Seu Evento (Ação Leve) será responsável por quaisquer danos (incluindo falhas de internet no local do evento, perda de dados ou lucros cessantes) decorrentes do uso ou da incapacidade de usar os materiais da plataforma.</p>
             </section>
 
             <section>
               <h2 className="text-2xl font-bold text-slate-900 mb-4">5. Contato</h2>
-              <p>Para dúvidas sobre estes termos, entre em contato conosco através dos nossos canais oficiais de suporte.</p>
+              <p>
+                Para dúvidas sobre estes termos, fale conosco pelo{" "}
+                <a href={siteConfig.urls.whatsapp} target="_blank" rel="noopener noreferrer" className="underline">WhatsApp</a>
+                {siteConfig.company.email && <> ou pelo e-mail <a href={`mailto:${siteConfig.company.email}`} className="underline">{siteConfig.company.email}</a></>}.
+              </p>
             </section>
           </div>
         </div>
