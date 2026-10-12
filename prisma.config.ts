@@ -13,6 +13,6 @@ export default defineConfig({
 
   migrations: {
     path: "prisma/migrations",
-    seed: "npx tsx prisma/seed.ts", // 👈 A mágica acontece nesta linha aqui
+    //seed: "npx tsx prisma/seed.ts", // 👈 A mágica acontece nesta linha aqui
   },
 });

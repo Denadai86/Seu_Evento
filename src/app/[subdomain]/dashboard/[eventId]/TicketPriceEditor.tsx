@@ -7,11 +7,20 @@ import { useRouter } from "next/navigation";
 import { Pencil, Check, X, Tag } from "lucide-react";
 import { toast } from "sonner"; // 🔥 Olha o Sonner aqui!
 
-export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: string, initialPrice: number }) {
+export default function TicketPriceEditor({
+  eventId,
+  initialPrice,
+  kind = "QUINA",
+}: {
+  eventId: string;
+  initialPrice: number | null; // null = ainda não definido (só acontece com a cartela cheia)
+  kind?: "QUINA" | "FULL_HOUSE";
+}) {
   const [isEditing, setIsEditing] = useState(false);
+  const initialText = initialPrice ? (initialPrice / 100).toFixed(2) : "";
   
   // Converte de centavos para real
-  const [priceInput, setPriceInput] = useState((initialPrice / 100).toFixed(2));
+  const [priceInput, setPriceInput] = useState(initialText);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -30,13 +39,13 @@ export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: 
     
     if (isNaN(cents) || cents <= 0) {
       toast.error("Preço inválido! Digite um valor maior que zero.");
-      setPriceInput((initialPrice / 100).toFixed(2)); // Restaura pro valor antigo se ele fez besteira
+      setPriceInput(initialText); // Restaura pro valor antigo se ele fez besteira
       return;
     }
 
     startTransition(async () => {
       try {
-        await updateTicketPrice(eventId, cents);
+        await updateTicketPrice(eventId, cents, kind);
         setIsEditing(false);
         setPriceInput((cents / 100).toFixed(2)); // Atualiza o campo com a nova máscara
         toast.success("Preço da cartela atualizado com sucesso!");
@@ -54,7 +63,7 @@ export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: 
       </div>
       <div className="flex flex-col">
         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">
-          Preço da Cartela
+          {kind === "FULL_HOUSE" ? "Preço padrão da Cartela Cheia" : "Preço padrão da Cartela"}
         </span>
         
         {isEditing ? (
@@ -72,7 +81,7 @@ export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: 
             <button onClick={handleSave} disabled={isPending} className="p-1 text-emerald-400 hover:bg-emerald-400/10 rounded transition ml-1 disabled:opacity-50">
               <Check size={16} />
             </button>
-            <button onClick={() => { setIsEditing(false); setPriceInput((initialPrice / 100).toFixed(2)); }} className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition">
+            <button onClick={() => { setIsEditing(false); setPriceInput(initialText); }} className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition">
               <X size={16} />
             </button>
           </div>
@@ -81,7 +90,9 @@ export default function TicketPriceEditor({ eventId, initialPrice }: { eventId: 
             onClick={() => setIsEditing(true)} 
             className="flex items-center gap-2 text-emerald-400 font-black text-sm hover:text-emerald-300 hover:bg-emerald-900/20 px-2 py-0.5 -ml-2 rounded transition"
           >
-            R$ {(initialPrice / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {initialPrice
+              ? `R$ ${(initialPrice / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : "Definir preço"}
             <Pencil size={12} className="opacity-50" />
           </button>
         )}

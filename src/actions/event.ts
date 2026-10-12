@@ -101,15 +101,20 @@ export async function toggleEventStatus(
 // ─────────────────────────────────────────────────────────────────────────────
 // ALTERAR PREÇO DA CARTELA
 // ─────────────────────────────────────────────────────────────────────────────
-export async function updateTicketPrice(eventId: string, priceInCents: number) {
+export async function updateTicketPrice(
+  eventId: string,
+  priceInCents: number,
+  kind: "QUINA" | "FULL_HOUSE" = "QUINA"
+) {
   const tenantId = await requireOrgAdmin();
   
-  if (priceInCents < 0) throw new Error("O valor não pode ser negativo.");
+  if (!Number.isFinite(priceInCents) || priceInCents < 0) throw new Error("O valor não pode ser negativo.");
+  if (kind === "FULL_HOUSE" && priceInCents <= 0) throw new Error("O preço da cartela cheia precisa ser maior que zero.");
 
   // 🛡️ SEGURANÇA: O 'where' duplo garante que não altere preço de eventos de terceiros
   const event = await prisma.event.update({
     where: { id: eventId, tenantId },
-    data: { ticketPrice: priceInCents },
+    data: kind === "FULL_HOUSE" ? { fullHousePrice: priceInCents } : { ticketPrice: priceInCents },
   });
 
   if (!event) throw new Error("Acesso negado ou evento inexistente.");

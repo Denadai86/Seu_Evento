@@ -45,13 +45,13 @@ const printOptions = [
   },
 ] as const;
 
-function PrintOptions({ eventId }: { eventId: string }) {
+function PrintOptions({ eventId, type }: { eventId: string; type: "ALL" | "QUINA" | "FULL_HOUSE" }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
       {printOptions.map(({ layout, label, description, color, icon: Icon }) => (
         <a
           key={layout}
-          href={`/print?eventId=${eventId}&layout=${layout}`}
+          href={`/print?eventId=${eventId}&layout=${layout}${type === "ALL" ? "" : `&type=${type}`}`}
           target="_blank"
           className={`
             bg-slate-900 border border-slate-700 
@@ -77,27 +77,68 @@ function PrintOptions({ eventId }: { eventId: string }) {
 export default function GenerateCardsButton({
   eventId,
   eventName,
+  fullHousePrice = null,
 }: {
   eventId: string;
   eventName: string;
+  fullHousePrice?: number | null;
 }) {
   const [amount, setAmount] = useState(100);
+  const [type, setType] = useState<"QUINA" | "FULL_HOUSE">("QUINA");
+  const [printType, setPrintType] = useState<"ALL" | "QUINA" | "FULL_HOUSE">("ALL");
   const [isPending, startTransition] = useTransition();
   const [successCount, setSuccessCount] = useState(0);
+  const [lastType, setLastType] = useState<"QUINA" | "FULL_HOUSE">("QUINA");
 
   const handleGenerate = () => {
     if (amount <= 0 || amount > 5000) return alert("Quantidade inválida");
+    if (type === "FULL_HOUSE" && !fullHousePrice) {
+      return alert("Defina primeiro o preço da cartela cheia (no topo da página).");
+    }
     startTransition(async () => {
-      const res = await generateCards(eventId, amount);
+      const res = await generateCards(eventId, amount, type);
       if (res.success) {
         setSuccessCount(amount);
+        setLastType(type);
+      } else {
+        alert(res.error ?? "Não foi possível gerar as cartelas.");
       }
     });
   };
 
+  const typeButton = (value: "QUINA" | "FULL_HOUSE", label: string) => (
+    <button
+      type="button"
+      onClick={() => setType(value)}
+      className={`flex-1 px-4 py-3 rounded-xl font-black text-sm transition-all border ${
+        type === value
+          ? "bg-emerald-600 border-emerald-500 text-white"
+          : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div className="flex flex-col gap-6">
       
+      {/* Tipo de cartela: cada tipo concorre só aos prêmios do mesmo tipo e tem preço próprio */}
+      <div>
+        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">
+          Tipo de Cartela
+        </label>
+        <div className="flex gap-3">
+          {typeButton("QUINA", "Quina")}
+          {typeButton("FULL_HOUSE", "Cartela Cheia")}
+        </div>
+        {type === "FULL_HOUSE" && !fullHousePrice && (
+          <p className="text-xs text-amber-400 mt-2">
+            Defina o preço da cartela cheia no topo da página antes de gerar este tipo.
+          </p>
+        )}
+      </div>
+
       {/* Módulo de Geração */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="flex-1">
@@ -126,7 +167,7 @@ export default function GenerateCardsButton({
 
       {successCount > 0 && (
         <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl text-emerald-400 text-sm text-center font-bold animate-in fade-in">
-          ✅ {successCount} cartelas criadas e adicionadas ao estoque com sucesso!
+          ✅ {successCount} cartelas de {lastType === "FULL_HOUSE" ? "cartela cheia" : "quina"} criadas e adicionadas ao estoque com sucesso!
         </div>
       )}
 
@@ -136,7 +177,24 @@ export default function GenerateCardsButton({
     <Printer size={16} /> Central de Impressão
   </h3>
 
-  <PrintOptions eventId={eventId} />
+  <div className="flex flex-wrap gap-2 mb-4">
+    {([["ALL", "Todas"], ["QUINA", "Só Quina"], ["FULL_HOUSE", "Só Cartela Cheia"]] as const).map(([value, label]) => (
+      <button
+        key={value}
+        type="button"
+        onClick={() => setPrintType(value)}
+        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+          printType === value
+            ? "bg-slate-700 border-slate-500 text-white"
+            : "bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500"
+        }`}
+      >
+        {label}
+      </button>
+    ))}
+  </div>
+
+  <PrintOptions eventId={eventId} type={printType} />
 </div>
 
     </div>

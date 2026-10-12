@@ -1,8 +1,9 @@
+// src/actions/venda.ts
 "use server";
 
-// src/actions/venda.ts
-
 import prisma from "@/lib/prisma";
+import { groupByPrice, priceForCard } from "@/lib/cardPricing";
+import { currentPrices } from "@/lib/priceTiers";
 import { PaymentMethod } from "@prisma/client";
 import { requireTenant, requireStaffForEvent } from "@/lib/requireTenant"; // 🔥 Importação Corrigida
 import { auth } from "@/lib/auth";
@@ -14,7 +15,8 @@ export async function processBatchSale(
   eventId: string,
   shortIds: string[],
   method: PaymentMethod,
-  eventStaffId: string 
+  eventStaffId: string,
+  expectedTotal?: number // total (centavos) que o caixa viu na tela: se a fase de preço mudou no meio, a venda é recusada
 ) {
   if (!shortIds || shortIds.length === 0) return { success: false, error: "Carrinho vazio." };
 
@@ -45,7 +47,7 @@ export async function processBatchSale(
 
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      select: { ticketPrice: true, isActive: true, tenantId: true, status: true },
+      select: { ticketPrice: true, fullHousePrice: true, isActive: true, tenantId: true, status: true },
     });
 
     if (!event || event.tenantId !== tenantId) return { success: false, error: "Evento inválido ou acesso negado." };
@@ -54,6 +56,13 @@ export async function processBatchSale(
     if (!event.isActive) return { success: false, error: "Evento não está ativo. O caixa foi encerrado pela administração." };
 
     const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
+
+    // 💰 O preço vem da FASE VIGENTE definida pelo admin (ou do preço padrão), calculado aqui no servidor.
+    const tiers = await prisma.priceTier.findMany({
+      where: { eventId },
+      select: { id: true, name: true, quinaPrice: true, fullHousePrice: true, startsAt: true },
+    });
+    const prices = currentPrices({ ticketPrice, fullHousePrice: event.fullHousePrice }, tiers);
 
     await prisma.$transaction(async (tx) => {
       const existingCards = await tx.card.findMany({
@@ -71,14 +80,36 @@ export async function processBatchSale(
         );
       }
 
+      // 💰 O preço de CADA cartela vem do tipo dela (quina ou cartela cheia), calculado aqui no servidor.
+      // O navegador só mostra o total; nunca decide o valor cobrado.
+      let byPrice: Map<number, typeof existingCards>;
+      try {
+        byPrice = groupByPrice(existingCards, prices.quina, prices.fullHouse);
+      } catch {
+        throw new Error("Há cartela cheia sem preço definido. Defina o preço da cartela cheia no painel do evento.");
+      }
+      const priceById = new Map<string, number>();
+      for (const [price, group] of byPrice) for (const c of group) priceById.set(c.id, price);
+
+      // Se a fase de preço virou entre o "adicionar cartela" e o "finalizar", o total da tela ficou velho.
+      // Recusa a venda (nada é cobrado) para o caixa conferir o valor novo.
+      if (expectedTotal != null) {
+        const total = existingCards.reduce((sum, c) => sum + priceById.get(c.id)!, 0);
+        if (Math.round(total) !== Math.round(expectedTotal)) throw new Error("PRICE_CHANGED");
+      }
+
       // Atualiza cartelas — 🔒 só as que AINDA não foram vendidas (isSold: false no próprio UPDATE).
       // A checagem acima não basta: dois caixas no mesmo instante passariam os dois por ela.
-      const marked = await tx.card.updateMany({
-        where: { shortId: { in: shortIds }, eventId, isSold: false },
-        data: { isSold: true, isPaid: true, eventStaffId, price: ticketPrice },
-      });
+      let markedTotal = 0;
+      for (const [price, group] of byPrice) {
+        const marked = await tx.card.updateMany({
+          where: { shortId: { in: group.map((c) => c.shortId) }, eventId, isSold: false },
+          data: { isSold: true, isPaid: true, eventStaffId, price },
+        });
+        markedTotal += marked.count;
+      }
 
-      if (marked.count !== shortIds.length) {
+      if (markedTotal !== shortIds.length) {
         // Desfaz a transação inteira: nada é vendido nem cobrado pela metade.
         throw new Error("Conflito! Outra venda ocupou uma ou mais cartelas agora há pouco. Atualize a lista e tente de novo.");
       }
@@ -89,7 +120,7 @@ export async function processBatchSale(
           eventId,
           cardId: card.id,
           eventStaffId,
-          amount: ticketPrice,
+          amount: priceById.get(card.id)!,
           method,
         })),
       });
@@ -97,7 +128,55 @@ export async function processBatchSale(
 
     return { success: true };
   } catch (error: any) {
+    if (error?.message === "PRICE_CHANGED") {
+      return {
+        success: false,
+        priceChanged: true,
+        error: "Os preços mudaram desde que as cartelas foram adicionadas. Os valores foram atualizados: confira o total e tente de novo.",
+      };
+    }
     console.error("[PROCESS_BATCH_SALE_ERROR]", error);
     return { success: false, error: error.message || "Falha crítica ao processar carrinho." };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSULTA DE CARTELA PARA O PDV
+// O caixa precisa saber o TIPO e o PREÇO de cada cartela antes de fechar a venda
+// (cartela cheia custa diferente da quina). Também avisa na hora se o código não existe ou já foi vendido.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function lookupCardForSale(eventId: string, shortId: string) {
+  try {
+    const tenantId = await requireTenant();
+    await requireStaffForEvent(eventId, "canSell");
+
+    const event = await prisma.event.findFirst({
+      where: { id: eventId, tenantId },
+      select: { ticketPrice: true, fullHousePrice: true },
+    });
+    if (!event) return { success: false, error: "Evento inválido ou acesso negado." };
+
+    const tiers = await prisma.priceTier.findMany({
+      where: { eventId },
+      select: { id: true, name: true, quinaPrice: true, fullHousePrice: true, startsAt: true },
+    });
+
+    const card = await prisma.card.findFirst({
+      where: { eventId, shortId: shortId.trim().toUpperCase() },
+      select: { shortId: true, type: true, isSold: true },
+    });
+    if (!card) return { success: false, error: "Cartela não encontrada neste evento." };
+    if (card.isSold) return { success: false, error: "Esta cartela já foi vendida." };
+
+    const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
+    const prices = currentPrices({ ticketPrice, fullHousePrice: event.fullHousePrice }, tiers);
+    const price = priceForCard(card.type, prices.quina, prices.fullHouse);
+    if (price === null) {
+      return { success: false, error: "O preço da cartela cheia ainda não foi definido. Avise o administrador." };
+    }
+
+    return { success: true, shortId: card.shortId, type: card.type, price, tierName: prices.tier?.name ?? null };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Não foi possível consultar a cartela." };
   }
 }

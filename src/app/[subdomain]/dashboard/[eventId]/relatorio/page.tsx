@@ -3,8 +3,10 @@
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Wallet, QrCode, Building2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Wallet, QrCode, Building2, AlertTriangle } from "lucide-react";
 import PrintButton from "./PrintButton";
+import { requireReportAccess } from "@/lib/requireReportAccess";
+import { computeCashReport } from "@/lib/cashReport";
 
 export default async function RelatorioPage({
   params,
@@ -13,64 +15,52 @@ export default async function RelatorioPage({
 }) {
   const { subdomain, eventId } = await params;
 
-  // Busca TUDO usando a mesma inteligência do Dashboard
+  // 🔐 Só o ORG_ADMIN do tenant (ou o Super Admin, só leitura) vê o fechamento de caixa.
+  const tenant = await requireReportAccess(subdomain);
+
   const event = await prisma.event.findFirst({
-    where: { id: eventId, tenant: { subdomain } },
+    where: { id: eventId, tenantId: tenant.id },
     include: {
       tenant: true,
       sponsors: true,
-      transactions: true,
-      cards: { select: { isPaid: true, isSold: true, price: true } },
-      staff: {
-        include: { transactions: true, cards: true } } }
-      }
-    );
+      transactions: { select: { method: true, amount: true, eventStaffId: true } },
+      cards: { select: { isPaid: true, isSold: true, price: true, type: true, eventStaffId: true } },
+      // O nome do voluntário mora no User (EventStaff não tem nome): antes todos saíam como "Vendedor".
+      staff: { include: { user: { select: { name: true } } } },
+    },
+  });
 
   if (!event) notFound();
 
-  // 🧮 PROCESSAMENTO BLINDADO (Matemática Sênior)
-  const totalCartelasGeradas = event.cards.length;
-  const paidCards = event.cards.filter(c => c.isPaid);
-  const cartelasVendidas = paidCards.length;
+  // 🧮 Toda a matemática fica em src/lib/cashReport.ts (função pura, com testes).
+  const report = computeCashReport({
+    ticketPrice: event.ticketPrice,
+    fullHousePrice: event.fullHousePrice,
+    cards: event.cards,
+    transactions: event.transactions,
+    sponsorContributions: event.sponsors.map((s) => s.contribution),
+    staff: event.staff.map((s) => ({ id: s.id, name: s.user?.name || "Vendedor" })),
+  });
 
-  // 1. Faturamento Base (Cartelas + Patrocínios) usando o Fallback
-  const totalVendasCents = paidCards.reduce((sum, c) => sum + (c.price || event.ticketPrice), 0);
-  const totalPatrociniosCents = event.sponsors.reduce((sum, s) => sum + s.contribution, 0);
-  const GMV_Cents = totalVendasCents + totalPatrociniosCents;
+  const totalCartelasGeradas = report.cardsGenerated;
+  const cartelasVendidas = report.cardsPaid;
+  const totalVendasCents = report.salesCents;
+  const totalPatrociniosCents = report.sponsorshipCents;
+  const GMV_Cents = report.gmvCents;
+  const vendasPixCents = report.pixCents;
+  const vendasDinheiroCents = report.cashCents;
+  const sellerStats = report.sellers;
 
-  // 2. Divisão PIX vs Dinheiro (Lendo as transações reais)
-  const vendasPixCents = event.transactions
-    .filter(t => t.method === "PIX")
-    .reduce((sum, t) => sum + t.amount, 0);
+  const formatCurrency = (cents: number) =>
+    (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-  // 3. A Mágica do Dinheiro "Órfão": Tudo que foi vendido mas não é PIX, nós assumimos que é dinheiro físico.
-  const vendasDinheiroCents = totalVendasCents - vendasPixCents;
-
-  // 4. Agrupando por Vendedor (Lendo direto das cartelas atreladas a eles)
-  const sellerStats = event.staff.map(seller => {
-    const sCards = seller.cards.filter(c => c.isPaid);
-    const sTotalCents = sCards.reduce((sum, c) => sum + (c.price || event.ticketPrice), 0);
-
-    // O que ele vendeu no PIX (Transações rastreáveis)
-    const sPixCents = event.transactions
-      .filter(t => t.eventStaffId === seller.id && t.method === "PIX")
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    // O que ele tem que devolver em Dinheiro Físico
-    const sDinheiroCents = sTotalCents - sPixCents;
-
-    return {
-      name: (seller as any).name || "Vendedor",
-      id: seller.id,
-      qtd: sCards.length,
-      pix: sPixCents,
-      dinheiro: sDinheiroCents,
-      total: sTotalCents
-    };
-  }).filter(s => s.qtd > 0); // Só mostra no relatório quem vendeu pelo menos 1 cartela
-
-  const formatCurrency = (cents: number) => 
-    (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  // O servidor roda em UTC: sem o fuso, o horário impresso saía 3h adiantado.
+  const formatDateTimeBR = (d: Date) =>
+    d.toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans pb-20">
@@ -97,7 +87,7 @@ export default async function RelatorioPage({
           </div>
           <div className="text-right">
             <p className="text-sm font-bold text-slate-400">Data do Relatório</p>
-            <p className="font-mono text-slate-800">{new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR')}</p>
+            <p className="font-mono text-slate-800">{formatDateTimeBR(new Date())}</p>
           </div>
         </div>
 
@@ -146,6 +136,42 @@ export default async function RelatorioPage({
             </div>
           </div>
         </section>
+
+        {report.byType.FULL_HOUSE.qtd > 0 && (
+          <section className="mb-10">
+            <h2 className="text-lg font-black uppercase text-slate-800 mb-4">Vendas por tipo de cartela</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Cartelas de Quina</p>
+                <p className="text-2xl font-black text-slate-800">{report.byType.QUINA.qtd}</p>
+                <p className="text-sm text-slate-500">{formatCurrency(report.byType.QUINA.total)}</p>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Cartelas Cheias</p>
+                <p className="text-2xl font-black text-slate-800">{report.byType.FULL_HOUSE.qtd}</p>
+                <p className="text-sm text-slate-500">{formatCurrency(report.byType.FULL_HOUSE.total)}</p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {report.hasDiscrepancy && (
+          <section className="mb-10">
+            <div className="flex gap-3 bg-amber-50 border-2 border-amber-300 text-amber-900 p-5 rounded-2xl">
+              <AlertTriangle className="shrink-0 text-amber-500" />
+              <div className="text-sm">
+                <p className="font-black uppercase tracking-wide mb-1">Conferência necessária</p>
+                <p>
+                  O total das cartelas pagas ({formatCurrency(totalVendasCents)}) é diferente do total dos
+                  lançamentos de pagamento ({formatCurrency(report.ledgerCents)}). Diferença:{" "}
+                  {formatCurrency(report.diffCents)}. Isso costuma acontecer quando há cartelas marcadas
+                  como pagas sem lançamento (por exemplo, pelo modo demonstração) ou quando o preço da
+                  cartela foi alterado depois das vendas.
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="mb-10">
           <h2 className="text-lg font-black uppercase text-slate-800 mb-4 flex items-center gap-2">

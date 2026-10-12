@@ -4,6 +4,8 @@ import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import PrintButton from "./PrintButton";
 import QRCode from "qrcode";
+import { requireReportAccess } from "@/lib/requireReportAccess";
+import { isCardType, CARD_TYPE_LABEL } from "@/lib/cardPricing";
 
 // --- Tipos ---
 type Layout = "a4-4" | "a4-2" | "a4-1" | "a4-6" | "a6";
@@ -105,22 +107,28 @@ function QRCodeSection({ qrCodeDataUrl, shortId }: { qrCodeDataUrl: string; shor
 // --- Página Principal ---
 interface PrintPageProps {
   params: Promise<{ subdomain: string }>;
-  searchParams: Promise<{ eventId?: string; layout?: string }>;
+  searchParams: Promise<{ eventId?: string; layout?: string; type?: string }>;
 }
 
 export default async function PrintView({ params, searchParams }: PrintPageProps) {
   const { subdomain } = await params;
-  const { eventId, layout: rawLayout = "a4-4" } = await searchParams;
+  const { eventId, layout: rawLayout = "a4-4", type: rawType } = await searchParams;
 
   if (!eventId) notFound();
 
   const layout: Layout = VALID_LAYOUTS.includes(rawLayout as Layout) ? (rawLayout as Layout) : "a4-4";
 
+  // 🔐 As cartelas (números e QR) só saem para o ORG_ADMIN do tenant (ou Super Admin, só leitura).
+  const tenant = await requireReportAccess(subdomain);
+
+  // ?type=QUINA | FULL_HOUSE imprime só aquele tipo (a gráfica recebe cada tipo separado).
+  const typeFilter = isCardType(rawType) ? rawType : null;
+
   const event = await prisma.event.findFirst({
-    where: { id: eventId, tenant: { subdomain } },
+    where: { id: eventId, tenantId: tenant.id },
     include: {
       tenant: true,
-      cards: { orderBy: { shortId: "asc" } },
+      cards: { where: typeFilter ? { type: typeFilter } : {}, orderBy: { shortId: "asc" } },
       sponsors: true,
     },
   });
@@ -154,7 +162,7 @@ export default async function PrintView({ params, searchParams }: PrintPageProps
         <div>
           <h1 className="font-bold">Impressão: {LAYOUT_LABELS[layout]}</h1>
           <p className="text-xs text-slate-400">
-            {event.cards.length} cartelas • {pages.length} página{pages.length > 1 ? "s" : ""}
+            {typeFilter ? `${CARD_TYPE_LABEL[typeFilter]} • ` : ""}{event.cards.length} cartelas • {pages.length} página{pages.length > 1 ? "s" : ""}
           </p>
         </div>
         <PrintButton />
@@ -186,6 +194,15 @@ export default async function PrintView({ params, searchParams }: PrintPageProps
                       <p className="text-[9px] text-slate-600 font-bold tracking-widest mt-1">
                         ID: {card.shortId}
                       </p>
+                      {card.type && (
+                        <span
+                          className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                            card.type === "FULL_HOUSE" ? "bg-black text-white" : "border-2 border-black text-black"
+                          }`}
+                        >
+                          {CARD_TYPE_LABEL[card.type]}
+                        </span>
+                      )}
                     </div>
                   </div>
 

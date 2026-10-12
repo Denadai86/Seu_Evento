@@ -12,6 +12,8 @@ import {
 import PrizeManager from "./PrizeManager";
 import SponsorManager from "./SponsorManager";
 import TicketPriceEditor from "./TicketPriceEditor";
+import PriceTiersManager from "./PriceTiersManager";
+import { priceForCard } from "@/lib/cardPricing";
 import EventWizard from "./EventWizard";
 import PixKeyEditor from "./PixKeyEditor"; // 👈 NOVO IMPORT
 
@@ -32,8 +34,9 @@ export default async function EventDashboardPage({
         select: { cards: true, sponsors: true },
       },
       sponsors: true,
+      priceTiers: { orderBy: { createdAt: 'asc' } },
       cards: {
-        select: { isPaid: true, isSold: true, price: true }
+        select: { isPaid: true, isSold: true, price: true, type: true }
       },
       prizes: { orderBy: { order: 'asc' } },
       transactions: {
@@ -56,7 +59,8 @@ export default async function EventDashboardPage({
   
   const cardsRevenueCents = event.cards
     .filter(c => c.isPaid)
-    .reduce((sum, card) => sum + (card.price || event.ticketPrice), 0);
+    // `??` (e não `||`): price 0 é cartela de demonstração e vale ZERO; null cai no preço do tipo dela.
+    .reduce((sum, card) => sum + (card.price ?? priceForCard(card.type, event.ticketPrice, event.fullHousePrice) ?? event.ticketPrice), 0);
 
   const sponsorsRevenueCents = event.sponsors.reduce((sum, s) => sum + s.contribution, 0);
   const totalEmCaixaReal = (cardsRevenueCents + sponsorsRevenueCents) / 100;
@@ -85,6 +89,7 @@ export default async function EventDashboardPage({
           
           <div className="flex items-center gap-4">
             <TicketPriceEditor eventId={event.id} initialPrice={event.ticketPrice} />
+            <TicketPriceEditor eventId={event.id} initialPrice={event.fullHousePrice} kind="FULL_HOUSE" />
             
             <div className="hidden sm:block h-6 w-px bg-slate-700"></div>
 
@@ -153,6 +158,20 @@ export default async function EventDashboardPage({
               </div>
             </div>
 
+            {/* 💰 FASES DE PREÇO (só o admin define; o caixa apenas aplica) */}
+            <PriceTiersManager
+              eventId={event.id}
+              defaultQuina={event.ticketPrice}
+              defaultFull={event.fullHousePrice}
+              tiers={event.priceTiers.map((t) => ({
+                id: t.id,
+                name: t.name,
+                quinaPrice: t.quinaPrice,
+                fullHousePrice: t.fullHousePrice,
+                startsAt: t.startsAt ? t.startsAt.toISOString() : null,
+              }))}
+            />
+
             {/* 🧩 BENTO GRID */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
@@ -166,7 +185,7 @@ export default async function EventDashboardPage({
                   Gere lotes matematicamente seguros e imprima em diferentes formatos.
                 </p>
                 <div className="bg-[#0b0f14] p-6 rounded-2xl border border-slate-800">
-                  <GenerateCardsButton eventId={event.id} eventName={event.name} />
+                  <GenerateCardsButton eventId={event.id} eventName={event.name} fullHousePrice={event.fullHousePrice} />
                 </div>
               </div>
 
@@ -350,6 +369,14 @@ export default async function EventDashboardPage({
                       ✨ Validar Todas (Demo)
                     </button>
                   </form>
+                  <a
+                    href={`/dashboard/${event.id}/patrocinadores`}
+                    target="_blank"
+                    className="col-span-full sm:col-span-2 lg:col-span-4 bg-amber-600 hover:bg-amber-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20 mt-2"
+                  >
+                    📣 Relatório de Patrocinadores
+                  </a>
+
 
                   <a 
                     href={`/dashboard/${event.id}/relatorio`} 

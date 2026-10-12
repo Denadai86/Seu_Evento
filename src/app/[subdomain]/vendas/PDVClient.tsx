@@ -2,9 +2,13 @@
 "use client";
 
 import { useState, useTransition, useRef, useEffect } from "react";
-import { processBatchSale } from "@/actions/venda";
+import { processBatchSale, lookupCardForSale } from "@/actions/venda";
 import { QrCode, Trash2, Banknote, CreditCard, UserCircle, X, Copy } from "lucide-react";
 import QRCode from "react-qr-code";
+
+// Cada item do carrinho já traz o TIPO e o PREÇO (a cartela cheia custa diferente da quina).
+// O preço mostrado aqui é só para o caixa conferir: o servidor recalcula tudo na hora de cobrar.
+type CartItem = { id: string; type: "QUINA" | "FULL_HOUSE" | null; price: number };
 
 interface Seller {
   id: string;
@@ -15,6 +19,7 @@ interface EventData {
   id: string;
   name: string;
   ticketPrice: number; // Em centavos
+  tierName?: string | null; // fase de preço vigente (definida pelo admin)
   pixKey: string;
   sellers: Seller[];
 }
@@ -23,7 +28,8 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
   const [selectedSeller, setSelectedSeller] = useState<string>("");
   const [isPending, startTransition] = useTransition();
   
-  const [cart, setCart] = useState<string[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [isLookingUp, setIsLookingUp] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [showPixModal, setShowPixModal] = useState(false);
@@ -71,32 +77,43 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
   }
 
   // ====================== LÓGICA DO PDV ======================
-  const handleAddCard = (e?: React.FormEvent<HTMLFormElement>) => {
+  const handleAddCard = async (e?: React.FormEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
     const id = inputValue.trim().toUpperCase();
-    if (!id) return;
+    if (!id || isLookingUp || !activeEvent) return;
 
-    if (cart.includes(id)) {
+    if (cart.some((item) => item.id === id)) {
       alert("Esta cartela já está no carrinho!");
       return setInputValue("");
     }
 
-    setCart([id, ...cart]);
+    // Consulta o servidor: confirma que a cartela existe, não foi vendida e qual é o tipo/preço dela.
+    setIsLookingUp(true);
+    const res = await lookupCardForSale(activeEvent.id, id);
+    setIsLookingUp(false);
+
+    if (!res.success) {
+      alert(res.error || "Não foi possível consultar a cartela.");
+      return setInputValue("");
+    }
+
+    setCart((current) => [{ id: res.shortId!, type: res.type ?? null, price: res.price! }, ...current]);
     setInputValue("");
     setSuccessMessage("");
   };
 
   const handleRemoveCard = (idToRemove: string) => {
-    setCart(cart.filter((id) => id !== idToRemove));
+    setCart(cart.filter((item) => item.id !== idToRemove));
   };
 
   const executeSale = (method: "PIX" | "CASH") => {
     startTransition(async () => {
       const res = await processBatchSale(
         activeEvent.id,
-        cart,
+        cart.map((item) => item.id),
         method,
-        selectedSeller
+        selectedSeller,
+        Math.round(cartTotalAmount * 100) // total que o caixa está vendo: o servidor recusa se a fase de preço mudou
       );
 
       if (res.success) {
@@ -105,6 +122,16 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
         setShowPixModal(false);
       } else {
         alert(res.error || "Erro ao processar venda");
+        // A fase de preço virou no meio da venda: reconsulta cada cartela para mostrar o valor atual.
+        if ("priceChanged" in res && res.priceChanged) {
+          const refreshed: CartItem[] = [];
+          for (const item of cart) {
+            const r = await lookupCardForSale(activeEvent.id, item.id);
+            if (r.success) refreshed.push({ id: r.shortId!, type: r.type ?? null, price: r.price! });
+          }
+          setCart(refreshed);
+          setShowPixModal(false);
+        }
       }
     });
   };
@@ -117,7 +144,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
     }
   };
 
-  const cartTotalAmount = cart.length * (activeEvent.ticketPrice / 100);
+  const cartTotalAmount = cart.reduce((sum, item) => sum + item.price, 0) / 100;
   const sellerName = activeEvent.sellers.find((s) => s.id === selectedSeller)?.name;
 
   return (
@@ -144,6 +171,9 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4 shadow-lg">
           <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-2 block">
             Adicionar Cartela
+            {activeEvent.tierName && (
+              <span className="ml-2 normal-case tracking-normal text-emerald-400">• preço: {activeEvent.tierName}</span>
+            )}
           </label>
           <form onSubmit={handleAddCard} className="flex gap-2">
             <input
@@ -156,7 +186,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
             />
             <button
               type="submit"
-              disabled={!inputValue.trim()}
+              disabled={!inputValue.trim() || isLookingUp}
               className="bg-emerald-600 disabled:bg-slate-800 text-white font-bold px-5 rounded-xl transition-colors shrink-0 text-xl"
               aria-label="Adicionar cartela"
             >
@@ -193,17 +223,27 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
                 <p className="text-sm font-bold">Carrinho vazio</p>
               </div>
             ) : (
-              cart.map((id) => (
+              cart.map((item) => (
                 <div
-                  key={id}
+                  key={item.id}
                   className="bg-black/40 border border-slate-800 p-3 rounded-xl flex justify-between items-center animate-in slide-in-from-left-2"
                 >
-                  <span className="font-black text-slate-200 tracking-wider">{id}</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="font-black text-slate-200 tracking-wider">{item.id}</span>
+                    {item.type === "FULL_HOUSE" && (
+                      <span className="text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded">
+                        Cheia
+                      </span>
+                    )}
+                    <span className="text-xs font-bold text-slate-500">
+                      {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.price / 100)}
+                    </span>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => handleRemoveCard(id)}
+                    onClick={() => handleRemoveCard(item.id)}
                     className="text-slate-500 hover:text-red-400 p-1"
-                    aria-label={`Remover cartela ${id}`}
+                    aria-label={`Remover cartela ${item.id}`}
                   >
                     <Trash2 size={18} />
                   </button>

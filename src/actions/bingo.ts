@@ -1,11 +1,13 @@
-"use server";
-
 // src/actions/bingo.ts
+
+"use server";
 
 import prisma from "@/lib/prisma";
 import { requireTenant, requireEventAdmin, requireEventCapability } from "@/lib/requireTenant";
 import { auth } from "@/lib/auth";
 import { secureInt, securePick } from "@/lib/random";
+import { evaluateCard } from "@/lib/bingoRules";
+import { cardCanWin, CARD_TYPE_LABEL, type CardType } from "@/lib/cardPricing";
 import { SPONSOR_SELECT, sponsorOrderBy, resolveSponsorSlots } from "@/lib/sponsorRotation";
 import { unstable_noStore as noStore } from "next/cache";
 import { revalidatePath } from "next/cache";
@@ -46,9 +48,23 @@ function getCardSignature(matrix: any): string {
 // GERAÇÃO DE CARTELAS
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function generateBatchCards(eventId: string, quantity: number) {
+export async function generateBatchCards(eventId: string, quantity: number, type: CardType = "QUINA") {
   // 🛡️ SEGURANÇA: Reaproveitando a função auxiliar
   const { tenantId, event } = await requireEventAdmin(eventId);
+
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5000) {
+    return { success: false, error: "Quantidade inválida (de 1 a 5000)." };
+  }
+  if (type !== "QUINA" && type !== "FULL_HOUSE") {
+    return { success: false, error: "Tipo de cartela inválido." };
+  }
+  // Cartela cheia tem preço próprio: sem ele a cartela seria vendida pelo preço errado.
+  if (type === "FULL_HOUSE" && !(event.fullHousePrice && event.fullHousePrice > 0)) {
+    const tierWithFullHouse = await prisma.priceTier.count({ where: { eventId, fullHousePrice: { gt: 0 } } });
+    if (tierWithFullHouse === 0) {
+      return { success: false, error: "Defina o preço da cartela cheia (padrão ou em alguma fase) antes de gerar cartelas desse tipo." };
+    }
+  }
 
   const eventWithCards = await prisma.event.findFirst({
     where: { id: eventId, tenantId },
@@ -73,7 +89,7 @@ export async function generateBatchCards(eventId: string, quantity: number) {
     };
     const sig = getCardSignature(newMatrix);
     if (!existingSignatures.includes(sig)) {
-      cardsToCreate.push({ eventId, shortId: shortIds[count], matrix: newMatrix, isSold: false, isPaid: false });
+      cardsToCreate.push({ eventId, shortId: shortIds[count], matrix: newMatrix, type, isSold: false, isPaid: false });
       existingSignatures.push(sig);
       count++;
     }
@@ -110,6 +126,18 @@ export async function drawNextNumber(eventId: string) {
       );
       const nextNumber = securePick(available);
 
+      // Patrocinadores ANTES do update: a pedra deste sorteio é a de número (cursor + 1).
+      const sponsors = await prisma.sponsor.findMany({
+        where: { eventId },
+        orderBy: sponsorOrderBy(),
+        select: SPONSOR_SELECT,
+      });
+      const { currentSponsor, nextSponsor } = resolveSponsorSlots(
+        sponsors,
+        event.sponsorCursor + 1,
+        true
+      );
+
       // Pedra e cursor de patrocinadores avançam no MESMO update (atômico).
       const swapped = await prisma.event.updateMany({
         where: { id: eventId, tenantId, sponsorCursor: event.sponsorCursor },
@@ -121,16 +149,23 @@ export async function drawNextNumber(eventId: string) {
 
       if (swapped.count === 0) continue; // alguém sorteou no meio: relê e tenta de novo
 
-      const sponsors = await prisma.sponsor.findMany({
-        where: { eventId },
-        orderBy: sponsorOrderBy(),
-        select: SPONSOR_SELECT,
-      });
-      const { currentSponsor, nextSponsor } = resolveSponsorSlots(
-        sponsors,
-        event.sponsorCursor + 1,
-        true
-      );
+      // 📊 Registro de exposição (base do relatório do patrocinador).
+      // Best-effort: se falhar, o SORTEIO NÃO PODE parar — só registramos o erro.
+      if (currentSponsor) {
+        try {
+          await prisma.sponsorExposure.create({
+            data: {
+              eventId,
+              sponsorId: currentSponsor.id,
+              sponsorName: currentSponsor.name,
+              ballNumber: nextNumber,
+              sequence: event.sponsorCursor + 1,
+            },
+          });
+        } catch (logError) {
+          console.error("[EXPOSURE_LOG_ERROR]", logError);
+        }
+      }
 
       return {
         success: true,
@@ -155,7 +190,14 @@ export async function resetGame(eventId: string) {
   const { tenantId } = await requireEventCapability(eventId, "canOperate");
   await prisma.event.update({
     where: { id: eventId }, // Já garantimos a posse, basta usar o ID único
-    data: { drawnNumbers: [] },
+    // Zera também um alerta/celebração pendente: senão o telão ficava "em festa" com a grade vazia.
+    data: {
+      drawnNumbers: [],
+      pendingWinnerCard: null,
+      pendingWinnerName: null,
+      bingoConfirmed: false,
+      bingoConfirmedAt: null,
+    },
   });
   return { success: true };
 }
@@ -178,7 +220,7 @@ export async function getEventCards(eventId: string) {
   if (!event) throw new Error("Evento não encontrado.");
 
   return {
-    cards: event.cards.map((c) => ({ id: c.id, shortId: c.shortId, matrix: c.matrix as any })),
+    cards: event.cards.map((c) => ({ id: c.id, shortId: c.shortId, matrix: c.matrix as any, type: c.type })),
     sponsors: event.sponsors.map((s) => ({ id: s.id, name: s.name, logoUrl: s.logoUrl ?? undefined })),
   };
 }
@@ -242,35 +284,18 @@ export async function validateWinningCard(eventId: string, shortId: string) {
     };
   }
 
-  // CRITÉRIO 2-4: Verificação matemática (MANTIDA ORIGINAL - OK)
-  const allNumbers = [
-    ...matrix.B, ...matrix.I,
-    matrix.N[0], matrix.N[1], matrix.N[3], matrix.N[4], // N[2] = FREE
-    ...matrix.G, ...matrix.O,
-  ];
-  const isFullHouse = allNumbers.every((n) => drawn.includes(n));
-
-  const hasHorizontalQuina = [0, 1, 2, 3, 4].some((row) =>
-    ["B", "I", "N", "G", "O"].every((col) => {
-      if (col === "N" && row === 2) return true;
-      return drawn.includes(matrix[col][row]);
-    })
-  );
-  const hasVerticalQuina = ["B", "I", "N", "G", "O"].some((col) =>
-    [0, 1, 2, 3, 4].every((row) => {
-      if (col === "N" && row === 2) return true;
-      return drawn.includes(matrix[col][row]);
-    })
-  );
-  const hasDiag1 = [matrix.B[0], matrix.I[1], matrix.G[3], matrix.O[4]].every((n) => drawn.includes(n));
-  const hasDiag2 = [matrix.B[4], matrix.I[3], matrix.G[1], matrix.O[0]].every((n) => drawn.includes(n));
-  const hasQuina = hasHorizontalQuina || hasVerticalQuina || hasDiag1 || hasDiag2;
+  // CRITÉRIOS 2-4: as regras ficam em src/lib/bingoRules.ts (a mesa do locutor usa a MESMA conta).
+  const { isFullHouse, hasQuina, hasHorizontalQuina, hasVerticalQuina, hasDiag1, hasDiag2 } =
+    evaluateCard(matrix, drawn);
 
   const currentPrize = event.prizes[0] || null;
   let isWinner = false;
   let winMessage = "";
 
-  if (currentPrize) {
+  if (currentPrize && !cardCanWin(card.type, currentPrize.type)) {
+    // Cartela de Quina não concorre a prêmio de Cartela Cheia (e vice-versa): nunca é "vencedora".
+    winMessage = `Esta cartela é de ${CARD_TYPE_LABEL[card.type as CardType]}, mas a rodada atual premia ${CARD_TYPE_LABEL[currentPrize.type as CardType]}.`;
+  } else if (currentPrize) {
     if (currentPrize.type === "QUINA" && hasQuina) {
       isWinner = true;
       winMessage = `🎉 BINGO! Quina confirmada — ${currentPrize.prizeName}`;
@@ -285,6 +310,7 @@ export async function validateWinningCard(eventId: string, shortId: string) {
   return {
     success: true,
     cardId: card.shortId,
+    cardType: card.type,
     isPaid: card.isPaid,
     isFullHouse,
     hasQuina,
@@ -304,7 +330,7 @@ export async function alertLocutor(eventId: string, shortId: string, winnerName:
     return { success: false, error: validation.error ?? "Cartela inválida." };
   }
   if (!validation.isWinner) {
-    return { success: false, error: "Esta cartela não está vencendo a rodada atual." };
+    return { success: false, error: validation.winMessage || "Esta cartela não está vencendo a rodada atual." };
   }
 
   // O dono da cartela não é guardado no sistema: o fiscal digita o nome. Limpa e limita.
@@ -338,12 +364,12 @@ export async function toggleBingoCelebration(eventId: string, confirm: boolean) 
 
   await prisma.event.update({
     where: { id: eventId },
-    data: {
-      bingoConfirmed: confirm,
-      pendingWinnerCard: null,
-      pendingWinnerName: null,
-      bingoConfirmedAt: confirm ? new Date() : null,
-    },
+    // Ao CONFIRMAR ("soltar no telão") o ganhador precisa continuar gravado: é o nome que a tela
+    // grande mostra. Antes ele era apagado aqui e o telão exibia só "Ganhador". O ganhador é limpo
+    // no falso alarme (confirm = false) e ao encerrar a rodada (completeCurrentPrizeAndNext).
+    data: confirm
+      ? { bingoConfirmed: true, bingoConfirmedAt: new Date() }
+      : { bingoConfirmed: false, bingoConfirmedAt: null, pendingWinnerCard: null, pendingWinnerName: null },
   });
 
   revalidatePath("/", "layout");

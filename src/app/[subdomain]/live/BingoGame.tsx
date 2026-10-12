@@ -1,6 +1,5 @@
-"use client";
-
 // src/app/[subdomain]/live/BingoGame.tsx
+"use client";
 
 import { useState, useTransition, useMemo, useEffect } from "react";
 import useSWR from "swr";
@@ -16,6 +15,8 @@ import {
 } from "@/actions/bingo";
 import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy, LogOut } from "lucide-react";
 import { notifyProjector } from "@/lib/projectorSync";
+import { evaluateCard } from "@/lib/bingoRules";
+import { cardCanWin } from "@/lib/cardPricing";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -108,20 +109,25 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
     { letter: "O", range: [61, 75] },
   ], []);
 
+  // "Na cara do gol" mede o que a rodada atual PREMIA:
+  //  • Quina → quantas pedras faltam para fechar a linha mais próxima (mostra até 2)
+  //  • Cartela cheia → quantas faltam para a cartela toda (mostra até 4)
+  // (antes media sempre cartela cheia: numa rodada de quina, toda cartela da lista já tinha ganhado)
+  const isQuinaRound = currentPrize?.type === "QUINA";
   const ranking = useMemo(() => {
     if (!cards.length || drawnNumbers.length === 0) return [];
-    return cards.map(card => {
-      const allNumbers = [
-        ...card.matrix.B, 
-        ...card.matrix.I, 
-        ...card.matrix.N.filter((_: any, i: number) => i !== 2), 
-        ...card.matrix.G, 
-        ...card.matrix.O
-      ];
-      const hits = allNumbers.filter((n: number) => drawnNumbers.includes(n)).length;
-      return { shortId: card.shortId, remaining: 24 - hits };
-    }).filter(c => c.remaining <= 4).sort((a, b) => a.remaining - b.remaining).slice(0, 10);
-  }, [cards, drawnNumbers]);
+    const limit = isQuinaRound ? 2 : 4;
+    return cards
+      // Cartela de um tipo só concorre à rodada do mesmo tipo (as antigas, sem tipo, concorrem a todas).
+      .filter((card: any) => cardCanWin(card.type, currentPrize?.type))
+      .map((card: any) => {
+        const ev = evaluateCard(card.matrix, drawnNumbers);
+        return { shortId: card.shortId as string, remaining: isQuinaRound ? ev.quinaMissing : ev.fullMissing };
+      })
+      .filter((c: { remaining: number }) => c.remaining <= limit)
+      .sort((a: { remaining: number }, b: { remaining: number }) => a.remaining - b.remaining)
+      .slice(0, 10);
+  }, [cards, drawnNumbers, isQuinaRound, currentPrize?.type]);
 
   const handleDraw = () => {
     startTransition(async () => {
@@ -403,12 +409,17 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
         <div className="bg-black/40 p-6 rounded-3xl border border-emerald-900/50 shadow-xl backdrop-blur-sm h-fit">
           <h2 className="text-emerald-400/60 font-black uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
             <Trophy size={18} className="text-[#ca8a04]" /> Na Cara do Gol
+            {currentPrize && (
+              <span className="text-[10px] font-bold text-emerald-300/50 normal-case tracking-normal">
+                ({isQuinaRound ? "quina" : "cartela cheia"})
+              </span>
+            )}
           </h2>
           <div className="flex flex-col gap-3">
             {!cards.length ? (
               <div className="text-center text-emerald-900 text-xs py-4">Sincronizando banco...</div>
             ) : ranking.length === 0 ? (
-              <div className="text-center text-emerald-900/50 text-xs py-4 border border-emerald-900/30 rounded-xl bg-black/30">Nenhuma cartela na quina ainda.</div>
+              <div className="text-center text-emerald-900/50 text-xs py-4 border border-emerald-900/30 rounded-xl bg-black/30">Nenhuma cartela perto de {isQuinaRound ? "bater a quina" : "fechar a cartela"} ainda.</div>
             ) : (
               ranking.map((r, idx) => (
                 <div key={r.shortId} className={`flex justify-between items-center p-4 rounded-xl border transition-all ${r.remaining === 0 ? "bg-emerald-900/50 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]" : "bg-black/50 border-emerald-900/30"}`}>

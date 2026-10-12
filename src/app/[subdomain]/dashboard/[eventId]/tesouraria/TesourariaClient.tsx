@@ -9,11 +9,13 @@ import { useRouter } from "next/navigation";
 export default function TesourariaClient({ 
   eventId, 
   initialStaff,
-  availableCardsCount
+  availableCardsCount,
+  priceOptions = []
 }: { 
   eventId: string; 
   initialStaff: any[];
   availableCardsCount: number;
+  priceOptions?: { value: string; label: string }[];
 }) {
   const router = useRouter();
   const [activeStaff, setActiveStaff] = useState<any>(null);
@@ -22,6 +24,7 @@ export default function TesourariaClient({
   const [modalType, setModalType] = useState<"assign" | "return" | "pay" | null>(null);
   
   const [batchInput, setBatchInput] = useState("");
+  const [tierId, setTierId] = useState(""); // "" = fase vigente agora
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -46,11 +49,15 @@ export default function TesourariaClient({
       } else if (modalType === "return") {
         res = await returnCardsFromStaff(eventId, activeStaff.id, codes);
       } else {
-        res = await registerCardPayment(eventId, activeStaff.id, codes);
+        res = await registerCardPayment(eventId, activeStaff.id, codes, tierId || undefined);
       }
 
       if (res.success) {
-        setMessage({ text: `${res.count} cartelas processadas com sucesso!`, type: "success" });
+        const money =
+          "amount" in res && typeof res.amount === "number"
+            ? ` — ${(res.amount / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} recebidos`
+            : "";
+        setMessage({ text: `${res.count} cartelas processadas com sucesso${money}!`, type: "success" });
         setBatchInput("");
         router.refresh(); 
         setTimeout(() => setModalType(null), 2000);
@@ -155,6 +162,26 @@ export default function TesourariaClient({
               {modalType === "pay" && "Registrar Pagamento"}
             </h3>
             <p className="text-slate-400 text-sm mb-6">Operando cartelas de: <strong className="text-emerald-400">@{activeStaff.user.username}</strong></p>
+
+            {modalType === "pay" && priceOptions.length > 0 && (
+              <div className="mb-4">
+                <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 block">
+                  Preço aplicado neste acerto
+                </label>
+                <select
+                  value={tierId}
+                  onChange={(e) => setTierId(e.target.value)}
+                  className="w-full bg-black border border-slate-800 rounded-xl p-3 text-sm text-white focus:border-emerald-500 outline-none"
+                >
+                  {priceOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Cartela vendida em papel na pré-venda deve ser acertada pelo preço da pré-venda, mesmo que o acerto seja só no dia do evento.
+                </p>
+              </div>
+            )}
 
             <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 block">
               Códigos das Cartelas (shortId)

@@ -63,12 +63,15 @@ export default function EventWizard({ event, prizes, sponsors }: EventWizardProp
               <div className="bg-blue-500/20 p-3 rounded-xl text-blue-400"><Ticket size={24} /></div>
               <div>
                 <h3 className="text-xl font-bold text-white">Passo 1: Valor da Cartela</h3>
-                <p className="text-sm text-slate-400">Clique no botão verde abaixo para definir o preço padrão de cada bilhete.</p>
+                <p className="text-sm text-slate-400">Defina o preço da cartela de quina e, se for ter rodada de cartela cheia, o preço da cartela cheia (ela é vendida à parte).</p>
               </div>
             </div>
             
             <div className="bg-black/20 p-6 rounded-2xl border border-slate-800/60 flex justify-center">
-              <TicketPriceEditor eventId={event.id} initialPrice={event.ticketPrice} />
+              <div className="flex flex-col sm:flex-row gap-4 items-center">
+                <TicketPriceEditor eventId={event.id} initialPrice={event.ticketPrice} />
+                <TicketPriceEditor eventId={event.id} initialPrice={event.fullHousePrice} kind="FULL_HOUSE" />
+              </div>
             </div>
 
             <button onClick={handleNextStep} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-900/20">
@@ -145,7 +148,7 @@ export default function EventWizard({ event, prizes, sponsors }: EventWizardProp
             </div>
 
             <div className="bg-black/20 p-8 rounded-2xl border border-slate-800 text-center flex flex-col items-center shadow-inner">
-              <GenerateCardsButton eventId={event.id} eventName={event.name} />
+              <GenerateCardsButton eventId={event.id} eventName={event.name} fullHousePrice={event.fullHousePrice} />
               <p className="text-[11px] text-slate-500 mt-4 max-w-md leading-relaxed">
                 *Nota: Assim que as cartelas forem geradas matemáticas no banco de dados, o Wizard entenderá que o setup acabou e liberará seu Centro de Comando operacional completo!
               </p>

@@ -2,6 +2,7 @@
 import prisma from "@/lib/prisma";
 import PDVClient from "./PDVClient";
 import StaffNav from "@/components/staff/StaffNav";
+import { currentPrices } from "@/lib/priceTiers";
 
 export default async function VendasPage({
   params,
@@ -19,6 +20,8 @@ export default async function VendasPage({
       id: true,
       name: true,
       ticketPrice: true,
+      fullHousePrice: true,
+      priceTiers: { select: { id: true, name: true, quinaPrice: true, fullHousePrice: true, startsAt: true } },
       pixKey: true,
       staff: {
         where: { canSell: true },
@@ -39,8 +42,16 @@ export default async function VendasPage({
     );
   }
 
+  const tierName =
+    currentPrices(
+      { ticketPrice: activeEvent.ticketPrice || 2500, fullHousePrice: activeEvent.fullHousePrice },
+      activeEvent.priceTiers
+    ).tier?.name ?? null;
+
   const eventData = {
-    ...activeEvent,
+    id: activeEvent.id,
+    name: activeEvent.name,
+    tierName,
     ticketPrice: activeEvent.ticketPrice || 2500,
     pixKey: activeEvent.pixKey || "",
     sellers: activeEvent.staff.map((s) => ({

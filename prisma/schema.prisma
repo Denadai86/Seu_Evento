@@ -102,6 +102,8 @@ model Event {
   // Rodízio de patrocinadores: nº total de pedras sorteadas no evento (NÃO zera ao trocar de rodada)
   sponsorCursor     Int      @default(0)
   ticketPrice       Float    @default(10.00)
+  // Preço da CARTELA CHEIA (centavos). null = ainda não definido (não dá para gerar/vender cartela cheia).
+  fullHousePrice    Float?
   pixKey            String?
   
   // Celebração de Bingo (State)
@@ -122,6 +124,9 @@ model Event {
   updatedAt         DateTime @updatedAt
 
   @@index([tenantId])
+  exposures     SponsorExposure[]
+  priceTiers    PriceTier[]
+
   @@map("events")
 }
 
@@ -160,6 +165,8 @@ model Sponsor {
   prizes        Prize[]  
   event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
+  exposures     SponsorExposure[]
+
   @@index([eventId])
   @@map("sponsors")
 }
@@ -172,6 +179,8 @@ model Card {
   isSold        Boolean     @default(false)
   isPaid        Boolean     @default(false)
   price         Float?
+  // Tipo da cartela: só concorre a prêmios do MESMO tipo. null = cartela antiga (vale para qualquer prêmio).
+  type          PrizeType?
   isDemoCard    Boolean     @default(false)
 
   eventId       String
@@ -239,4 +248,47 @@ model AuditLog {
 
   @@index([tenantId])
   @@map("audit_logs")
+}
+
+// ==========================================
+// EXPOSIÇÃO DE PATROCINADORES
+// Uma linha por pedra sorteada: qual patrocinador "ofereceu" aquela pedra no telão.
+// É a base do Relatório de Exposição (prova de entrega para o patrocinador).
+// ==========================================
+model SponsorExposure {
+  id          String   @id @default(cuid())
+  eventId     String
+  sponsorId   String?
+  sponsorName String   // cópia do nome: o relatório continua certo se o patrocinador for removido depois
+  ballNumber  Int
+  sequence    Int      // nº da pedra no evento (1 = primeira), contando todas as rodadas
+  createdAt   DateTime @default(now())
+
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sponsor     Sponsor? @relation(fields: [sponsorId], references: [id], onDelete: SetNull)
+
+  @@index([eventId, createdAt])
+  @@map("sponsor_exposures")
+}
+
+// ==========================================
+// FASES DE PREÇO
+// O preço da cartela muda com a data (pré-venda, perto do evento, no evento). Só o admin define.
+// A fase vigente é a de maior `startsAt` que já começou; sem nenhuma fase vigente vale o preço
+// padrão do evento. O preço cobrado fica gravado em Card.price na hora da venda, então trocar de
+// fase NUNCA altera cartelas já vendidas.
+// ==========================================
+model PriceTier {
+  id             String    @id @default(cuid())
+  eventId        String
+  name           String
+  quinaPrice     Float     // centavos
+  fullHousePrice Float?    // centavos; null = usa o preço padrão da cartela cheia do evento
+  startsAt       DateTime? // null = vale desde o início (só pode haver uma fase assim)
+  createdAt      DateTime  @default(now())
+
+  event          Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, startsAt])
+  @@map("price_tiers")
 }
