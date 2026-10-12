@@ -370,6 +370,13 @@ export default async function EventDashboardPage({
                     </button>
                   </form>
                   <a
+                    href={`/dashboard/${event.id}/resultados`}
+                    className="col-span-full sm:col-span-2 lg:col-span-4 bg-sky-600 hover:bg-sky-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-sky-900/20 mt-2"
+                  >
+                    📊 Painel de Resultados
+                  </a>
+
+                  <a
                     href={`/dashboard/${event.id}/patrocinadores`}
                     target="_blank"
                     className="col-span-full sm:col-span-2 lg:col-span-4 bg-amber-600 hover:bg-amber-500 text-white font-bold py-4 px-6 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20 mt-2"
