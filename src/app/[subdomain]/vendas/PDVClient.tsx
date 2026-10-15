@@ -6,6 +6,7 @@ import { processBatchSale, lookupCardForSale, undoLastSale } from "@/actions/ven
 import { QrCode, Trash2, Banknote, CreditCard, UserCircle, X, Copy, Camera } from "lucide-react";
 import QRCode from "react-qr-code";
 import TeamPanel from "./TeamPanel";
+import HelpButton from "@/components/manual/HelpButton";
 import PdvScanner from "./PdvScanner";
 import { UNDO_WINDOW_MS } from "@/lib/saleRules";
 
@@ -185,6 +186,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
           <p className="text-emerald-400 font-black">{sellerName}</p>
         </div>
         <div className="flex items-center gap-2">
+          <HelpButton topicId="pdv-vender" label="Ajuda" />
           <TeamPanel eventId={activeEvent.id} />
           {/* Voluntário logado já entra como ele mesmo: "Trocar" só existe para quem não é vendedor da escala */}
           {!activeEvent.meStaffId && (

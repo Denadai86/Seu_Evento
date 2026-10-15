@@ -2,6 +2,10 @@
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
+import { auth } from "@/lib/auth";
+import WelcomeGuide from "@/components/manual/WelcomeGuide";
+import { getManualViewer } from "@/lib/manual/viewer";
+import { ROLE_LABEL } from "@/lib/manual/roles";
 
 interface Props {
   children: React.ReactNode;
@@ -49,6 +53,24 @@ export default async function SubdomainLayout({ children, params }: Props) {
     );
   }
 
+  // Primeiro acesso: avisa UMA vez que existe a Central de Ajuda (o suporte da plataforma não precisa).
+  let welcome: { firstName: string; roleLabels: string[] } | null = null;
+  const session = await auth();
+  if (session?.user?.id && session.user.role !== "SUPER_ADMIN") {
+    const me = await prisma.user.findUnique({ where: { id: session.user.id }, select: { manualSeenAt: true } });
+    if (me && !me.manualSeenAt) {
+      const viewer = await getManualViewer();
+      if (viewer) {
+        welcome = { firstName: viewer.firstName, roleLabels: viewer.isAdmin ? [ROLE_LABEL.admin] : viewer.roles.map((r) => ROLE_LABEL[r]) };
+      }
+    }
+  }
+
   // Se a licença estiver 100% regularizada, deixa o cliente passar para as páginas internas
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {welcome && <WelcomeGuide firstName={welcome.firstName} roleLabels={welcome.roleLabels} />}
+    </>
+  );
 }

@@ -85,6 +85,8 @@ model User {
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  // Quando a pessoa viu o aviso de boas-vindas da Central de Ajuda (aparece uma única vez).
+  manualSeenAt DateTime?
 
   @@index([tenantId])
   @@map("users")

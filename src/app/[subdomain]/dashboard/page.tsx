@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import EventList from "./EventList";
 import LogoutButton from "@/components/auth/LogoutButton";
 import Link from "next/link";
-import { Calendar, Users, Activity, Plus, UserCircle } from "lucide-react";
+import { Calendar, Users, Activity, Plus, UserCircle, BookOpen } from "lucide-react";
 import CloseEventButton from "./CloseEventButton";
 import { auth } from "@/lib/auth"; // 🔥 NOVO: Importando a sessão do usuário
 
@@ -71,6 +71,12 @@ export default async function TenantDashboardPage({ params }: { params: Promise<
               </div>
             )}
             
+            <Link
+              href="/manual"
+              className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-xl transition"
+            >
+              <BookOpen size={16} /> Manual
+            </Link>
             <LogoutButton/>
           </div>
 

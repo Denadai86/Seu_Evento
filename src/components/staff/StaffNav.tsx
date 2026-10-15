@@ -2,7 +2,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { ShoppingCart, ScanLine, LogOut, Landmark } from "lucide-react";
+import { ShoppingCart, ScanLine, LogOut, Landmark, CircleHelp } from "lucide-react";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { useState } from "react";
@@ -54,6 +54,16 @@ export default function StaffNav({ eventId, showGestao = false }: { eventId?: st
           </Link>
         </>
       )}
+
+      <div className="w-px bg-slate-800 my-3" />
+
+      <Link
+        href="/manual"
+        className="flex-1 flex flex-col items-center justify-center gap-1 text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors"
+      >
+        <CircleHelp size={22} strokeWidth={1.75} />
+        <span>Ajuda</span>
+      </Link>
 
       <div className="w-px bg-slate-800 my-3" />
 
