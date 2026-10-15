@@ -3,6 +3,9 @@ import prisma from "@/lib/prisma";
 import PDVClient from "./PDVClient";
 import StaffNav from "@/components/staff/StaffNav";
 import { currentPrices } from "@/lib/priceTiers";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { hasManagementAccess } from "@/lib/eventAccess";
 
 export default async function VendasPage({
   params,
@@ -10,6 +13,15 @@ export default async function VendasPage({
   params: Promise<{ subdomain: string }>;
 }) {
   const { subdomain } = await params;
+
+  // Papéis de gestão (tesoureiro/conselho): quem NÃO vende vai direto para a Gestão; quem vende ganha o atalho no menu.
+  const session = await auth();
+  const userId = session?.user?.id;
+  const showGestao = userId && session?.user?.role === "STAFF" ? await hasManagementAccess(userId) : false;
+  if (userId && showGestao) {
+    const sells = await prisma.eventStaff.count({ where: { userId, canSell: true } });
+    if (sells === 0) redirect("/gestao");
+  }
 
   const activeEvent = await prisma.event.findFirst({
     where: {
@@ -37,7 +49,7 @@ export default async function VendasPage({
         <p className="text-slate-400 text-sm">
           Peça para o administrador iniciar o evento no painel principal.
         </p>
-        <StaffNav />
+        <StaffNav showGestao={showGestao} />
       </div>
     );
   }
@@ -48,7 +60,12 @@ export default async function VendasPage({
       activeEvent.priceTiers
     ).tier?.name ?? null;
 
+  // Quem sou eu: vem da SESSÃO (o servidor só aceita venda do próprio usuário). Assim o PDV já entra
+  // como o voluntário logado, sem a tela de "entrar como…" que deixava escolher o nome de outra pessoa.
+  const meStaffId = activeEvent.staff.find((s) => s.userId === session?.user?.id)?.id ?? null;
+
   const eventData = {
+    meStaffId,
     id: activeEvent.id,
     name: activeEvent.name,
     tierName,
@@ -78,7 +95,7 @@ export default async function VendasPage({
         <PDVClient activeEvent={eventData} />
       </main>
 
-      <StaffNav eventId={activeEvent.id} />
+      <StaffNav showGestao={showGestao} eventId={activeEvent.id} />
     </div>
   );
 }

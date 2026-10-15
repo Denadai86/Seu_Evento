@@ -25,6 +25,8 @@ export default async function GlobalEquipePage() {
           canSell: true,
           canOperate: true,
           canVerify: true,
+          canTreasury: true,
+          canAudit: true,
         }
       }
     },
@@ -42,6 +44,8 @@ export default async function GlobalEquipePage() {
       canSell: es.canSell,
       canOperate: es.canOperate,
       canVerify: es.canVerify,
+      canTreasury: es.canTreasury,
+      canAudit: es.canAudit,
     }))
   }));
 

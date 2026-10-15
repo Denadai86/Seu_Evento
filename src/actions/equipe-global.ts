@@ -1,12 +1,13 @@
-"use server";
-
 // src/actions/equipe-global.ts
+
+"use server";
 
 import prisma from "@/lib/prisma";
 import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { requireOrgAdmin } from "@/lib/requireTenant"; // Importação crucial
 import { secureInt } from "@/lib/random";
+import { logAudit } from "@/lib/audit";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CRIAR STAFF (VENDEDOR/VOLUNTÁRIO)
@@ -49,7 +50,7 @@ export async function toggleStaffInEvent(
   userId: string,
   eventId: string,
   isAssigned: boolean,
-  permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean }
+  permissions: { canSell: boolean; canOperate: boolean; canVerify: boolean; canTreasury?: boolean; canAudit?: boolean }
 ) {
   try {
     const tenantId = await requireOrgAdmin();
@@ -62,6 +63,15 @@ export async function toggleStaffInEvent(
 
     if (!eventExists) throw new Error("Evento não encontrado ou acesso negado.");
     if (!userExists) throw new Error("Usuário não encontrado ou não pertence à sua equipe.");
+
+    const flags = (p: { canSell?: boolean; canOperate?: boolean; canVerify?: boolean; canTreasury?: boolean; canAudit?: boolean } | null | undefined) => ({
+      canSell: !!p?.canSell, canOperate: !!p?.canOperate, canVerify: !!p?.canVerify, canTreasury: !!p?.canTreasury, canAudit: !!p?.canAudit,
+    });
+    // Estado ANTES: o log mostra exatamente o que mudou (quem ganhou ou perdeu qual permissão).
+    const beforeRow = await prisma.eventStaff.findFirst({
+      where: { userId, eventId },
+      select: { canSell: true, canOperate: true, canVerify: true, canTreasury: true, canAudit: true },
+    });
 
     if (!isAssigned) {
       await prisma.eventStaff.deleteMany({
@@ -76,6 +86,8 @@ export async function toggleStaffInEvent(
           canSell: permissions.canSell,
           canOperate: permissions.canOperate,
           canVerify: permissions.canVerify,
+          canTreasury: !!permissions.canTreasury,
+          canAudit: !!permissions.canAudit,
         },
       });
 
@@ -87,10 +99,26 @@ export async function toggleStaffInEvent(
             canSell: permissions.canSell,
             canOperate: permissions.canOperate,
             canVerify: permissions.canVerify,
+            canTreasury: !!permissions.canTreasury,
+            canAudit: !!permissions.canAudit,
           },
         });
       }
     }
+
+    await logAudit({
+      tenantId,
+      action: "STAFF_PERMISSIONS_CHANGED",
+      eventId,
+      metadata: {
+        targetUserId: userId,
+        targetName: userExists.name,
+        targetUsername: userExists.username,
+        assigned: isAssigned,
+        before: beforeRow ? flags(beforeRow) : null,
+        after: isAssigned ? flags(permissions) : null,
+      },
+    });
 
     revalidatePath("/dashboard/equipe");
     return { success: true };
@@ -123,6 +151,19 @@ export async function resetGlobalStaffPin(userId: string) {
       where: { id: userId },
       data: { password: hashedPin },
     });
+
+    // Redefinir o PIN dá acesso à conta da pessoa: é um dos pontos mais sensíveis para fraude interna.
+    // Registra em CADA evento em que ela trabalha, para aparecer na auditoria de cada um.
+    const staffedEvents = await prisma.eventStaff.findMany({ where: { userId }, select: { eventId: true } });
+    const targets = staffedEvents.length > 0 ? staffedEvents.map((e) => e.eventId) : [undefined];
+    for (const evId of targets) {
+      await logAudit({
+        tenantId,
+        action: "PIN_RESET",
+        eventId: evId,
+        metadata: { targetUserId: userId, targetName: userToReset.name, targetUsername: userToReset.username },
+      });
+    }
 
     return { success: true, newPin, username: user.username };
   } catch (error: any) {

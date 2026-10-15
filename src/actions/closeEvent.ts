@@ -1,9 +1,10 @@
-"use server";
 // src/actions/closeEvent.ts
+"use server";
 
 import prisma from "@/lib/prisma";
 import { requireOrgAdmin } from "@/lib/requireTenant";
 import { revalidatePath } from "next/cache";
+import { logAudit } from "@/lib/audit";
 
 export async function closeEventAndGenerateReport(eventId: string) {
   const tenantId = await requireOrgAdmin();
@@ -58,6 +59,13 @@ export async function closeEventAndGenerateReport(eventId: string) {
     staffRanking,
     totalStaff: event.staff.length,
   };
+
+  await logAudit({
+    tenantId,
+    action: "EVENT_CLOSED",
+    eventId,
+    metadata: { totalRevenue: report.totalRevenue, cards: report.totalCardsSold },
+  });
 
   revalidatePath(`/dashboard/${eventId}`);
   revalidatePath("/dashboard");

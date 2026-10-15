@@ -4,6 +4,9 @@
 import prisma from "@/lib/prisma";
 import { groupByPrice, priceForCard } from "@/lib/cardPricing";
 import { currentPrices } from "@/lib/priceTiers";
+import { UNDO_WINDOW_MS } from "@/lib/saleRules";
+import { buildAuditData } from "@/lib/audit";
+import { randomUUID } from "node:crypto";
 import { PaymentMethod } from "@prisma/client";
 import { requireTenant, requireStaffForEvent } from "@/lib/requireTenant"; // 🔥 Importação Corrigida
 import { auth } from "@/lib/auth";
@@ -64,6 +67,8 @@ export async function processBatchSale(
     });
     const prices = currentPrices({ ticketPrice, fullHousePrice: event.fullHousePrice }, tiers);
 
+    const batchId = randomUUID();
+
     await prisma.$transaction(async (tx) => {
       const existingCards = await tx.card.findMany({
         where: { shortId: { in: shortIds }, eventId },
@@ -71,6 +76,11 @@ export async function processBatchSale(
 
       if (existingCards.length !== shortIds.length) {
         throw new Error("Uma ou mais cartelas não pertencem a este evento.");
+      }
+
+      const blockedCards = existingCards.filter((c) => c.blocked);
+      if (blockedCards.length > 0) {
+        throw new Error(`Cartela bloqueada (perdida ou cancelada): ${blockedCards.map((c) => c.shortId).join(", ")}`);
       }
 
       const alreadySold = existingCards.filter((c) => c.isSold);
@@ -103,7 +113,7 @@ export async function processBatchSale(
       let markedTotal = 0;
       for (const [price, group] of byPrice) {
         const marked = await tx.card.updateMany({
-          where: { shortId: { in: group.map((c) => c.shortId) }, eventId, isSold: false },
+          where: { shortId: { in: group.map((c) => c.shortId) }, eventId, isSold: false, blocked: false },
           data: { isSold: true, isPaid: true, eventStaffId, price },
         });
         markedTotal += marked.count;
@@ -122,6 +132,7 @@ export async function processBatchSale(
           eventStaffId,
           amount: priceById.get(card.id)!,
           method,
+          batchId, // agrupa esta venda: é o que permite desfazer
         })),
       });
     });
@@ -163,9 +174,10 @@ export async function lookupCardForSale(eventId: string, shortId: string) {
 
     const card = await prisma.card.findFirst({
       where: { eventId, shortId: shortId.trim().toUpperCase() },
-      select: { shortId: true, type: true, isSold: true },
+      select: { shortId: true, type: true, isSold: true, blocked: true },
     });
     if (!card) return { success: false, error: "Cartela não encontrada neste evento." };
+    if (card.blocked) return { success: false, error: "Esta cartela está BLOQUEADA (perdida ou cancelada). Não pode ser vendida." };
     if (card.isSold) return { success: false, error: "Esta cartela já foi vendida." };
 
     const ticketPrice = event.ticketPrice > 0 ? event.ticketPrice : 2500;
@@ -178,5 +190,69 @@ export async function lookupCardForSale(eventId: string, shortId: string) {
     return { success: true, shortId: card.shortId, type: card.type, price, tierName: prices.tier?.name ?? null };
   } catch (error: any) {
     return { success: false, error: error.message || "Não foi possível consultar a cartela." };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESFAZER A ÚLTIMA VENDA (erro de digitação, cliente desistiu)
+// Só a PRÓPRIA última venda do voluntário, dentro de 10 minutos. As cartelas voltam para a mão dele,
+// os lançamentos são apagados e FICA REGISTRADO no log de auditoria (quem, quando, quais cartelas).
+// ─────────────────────────────────────────────────────────────────────────────
+export async function undoLastSale(eventId: string) {
+  try {
+    const tenantId = await requireTenant();
+    const me = await requireStaffForEvent(eventId, "canSell");
+
+    const event = await prisma.event.findFirst({ where: { id: eventId, tenantId }, select: { status: true } });
+    if (!event) throw new Error("Evento inválido ou acesso negado.");
+    if (event.status === "ENCERRADO" || event.status === "FINISHED") {
+      throw new Error("Evento encerrado: o caixa está fechado e a venda não pode ser desfeita.");
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const last = await tx.transaction.findFirst({
+        where: { eventId, eventStaffId: me.id, cardId: { not: null } },
+        orderBy: { createdAt: "desc" },
+        select: { batchId: true, createdAt: true },
+      });
+      if (!last) throw new Error("Você ainda não fez nenhuma venda.");
+      if (!last.batchId) throw new Error("Esta venda é antiga e não pode ser desfeita automaticamente. Fale com o administrador.");
+      if (Date.now() - last.createdAt.getTime() > UNDO_WINDOW_MS) {
+        throw new Error("Passaram mais de 10 minutos. Fale com o administrador para corrigir.");
+      }
+
+      const batch = await tx.transaction.findMany({
+        where: { eventId, eventStaffId: me.id, batchId: last.batchId },
+        select: { id: true, cardId: true, amount: true, method: true, card: { select: { shortId: true } } },
+      });
+      const cardIds = batch.map((b) => b.cardId).filter((id): id is string => !!id);
+      const codes = batch.map((b) => b.card?.shortId).filter((c): c is string => !!c).sort();
+      const total = batch.reduce((s, b) => s + b.amount, 0);
+
+      const reverted = await tx.card.updateMany({
+        where: { id: { in: cardIds }, eventId, isPaid: true, eventStaffId: me.id },
+        data: { isSold: false, isPaid: false, price: null },
+      });
+      if (reverted.count !== cardIds.length) {
+        throw new Error("Algumas cartelas dessa venda já foram alteradas. Fale com o administrador.");
+      }
+
+      await tx.transaction.deleteMany({ where: { id: { in: batch.map((b) => b.id) } } });
+
+      await tx.auditLog.create({
+        data: await buildAuditData({
+          action: "SALE_UNDONE",
+          eventId,
+          tenantId,
+          metadata: { staffId: me.id, batchId: last.batchId, codes, total, method: batch[0]?.method ?? null },
+        }),
+      });
+
+      return { count: codes.length, total, codes };
+    });
+
+    return { success: true as const, ...result };
+  } catch (error: any) {
+    return { success: false as const, error: error.message as string };
   }
 }

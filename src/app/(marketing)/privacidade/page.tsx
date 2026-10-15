@@ -58,7 +58,7 @@ export default function PrivacidadePage() {
 
             <section>
               <h2 className="text-2xl font-bold text-slate-900 mb-4">6. Cookies e terceiros</h2>
-              <p>Usamos apenas o cookie necessário para manter o seu login. Não usamos cookies de publicidade nem ferramentas de análise de terceiros. As fontes de texto são carregadas do Google Fonts, o que pode expor o seu endereço IP ao Google.</p>
+              <p>Usamos apenas o cookie necessário para manter o seu login. Para segurança e prestação de contas, o registro de auditoria do evento guarda quem fez cada ação, quando, de qual endereço IP e aparelho. Não usamos cookies de publicidade nem ferramentas de análise de terceiros. As fontes de texto são carregadas do Google Fonts, o que pode expor o seu endereço IP ao Google.</p>
             </section>
 
             <section>

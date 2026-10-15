@@ -3,10 +3,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getRootDomain, isLocalHost, toLogin, toSubdomain, to } from "@/lib/middleware/helpers";
+import { isPublicPath } from "@/lib/publicRoutes";
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp|pdf)$).*)",
   ],
 };
 
@@ -26,10 +27,8 @@ export default auth((req) => {
   const userSubdomain = session?.user?.subdomain ?? (session?.user as any)?.tenant?.subdomain;
 
   // ── ROTAS PÚBLICAS (definidas primeiro — usadas em múltiplos checks abaixo) ──
-  const publicRoutes = ["/", "/entrar", "/projector", "/verify", "/cartela"];
-  const isPublicRoute = publicRoutes.some(
-    (r) => url.pathname === r || url.pathname.startsWith(`${r}/`)
-  );
+  // A lista fica em src/lib/publicRoutes.ts (com testes).
+  const isPublicRoute = isPublicPath(url.pathname);
 
   // ── 1. SESSÃO INVÁLIDA ───────────────────────────────────────────────────
   // ✅ Só bloqueia rotas protegidas — /projector e /cartela são públicos
@@ -68,7 +67,11 @@ export default auth((req) => {
     }
 
     if (role === "STAFF" && (url.pathname.startsWith("/dashboard") || url.pathname.startsWith("/admin"))) {
-      return to(url, "/vendas");
+      // Tesoureiro e Conselho abrem SÓ as telas de gestão de UM evento. Quem decide se a pessoa pode entrar
+      // é a própria página (permissão por evento): o proxy só afasta o que nunca é de voluntário.
+      const staffManagementPage =
+        /^\/dashboard\/[^/]+\/(tesouraria|relatorio|extrato|cartelas|resultados|patrocinadores|auditoria)(\/|$)/.test(url.pathname);
+      if (!staffManagementPage) return to(url, "/vendas");
     }
   }
 

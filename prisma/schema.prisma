@@ -126,6 +126,7 @@ model Event {
   @@index([tenantId])
   exposures     SponsorExposure[]
   priceTiers    PriceTier[]
+  cardTransfers CardTransfer[]
 
   @@map("events")
 }
@@ -140,12 +141,18 @@ model EventStaff {
   canSell     Boolean  @default(true)
   canOperate  Boolean  @default(false)
   canVerify   Boolean  @default(false)
+  // Papéis de gestão (por evento). Tesoureiro: tesouraria, extratos, fechamento e cartelas.
+  // Conselho: leitura de painel, relatórios e auditoria. O administrador define quem tem o quê.
+  canTreasury  Boolean  @default(false)
+  canAudit     Boolean  @default(false)
 
   event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   cards       Card[]
   transactions Transaction[]
+  transfersRequested CardTransfer[] @relation("TransferRequester")
+  transfersOwned     CardTransfer[] @relation("TransferOwner")
 
   createdAt   DateTime @default(now())
 
@@ -181,6 +188,10 @@ model Card {
   price         Float?
   // Tipo da cartela: só concorre a prêmios do MESMO tipo. null = cartela antiga (vale para qualquer prêmio).
   type          PrizeType?
+  // Cartela PERDIDA/cancelada: não pode ser vendida, entregue, transferida nem premiada.
+  blocked       Boolean     @default(false)
+  blockedAt     DateTime?
+  blockedReason String?
   isDemoCard    Boolean     @default(false)
 
   eventId       String
@@ -227,6 +238,8 @@ model Transaction {
   eventStaffId  String?
   amount        Float
   method        PaymentMethod
+  // Agrupa as cartelas de UM mesmo fechamento de venda no PDV (permite desfazer a última venda).
+  batchId       String?
   
   event         Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
   card          Card?         @relation(fields: [cardId], references: [id], onDelete: SetNull)
@@ -247,6 +260,7 @@ model AuditLog {
   createdAt   DateTime @default(now())
 
   @@index([tenantId])
+  @@index([tenantId, createdAt])
   @@map("audit_logs")
 }
 
@@ -291,4 +305,38 @@ model PriceTier {
 
   @@index([eventId, startsAt])
   @@map("price_tiers")
+}
+
+// ==========================================
+// PEDIDOS DE CARTELAS ENTRE VOLUNTÁRIOS
+// "Preciso de mais 5": o voluntário PEDE a outro pelo PDV e o outro libera.
+// Ao aceitar, as cartelas mudam de dono NO SISTEMA (registro completo, com os códigos),
+// para o acerto e a validação do ganhador continuarem batendo com as cartelas físicas.
+// ==========================================
+enum TransferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+model CardTransfer {
+  id          String         @id @default(cuid())
+  eventId     String
+  requesterId String         // EventStaff que PEDIU as cartelas
+  ownerId     String         // EventStaff que TEM as cartelas e libera
+  type        PrizeType      // Quina ou Cartela Cheia
+  quantity    Int
+  status      TransferStatus @default(PENDING)
+  codes       Json?          // códigos transferidos (preenchido ao aceitar)
+  createdAt   DateTime       @default(now())
+  respondedAt DateTime?
+
+  event       Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  requester   EventStaff     @relation("TransferRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  owner       EventStaff     @relation("TransferOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, status])
+  @@index([ownerId, status])
+  @@map("card_transfers")
 }

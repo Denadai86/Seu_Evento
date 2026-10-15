@@ -5,6 +5,7 @@ import { validateWinningCard } from "@/actions/bingo";
 import QRCodeScanner from "./QRCodeScanner";
 import VerifyClient from "./verifyClient";
 import StaffNav from "@/components/staff/StaffNav";
+import { hasManagementAccess } from "@/lib/eventAccess";
 import { ScanLine } from "lucide-react";
 
 export default async function VerifyPage({
@@ -17,6 +18,7 @@ export default async function VerifyPage({
   const { subdomain } = await params;
   const search = await searchParams;
   const session = await auth();
+  const showGestao = session?.user?.id && session.user.role === "STAFF" ? await hasManagementAccess(session.user.id) : false;
 
   const eventId = Array.isArray(search.event) ? search.event[0] : search.event;
   const rawShortId = Array.isArray(search.id) ? search.id[0] : search.id;
@@ -46,7 +48,7 @@ export default async function VerifyPage({
           <QRCodeScanner eventId={eventId || null} subdomain={subdomain} />
         </main>
 
-        <StaffNav eventId={eventId} />
+        <StaffNav showGestao={showGestao} eventId={eventId} />
       </div>
     );
   }
@@ -88,7 +90,7 @@ export default async function VerifyPage({
           </a>
         </main>
 
-        <StaffNav eventId={eventId} />
+        <StaffNav showGestao={showGestao} eventId={eventId} />
       </div>
     );
   }
@@ -138,7 +140,7 @@ export default async function VerifyPage({
         </div>
       </main>
 
-      <StaffNav eventId={card.event.id} />
+      <StaffNav showGestao={showGestao} eventId={card.event.id} />
     </div>
   );
 }

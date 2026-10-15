@@ -4,6 +4,7 @@
 import prisma from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { requireEventAdmin } from "@/lib/requireTenant";
+import { logAudit } from "@/lib/audit";
 
 type TierInput = {
   name: string;
@@ -51,6 +52,11 @@ export async function createPriceTier(eventId: string, input: TierInput) {
       },
     });
 
+    await logAudit({
+      action: "PRICE_TIER_CREATED",
+      eventId,
+      metadata: { name, quinaPrice: Math.round(input.quinaPrice), fullHousePrice: input.fullHousePrice ?? null, startsAt: startsAt ? startsAt.toISOString() : null },
+    });
     revalidatePath(`/dashboard/${eventId}`);
     return { success: true };
   } catch (error: any) {
@@ -62,7 +68,9 @@ export async function createPriceTier(eventId: string, input: TierInput) {
 export async function deletePriceTier(eventId: string, tierId: string) {
   try {
     await requireEventAdmin(eventId);
+    const gone = await prisma.priceTier.findFirst({ where: { id: tierId, eventId }, select: { name: true, quinaPrice: true, fullHousePrice: true, startsAt: true } });
     await prisma.priceTier.deleteMany({ where: { id: tierId, eventId } });
+    await logAudit({ action: "PRICE_TIER_DELETED", eventId, metadata: { tierId, name: gone?.name ?? null, quinaPrice: gone?.quinaPrice ?? null, fullHousePrice: gone?.fullHousePrice ?? null, startsAt: gone?.startsAt ? gone.startsAt.toISOString() : null } });
     revalidatePath(`/dashboard/${eventId}`);
     return { success: true };
   } catch (error: any) {

@@ -66,7 +66,7 @@ test("estoque: livres + com voluntários + pagas = total", () => {
     { isPaid: true, price: 1000, eventStaffId: "A" }, { isPaid: true, price: 1000, eventStaffId: null },
   ];
   const s = buildStock(cards);
-  assert.deepEqual(s, { total: 5, free: 2, withVolunteers: 1, paid: 2 });
+  assert.deepEqual(s, { total: 5, free: 2, withVolunteers: 1, paid: 2, blocked: 0 });
   assert.equal(s.free + s.withVolunteers + s.paid, s.total);
   assert.equal(pendingByStaff(cards).get("A"), 1);
 });

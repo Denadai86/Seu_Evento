@@ -8,7 +8,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import PrintButton from "../relatorio/PrintButton";
-import { requireReportAccess } from "@/lib/requireReportAccess";
+import { requirePageAccess } from "@/lib/eventAccess";
+
 import { computeCashReport } from "@/lib/cashReport";
 
 const TZ = "America/Sao_Paulo";
@@ -25,7 +26,7 @@ export default async function ExtratoPage({
 }) {
   const { subdomain, eventId } = await params;
   const { staff: staffFilter } = await searchParams;
-  const tenant = await requireReportAccess(subdomain);
+  const tenant = await requirePageAccess(subdomain, eventId, "extrato");
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId: tenant.id },
@@ -77,7 +78,7 @@ export default async function ExtratoPage({
       <header className="print:hidden bg-[#0b0f14] text-white p-4 sticky top-0 z-50 shadow-md">
         <div className="max-w-3xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Link href={`/dashboard/${eventId}/resultados`} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition">
+            <Link href={tenant.actor.role === "STAFF" ? "/gestao" : `/dashboard/${eventId}/resultados`} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition">
               <ArrowLeft size={20} />
             </Link>
             <h1 className="font-bold">Extrato por Voluntário • {sheets.length} folha{sheets.length === 1 ? "" : "s"}</h1>

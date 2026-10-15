@@ -2,9 +2,12 @@
 "use client";
 
 import { useState, useTransition, useRef, useEffect } from "react";
-import { processBatchSale, lookupCardForSale } from "@/actions/venda";
-import { QrCode, Trash2, Banknote, CreditCard, UserCircle, X, Copy } from "lucide-react";
+import { processBatchSale, lookupCardForSale, undoLastSale } from "@/actions/venda";
+import { QrCode, Trash2, Banknote, CreditCard, UserCircle, X, Copy, Camera } from "lucide-react";
 import QRCode from "react-qr-code";
+import TeamPanel from "./TeamPanel";
+import PdvScanner from "./PdvScanner";
+import { UNDO_WINDOW_MS } from "@/lib/saleRules";
 
 // Cada item do carrinho já traz o TIPO e o PREÇO (a cartela cheia custa diferente da quina).
 // O preço mostrado aqui é só para o caixa conferir: o servidor recalcula tudo na hora de cobrar.
@@ -20,16 +23,21 @@ interface EventData {
   name: string;
   ticketPrice: number; // Em centavos
   tierName?: string | null; // fase de preço vigente (definida pelo admin)
+  meStaffId?: string | null; // o voluntário LOGADO (vem da sessão no servidor)
   pixKey: string;
   sellers: Seller[];
 }
 
 export default function PDVClient({ activeEvent }: { activeEvent: EventData | null }) {
-  const [selectedSeller, setSelectedSeller] = useState<string>("");
+  const [selectedSeller, setSelectedSeller] = useState<string>(activeEvent?.meStaffId ?? "");
   const [isPending, startTransition] = useTransition();
   
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [lastSaleAt, setLastSaleAt] = useState<number | null>(null);
+  const cartRef = useRef<CartItem[]>([]);
+  cartRef.current = cart;
   const [inputValue, setInputValue] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [showPixModal, setShowPixModal] = useState(false);
@@ -77,29 +85,47 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
   }
 
   // ====================== LÓGICA DO PDV ======================
+  // Coloca UMA cartela no carrinho pelo código (digitado ou lido pela câmera).
+  // Devolve null se deu certo, ou a mensagem de erro (inexistente, já vendida, bloqueada…).
+  const addById = async (rawId: string): Promise<string | null> => {
+    const id = rawId.trim().toUpperCase();
+    if (!id || !activeEvent) return null;
+    if (cartRef.current.some((item) => item.id === id)) return "Esta cartela já está no carrinho!";
+
+    const res = await lookupCardForSale(activeEvent.id, id);
+    if (!res.success) return res.error || "Não foi possível consultar a cartela.";
+
+    setCart((current) =>
+      current.some((item) => item.id === res.shortId)
+        ? current
+        : [{ id: res.shortId!, type: res.type ?? null, price: res.price! }, ...current]
+    );
+    setSuccessMessage("");
+    return null;
+  };
+
   const handleAddCard = async (e?: React.FormEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
-    const id = inputValue.trim().toUpperCase();
-    if (!id || isLookingUp || !activeEvent) return;
-
-    if (cart.some((item) => item.id === id)) {
-      alert("Esta cartela já está no carrinho!");
-      return setInputValue("");
-    }
-
-    // Consulta o servidor: confirma que a cartela existe, não foi vendida e qual é o tipo/preço dela.
+    if (isLookingUp || !inputValue.trim()) return;
     setIsLookingUp(true);
-    const res = await lookupCardForSale(activeEvent.id, id);
+    const error = await addById(inputValue);
     setIsLookingUp(false);
-
-    if (!res.success) {
-      alert(res.error || "Não foi possível consultar a cartela.");
-      return setInputValue("");
-    }
-
-    setCart((current) => [{ id: res.shortId!, type: res.type ?? null, price: res.price! }, ...current]);
+    if (error) alert(error);
     setInputValue("");
-    setSuccessMessage("");
+  };
+
+  const handleUndo = () => {
+    if (!activeEvent) return;
+    if (!window.confirm("Desfazer a última venda? As cartelas voltam para a sua mão e o valor sai do caixa.")) return;
+    startTransition(async () => {
+      const res = await undoLastSale(activeEvent.id);
+      if (res.success) {
+        setSuccessMessage(`↩️ Venda desfeita: ${res.count} cartela(s) voltaram para você.`);
+        setLastSaleAt(null);
+      } else {
+        alert(res.error);
+      }
+    });
   };
 
   const handleRemoveCard = (idToRemove: string) => {
@@ -118,6 +144,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
 
       if (res.success) {
         setSuccessMessage(`✅ Venda de ${cart.length} cartela(s) concluída!`);
+        setLastSaleAt(Date.now());
         setCart([]);
         setShowPixModal(false);
       } else {
@@ -149,20 +176,28 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
 
   return (
     <div className="min-h-screen bg-[#0b0f14] flex flex-col font-sans">
+      {showScanner && <PdvScanner onCode={addById} onClose={() => setShowScanner(false)} />}
+
       {/* HEADER */}
       <header className="bg-[#111827] border-b border-slate-800 p-4 flex justify-between items-center z-10">
         <div>
           <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Operador</p>
           <p className="text-emerald-400 font-black">{sellerName}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setSelectedSeller("")}
-          className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-700 transition"
-          aria-label="Trocar operador"
-        >
-          Trocar
-        </button>
+        <div className="flex items-center gap-2">
+          <TeamPanel eventId={activeEvent.id} />
+          {/* Voluntário logado já entra como ele mesmo: "Trocar" só existe para quem não é vendedor da escala */}
+          {!activeEvent.meStaffId && (
+            <button
+              type="button"
+              onClick={() => setSelectedSeller("")}
+              className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-700 transition"
+              aria-label="Trocar operador"
+            >
+              Trocar
+            </button>
+          )}
+        </div>
       </header>
 
       {/* CONTEÚDO PRINCIPAL */}
@@ -185,6 +220,15 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
               className="flex-1 bg-black/50 border border-slate-700 rounded-xl px-4 py-3 text-lg font-black text-white uppercase outline-none focus:border-emerald-500 transition-colors placeholder:text-slate-600"
             />
             <button
+              type="button"
+              onClick={() => setShowScanner(true)}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-xl transition-colors shrink-0"
+              aria-label="Ler QR da cartela com a câmera"
+              title="Ler QR com a câmera"
+            >
+              <Camera size={20} />
+            </button>
+            <button
               type="submit"
               disabled={!inputValue.trim() || isLookingUp}
               className="bg-emerald-600 disabled:bg-slate-800 text-white font-bold px-5 rounded-xl transition-colors shrink-0 text-xl"
@@ -199,6 +243,16 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
         {successMessage && (
           <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl mb-4 text-center font-bold text-sm animate-in fade-in">
             {successMessage}
+            {lastSaleAt !== null && Date.now() - lastSaleAt < UNDO_WINDOW_MS && (
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={isPending}
+                className="block mx-auto mt-3 text-xs font-bold text-slate-300 hover:text-white underline underline-offset-2 disabled:opacity-50"
+              >
+                Errei: desfazer esta venda
+              </button>
+            )}
           </div>
         )}
 

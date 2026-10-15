@@ -5,6 +5,7 @@
 import prisma from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { requireOrgAdmin } from "@/lib/requireTenant";
+import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,6 +112,9 @@ export async function updateTicketPrice(
   if (!Number.isFinite(priceInCents) || priceInCents < 0) throw new Error("O valor não pode ser negativo.");
   if (kind === "FULL_HOUSE" && priceInCents <= 0) throw new Error("O preço da cartela cheia precisa ser maior que zero.");
 
+  // Valor ANTERIOR: o log mostra de quanto para quanto o preço mudou.
+  const previous = await prisma.event.findFirst({ where: { id: eventId, tenantId }, select: { ticketPrice: true, fullHousePrice: true } });
+
   // 🛡️ SEGURANÇA: O 'where' duplo garante que não altere preço de eventos de terceiros
   const event = await prisma.event.update({
     where: { id: eventId, tenantId },
@@ -118,6 +122,8 @@ export async function updateTicketPrice(
   });
 
   if (!event) throw new Error("Acesso negado ou evento inexistente.");
+
+  await logAudit({ tenantId, action: "TICKET_PRICE_CHANGED", eventId, metadata: { kind, price: priceInCents, from: kind === "FULL_HOUSE" ? previous?.fullHousePrice ?? null : previous?.ticketPrice ?? null } });
 
   return { success: true };
 }
@@ -150,6 +156,8 @@ export async function activateDemoMode(eventId: string) {
       price: 0, // Marcador de demo — sem Transaction associada
     },
   });
+
+  await logAudit({ tenantId, action: "DEMO_MODE", eventId });
 
   return { success: true };
 }

@@ -7,8 +7,9 @@
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Printer, FileSignature, Megaphone, ReceiptText, AlertTriangle } from "lucide-react";
-import { requireReportAccess } from "@/lib/requireReportAccess";
+import { ArrowLeft, Printer, FileSignature, Megaphone, ReceiptText, AlertTriangle, Ticket, ShieldCheck } from "lucide-react";
+import { requirePageAccess } from "@/lib/eventAccess";
+import { canSeeRanking } from "@/lib/accessPolicy";
 import { computeCashReport } from "@/lib/cashReport";
 import { buildTimeline, buildByPrice, buildStock, pendingByStaff, buildDrawSummary } from "@/lib/dashboardData";
 import { buildSponsorReport, formatDuration } from "@/lib/sponsorReport";
@@ -18,6 +19,7 @@ import DonutChart from "@/components/charts/DonutChart";
 import StackBar from "@/components/charts/StackBar";
 import { brl, COLORS } from "@/components/charts/format";
 import AutoRefresh from "./AutoRefresh";
+import { buildRanking, type RankBy } from "@/lib/ranking";
 
 const TZ = "America/Sao_Paulo";
 const fmtClock = (d: Date) => d.toLocaleTimeString("pt-BR", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
@@ -60,11 +62,15 @@ function Legend({ items }: { items: { label: string; value: string; color: strin
 
 export default async function ResultadosPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ subdomain: string; eventId: string }>;
+  searchParams: Promise<{ rank?: string }>;
 }) {
   const { subdomain, eventId } = await params;
-  const tenant = await requireReportAccess(subdomain);
+  const { rank } = await searchParams;
+  const rankBy: RankBy = rank === "qtd" ? "qtd" : "valor";
+  const tenant = await requirePageAccess(subdomain, eventId, "resultados");
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId: tenant.id },
@@ -75,7 +81,7 @@ export default async function ResultadosPage({
       tenant: { select: { name: true } },
       sponsors: { select: { id: true, name: true, logoUrl: true, contribution: true } },
       prizes: { select: { sponsorId: true, prizeName: true, isCompleted: true } },
-      cards: { select: { type: true, isPaid: true, isSold: true, price: true, eventStaffId: true } },
+      cards: { select: { type: true, isPaid: true, isSold: true, price: true, eventStaffId: true, blocked: true } },
       transactions: { select: { method: true, amount: true, eventStaffId: true, cardId: true, createdAt: true } },
       staff: { select: { id: true, user: { select: { name: true } } } },
     },
@@ -110,6 +116,7 @@ export default async function ResultadosPage({
   const base = `/dashboard/${eventId}`;
 
   const sellersSorted = [...report.sellers].sort((a, b) => b.total - a.total);
+  const ranking = buildRanking(report.sellers, rankBy);
   const methodSegments = [
     { label: "PIX", value: report.pixCents, color: COLORS.pix },
     { label: "Dinheiro", value: report.cashCents, color: COLORS.cash },
@@ -126,7 +133,7 @@ export default async function ResultadosPage({
       <header className="sticky top-0 z-50 bg-[#0b0f14]/85 backdrop-blur-md border-b border-emerald-900/30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div className="flex items-center gap-4">
-            <Link href={base} className="p-2 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white">
+            <Link href={tenant.actor.role === "STAFF" ? "/gestao" : base} className="p-2 bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white">
               <ArrowLeft size={20} />
             </Link>
             <div>
@@ -156,6 +163,12 @@ export default async function ResultadosPage({
             </a>
             <a href={`${base}/extrato`} target="_blank" className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm px-4 py-2.5 rounded-xl transition border border-slate-700">
               <ReceiptText size={16} /> Extrato por Voluntário
+            </a>
+            <a href={`${base}/cartelas`} target="_blank" className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm px-4 py-2.5 rounded-xl transition border border-slate-700">
+              <Ticket size={16} /> Cartelas por ID
+            </a>
+            <a href={`${base}/auditoria`} target="_blank" className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm px-4 py-2.5 rounded-xl transition border border-slate-700">
+              <ShieldCheck size={16} /> Auditoria
             </a>
             <a href={`${base}/patrocinadores`} target="_blank" className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm px-4 py-2.5 rounded-xl transition">
               <Megaphone size={16} /> Relatório de Patrocinadores
@@ -198,6 +211,60 @@ export default async function ResultadosPage({
             (barra laranja), porque a data da venda em papel não é registrada.
           </p>
         </Card>
+
+        {/* RANKING (só o administrador vê: serve para premiar com uma prenda, sem metas) */}
+        {canSeeRanking(tenant.actor) && (
+        <Card title="Ranking de vendedores • só você vê">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div className="flex gap-2">
+              {([["valor", "Por valor vendido"], ["qtd", "Por cartelas vendidas"]] as const).map(([v, label]) => (
+                <Link
+                  key={v}
+                  href={`${base}/resultados?rank=${v}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                    rankBy === v ? "bg-emerald-600 border-emerald-500 text-white" : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                  }`}
+                >
+                  {label}
+                </Link>
+              ))}
+            </div>
+            <a href={`${base}/ranking?by=${rankBy}`} target="_blank" className="text-xs font-bold text-emerald-400 hover:text-emerald-300 underline underline-offset-2">
+              Imprimir ranking
+            </a>
+          </div>
+
+          {ranking.length === 0 ? (
+            <p className="text-sm text-slate-500">Ninguém vendeu ainda.</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+                {ranking.filter((r) => r.position <= 3).slice(0, 3).map((r) => (
+                  <div key={r.id} className={`rounded-2xl p-5 border ${r.position === 1 ? "border-yellow-500/50 bg-yellow-500/5" : "border-slate-700 bg-black/30"}`}>
+                    <p className="text-3xl">{["🥇", "🥈", "🥉"][r.position - 1]}</p>
+                    <p className="text-lg font-black text-white mt-2 truncate">{r.name}</p>
+                    <p className="text-2xl font-black text-emerald-400 mt-1">{rankBy === "valor" ? brl(r.total) : `${r.qtd} cartelas`}</p>
+                    <p className="text-xs text-slate-500 mt-1">{rankBy === "valor" ? `${r.qtd} cartelas` : brl(r.total)}</p>
+                  </div>
+                ))}
+              </div>
+              {ranking.filter((r) => r.position > 3).length > 0 && (
+                <ol className="space-y-2 text-sm">
+                  {ranking.filter((r) => r.position > 3).map((r) => (
+                    <li key={r.id} className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                      <span className="text-slate-300"><strong className="text-slate-500 mr-3">{r.position}º</strong>{r.name}</span>
+                      <span className="font-bold text-white">{rankBy === "valor" ? `${brl(r.total)} • ${r.qtd} cartelas` : `${r.qtd} cartelas • ${brl(r.total)}`}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
+          )}
+          <p className="text-xs text-slate-500 mt-4">
+            Conta tudo que foi creditado ao voluntário: vendas no PDV e cartelas acertadas na tesouraria. Os voluntários não veem este ranking.
+          </p>
+        </Card>
+        )}
 
         {/* VOLUNTÁRIOS + MÉTODO */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -256,6 +323,7 @@ export default async function ResultadosPage({
                 { label: "Livres", value: stock.free, color: COLORS.free },
                 { label: "Com voluntários", value: stock.withVolunteers, color: COLORS.withVolunteers },
                 { label: "Pagas", value: stock.paid, color: COLORS.paid },
+                { label: "Bloqueadas", value: stock.blocked, color: "#ef4444" },
               ]}
             />
             <div className="mt-5">
@@ -264,6 +332,7 @@ export default async function ResultadosPage({
                   { label: "Livres na fábrica", value: `${stock.free}`, color: COLORS.free },
                   { label: "Com voluntários (a acertar)", value: `${stock.withVolunteers}`, color: COLORS.withVolunteers },
                   { label: "Pagas", value: `${stock.paid}`, color: COLORS.paid },
+                  ...(stock.blocked > 0 ? [{ label: "Bloqueadas (perdidas)", value: `${stock.blocked}`, color: "#ef4444" }] : []),
                   { label: "Total gerado", value: `${stock.total}`, color: "transparent" },
                 ]}
               />

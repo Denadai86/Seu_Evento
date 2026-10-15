@@ -14,6 +14,7 @@ export type DashCard = {
   isPaid: boolean;
   price: number | null;
   eventStaffId: string | null;
+  blocked?: boolean;
 };
 
 export type DashTx = { amount: number; createdAt: Date; cardId: string | null };
@@ -106,20 +107,21 @@ export function buildByPrice(cards: DashCard[], ticketPrice: number, fullHousePr
 
 /** Para onde foram as cartelas: livres, com voluntários (ainda não acertadas) ou pagas. */
 export function buildStock(cards: DashCard[]) {
-  let free = 0, withVolunteers = 0, paid = 0;
+  let free = 0, withVolunteers = 0, paid = 0, blocked = 0;
   for (const c of cards) {
-    if (c.isPaid) paid++;
+    if (c.blocked) blocked++;
+    else if (c.isPaid) paid++;
     else if (c.eventStaffId) withVolunteers++;
     else free++;
   }
-  return { total: cards.length, free, withVolunteers, paid };
+  return { total: cards.length, free, withVolunteers, paid, blocked };
 }
 
 /** Quantas cartelas cada voluntário ainda tem na mão (atribuídas e não pagas). */
 export function pendingByStaff(cards: DashCard[]) {
   const map = new Map<string, number>();
   for (const c of cards) {
-    if (!c.isPaid && c.eventStaffId) map.set(c.eventStaffId, (map.get(c.eventStaffId) ?? 0) + 1);
+    if (!c.isPaid && !c.blocked && c.eventStaffId) map.set(c.eventStaffId, (map.get(c.eventStaffId) ?? 0) + 1);
   }
   return map;
 }

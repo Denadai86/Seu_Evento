@@ -7,6 +7,7 @@ import { requireTenant, requireEventAdmin, requireEventCapability } from "@/lib/
 import { auth } from "@/lib/auth";
 import { secureInt, securePick } from "@/lib/random";
 import { evaluateCard } from "@/lib/bingoRules";
+import { logAudit } from "@/lib/audit";
 import { cardCanWin, CARD_TYPE_LABEL, type CardType } from "@/lib/cardPricing";
 import { SPONSOR_SELECT, sponsorOrderBy, resolveSponsorSlots } from "@/lib/sponsorRotation";
 import { unstable_noStore as noStore } from "next/cache";
@@ -96,6 +97,7 @@ export async function generateBatchCards(eventId: string, quantity: number, type
   }
 
   await prisma.card.createMany({ data: cardsToCreate });
+  await logAudit({ tenantId, action: "CARDS_GENERATED", eventId, metadata: { quantity, type } });
   return { success: true, totalCreated: quantity };
 }
 
@@ -199,6 +201,7 @@ export async function resetGame(eventId: string) {
       bingoConfirmedAt: null,
     },
   });
+  await logAudit({ tenantId, action: "GAME_RESET", eventId });
   return { success: true };
 }
 
@@ -275,6 +278,14 @@ export async function validateWinningCard(eventId: string, shortId: string) {
   const card = event.cards[0];
   const drawn = event.drawnNumbers as number[];
   const matrix = card.matrix as any;
+
+  // CRITÉRIO 0: cartela BLOQUEADA (perdida/cancelada) nunca ganha
+  if (card.blocked) {
+    return {
+      success: false,
+      error: `⛔ CARTELA BLOQUEADA${card.blockedReason ? ` (${card.blockedReason})` : ""}. Ela foi dada como perdida ou cancelada e não pode ser premiada.`,
+    };
+  }
 
   // CRITÉRIO 1: Pagamento obrigatório
   if (!card.isPaid) {
@@ -354,6 +365,13 @@ export async function alertLocutor(eventId: string, shortId: string, winnerName:
     },
   });
 
+  await logAudit({
+    tenantId,
+    action: "BINGO_ALERT",
+    eventId,
+    metadata: { card: validation.cardId ?? shortId.trim().toUpperCase(), winnerName: cleanName, fiscal },
+  });
+
   revalidatePath("/", "layout");
   return { success: true };
 }
@@ -361,6 +379,12 @@ export async function alertLocutor(eventId: string, shortId: string, winnerName:
 export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
   // ⚠️ CORREÇÃO CRÍTICA (Item 4): Garantindo posse do evento.
   const { tenantId } = await requireEventCapability(eventId, "canOperate");
+
+  // Lê o ganhador ANTES de limpar (o falso alarme apaga), para o log dizer de qual cartela se tratava.
+  const pending = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { pendingWinnerCard: true, pendingWinnerName: true },
+  });
 
   await prisma.event.update({
     where: { id: eventId },
@@ -370,6 +394,13 @@ export async function toggleBingoCelebration(eventId: string, confirm: boolean) 
     data: confirm
       ? { bingoConfirmed: true, bingoConfirmedAt: new Date() }
       : { bingoConfirmed: false, bingoConfirmedAt: null, pendingWinnerCard: null, pendingWinnerName: null },
+  });
+
+  await logAudit({
+    tenantId,
+    action: confirm ? "BINGO_RELEASED" : "BINGO_FALSE_ALARM",
+    eventId,
+    metadata: { card: pending?.pendingWinnerCard ?? null, winnerName: pending?.pendingWinnerName ?? null },
   });
 
   revalidatePath("/", "layout");
@@ -409,6 +440,8 @@ export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeI
       },
     }),
   ]);
+
+  await logAudit({ tenantId, action: "ROUND_COMPLETED", eventId, metadata: { prizeName: prize.prizeName, prizeType: prize.type } });
 
   revalidatePath("/", "layout");
   return { success: true };

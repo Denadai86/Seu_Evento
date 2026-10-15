@@ -3,11 +3,11 @@
 
 import { useState, useTransition } from "react";
 import { createTenantStaff, toggleStaffInEvent, resetGlobalStaffPin } from "@/actions/equipe-global";
-import { UserPlus, Settings2, Key, CheckCircle, Ticket, Mic, Shield } from "lucide-react";
+import { UserPlus, Settings2, Key, CheckCircle, Ticket, Mic, Shield, Wallet, Eye } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 type EventType = { id: string; name: string; isActive: boolean };
-type StaffEventType = { eventId: string; canSell: boolean; canOperate: boolean; canVerify: boolean };
+type StaffEventType = { eventId: string; canSell: boolean; canOperate: boolean; canVerify: boolean; canTreasury: boolean; canAudit: boolean };
 type StaffMemberType = { id: string; name: string | null; username: string | null; events: StaffEventType[] };
 
 // Nota: tenantId foi mantido nas props caso o componente pai ainda o envie, mas não o usamos mais para chamadas seguras.
@@ -53,8 +53,8 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
     startTransition(async () => {
       const newAssigned = !currentAssigned;
       const perms = newAssigned 
-        ? { canSell: true, canOperate: false, canVerify: false } 
-        : { canSell: false, canOperate: false, canVerify: false };
+        ? { canSell: true, canOperate: false, canVerify: false, canTreasury: false, canAudit: false } 
+        : { canSell: false, canOperate: false, canVerify: false, canTreasury: false, canAudit: false };
       
       // 🛡️ CORREÇÃO DE ASSINATURA: userId, eventId, isAssigned, permissions
       await toggleStaffInEvent(userId, eventId, newAssigned, perms);
@@ -69,13 +69,15 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
     });
   };
 
-  const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify', currentPerms: StaffEventType) => {
+  const handlePermissionToggle = (userId: string, eventId: string, permKey: 'canSell'|'canOperate'|'canVerify'|'canTreasury'|'canAudit', currentPerms: StaffEventType) => {
     startTransition(async () => {
       // Constrói o objeto estrito de permissões exigido pelo back-end
       const updatedPerms = { 
         canSell: currentPerms.canSell,
         canOperate: currentPerms.canOperate,
         canVerify: currentPerms.canVerify,
+        canTreasury: currentPerms.canTreasury,
+        canAudit: currentPerms.canAudit,
         [permKey]: !currentPerms[permKey] 
       };
 
@@ -180,6 +182,20 @@ export default function GlobalStaffClient({ staffMembers, events, tenantId }: { 
                           className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canVerify ? 'bg-amber-600/20 border-amber-500 text-amber-400' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
                         >
                           <Shield size={16} /> Fiscal
+                        </button>
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canTreasury', staffEvent)}
+                          title="Entrega, recolhe e recebe cartelas; vê fechamento, extratos e cartelas por ID; bloqueia cartela perdida. Não mexe em preços."
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canTreasury ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                        >
+                          <Wallet size={16} /> Tesouraria
+                        </button>
+                        <button 
+                          onClick={() => handlePermissionToggle(activeStaffModal.id, event.id, 'canAudit', staffEvent)}
+                          title="Somente leitura: painel, relatórios e auditoria. Não altera nada."
+                          className={`flex items-center justify-center gap-2 py-3 rounded-xl border transition ${staffEvent.canAudit ? 'bg-sky-600/20 border-sky-500 text-sky-400' : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                        >
+                          <Eye size={16} /> Conselho
                         </button>
                       </div>
                     )}

@@ -5,7 +5,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Wallet, QrCode, Building2, AlertTriangle } from "lucide-react";
 import PrintButton from "./PrintButton";
-import { requireReportAccess } from "@/lib/requireReportAccess";
+import { requirePageAccess } from "@/lib/eventAccess";
+import { homeFor } from "@/lib/accessPolicy";
 import { computeCashReport } from "@/lib/cashReport";
 
 export default async function RelatorioPage({
@@ -16,7 +17,7 @@ export default async function RelatorioPage({
   const { subdomain, eventId } = await params;
 
   // 🔐 Só o ORG_ADMIN do tenant (ou o Super Admin, só leitura) vê o fechamento de caixa.
-  const tenant = await requireReportAccess(subdomain);
+  const tenant = await requirePageAccess(subdomain, eventId, "fechamento");
 
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenantId: tenant.id },
@@ -68,7 +69,7 @@ export default async function RelatorioPage({
       <header className="print:hidden bg-[#0b0f14] text-white p-4 sticky top-0 z-50 shadow-md">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Link href={`/dashboard/${eventId}`} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition">
+            <Link href={homeFor(tenant.actor, eventId)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition">
               <ArrowLeft size={20} />
             </Link>
             <h1 className="font-bold">Voltar ao Painel</h1>
