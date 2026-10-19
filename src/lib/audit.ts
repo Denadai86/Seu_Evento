@@ -74,3 +74,51 @@ export async function logAudit(input: AuditInput) {
     console.error("[AUDIT_LOG_ERROR]", input.action, error);
   }
 }
+
+/** Registra que o fiscal conferiu uma cartela NÃO paga (no máximo uma vez a cada 10 minutos por cartela). */
+export async function logUnpaidCardCheck(input: { tenantId: string; eventId: string; shortId: string; holderStaffId: string | null }) {
+  try {
+    const since = new Date(Date.now() - 10 * 60 * 1000);
+    const recent = await prisma.auditLog.findMany({
+      where: { tenantId: input.tenantId, action: "UNPAID_CARD_CHECKED", createdAt: { gte: since } },
+      select: { metadata: true },
+      take: 200,
+    });
+    const already = recent.some((r) => {
+      const m = (r.metadata ?? {}) as Record<string, unknown>;
+      return m.eventId === input.eventId && m.card === input.shortId;
+    });
+    if (already) return;
+    await logAudit({
+      tenantId: input.tenantId,
+      action: "UNPAID_CARD_CHECKED",
+      eventId: input.eventId,
+      metadata: { card: input.shortId, holderStaffId: input.holderStaffId },
+    });
+  } catch (error) {
+    console.error("[UNPAID_CHECK_LOG_ERROR]", error);
+  }
+}
+
+/** Dos códigos informados, quais JÁ tinham sido conferidos como NÃO pagos (para destacar pagamento depois do bingo). */
+export async function codesCheckedUnpaid(eventId: string, codes: string[]): Promise<string[]> {
+  if (codes.length === 0) return [];
+  try {
+    const rows = await prisma.auditLog.findMany({
+      where: { action: "UNPAID_CARD_CHECKED", metadata: { path: ["eventId"], equals: eventId } },
+      select: { metadata: true },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+    const wanted = new Set(codes.map((c) => c.toUpperCase()));
+    const found = new Set<string>();
+    for (const r of rows) {
+      const card = String(((r.metadata ?? {}) as Record<string, unknown>).card ?? "").toUpperCase();
+      if (wanted.has(card)) found.add(card);
+    }
+    return [...found];
+  } catch (error) {
+    console.error("[CHECKED_UNPAID_LOOKUP_ERROR]", error);
+    return [];
+  }
+}

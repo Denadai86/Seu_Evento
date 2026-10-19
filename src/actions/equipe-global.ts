@@ -24,7 +24,7 @@ export async function createTenantStaff(name: string) {
     const pin = secureInt(100000, 999999).toString();
     const hashedPin = await hash(pin, 12);
 
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         name: name.trim(),
         username: username.toUpperCase(),
@@ -35,7 +35,7 @@ export async function createTenantStaff(name: string) {
     });
 
     revalidatePath("/dashboard/equipe");
-    return { success: true, username: username.toUpperCase(), pin };
+    return { success: true, username: username.toUpperCase(), pin, userId: created.id };
   } catch (error: any) {
     console.error("[CREATE_STAFF_ERROR]", error);
     return { success: false, error: error.message };
@@ -121,6 +121,7 @@ export async function toggleStaffInEvent(
     });
 
     revalidatePath("/dashboard/equipe");
+    revalidatePath(`/dashboard/${eventId}/equipe`);
     return { success: true };
   } catch (error: any) {
     console.error("[TOGGLE_STAFF_ERROR]", error);
@@ -169,5 +170,80 @@ export async function resetGlobalStaffPin(userId: string) {
   } catch (error: any) {
     console.error("[RESET_PIN_ERROR]", error);
     return { success: false, error: error.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COPIAR A EQUIPE DE OUTRO EVENTO
+// Traz as pessoas (com as mesmas permissões) que ainda NÃO estão no evento de destino. Quem já está lá
+// não é alterado. Cada pessoa trazida fica registrada na auditoria, como se fosse uma escalação normal.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function copyEventTeam(fromEventId: string, toEventId: string) {
+  try {
+    const tenantId = await requireOrgAdmin();
+    if (fromEventId === toEventId) throw new Error("Escolha um evento diferente para copiar.");
+
+    const [from, to] = await Promise.all([
+      prisma.event.findFirst({ where: { id: fromEventId, tenantId }, select: { id: true, name: true } }),
+      prisma.event.findFirst({ where: { id: toEventId, tenantId }, select: { id: true } }),
+    ]);
+    if (!from || !to) throw new Error("Evento não encontrado ou acesso negado.");
+
+    const [source, existing] = await Promise.all([
+      prisma.eventStaff.findMany({
+        where: { eventId: fromEventId, user: { tenantId } },
+        select: {
+          userId: true, canSell: true, canOperate: true, canVerify: true, canTreasury: true, canAudit: true,
+          user: { select: { name: true, username: true } },
+        },
+      }),
+      prisma.eventStaff.findMany({ where: { eventId: toEventId }, select: { userId: true } }),
+    ]);
+
+    const already = new Set(existing.map((e) => e.userId));
+    const seen = new Set<string>();
+    const toAdd = source.filter((s) => {
+      if (already.has(s.userId) || seen.has(s.userId)) return false;
+      seen.add(s.userId);
+      return true;
+    });
+
+    if (toAdd.length > 0) {
+      await prisma.eventStaff.createMany({
+        data: toAdd.map((s) => ({
+          userId: s.userId,
+          eventId: toEventId,
+          canSell: s.canSell,
+          canOperate: s.canOperate,
+          canVerify: s.canVerify,
+          canTreasury: s.canTreasury,
+          canAudit: s.canAudit,
+        })),
+      });
+
+      for (const s of toAdd) {
+        await logAudit({
+          tenantId,
+          action: "STAFF_PERMISSIONS_CHANGED",
+          eventId: toEventId,
+          metadata: {
+            targetUserId: s.userId,
+            targetName: s.user.name,
+            targetUsername: s.user.username,
+            assigned: true,
+            before: null,
+            after: { canSell: s.canSell, canOperate: s.canOperate, canVerify: s.canVerify, canTreasury: s.canTreasury, canAudit: s.canAudit },
+            copiedFrom: from.name,
+          },
+        });
+      }
+    }
+
+    revalidatePath("/dashboard/equipe");
+    revalidatePath(`/dashboard/${toEventId}/equipe`);
+    return { success: true, added: toAdd.length, skipped: source.length - toAdd.length };
+  } catch (error: any) {
+    console.error("[COPY_EVENT_TEAM_ERROR]", error);
+    return { success: false, error: error.message as string };
   }
 }

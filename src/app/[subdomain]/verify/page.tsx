@@ -6,6 +6,7 @@ import QRCodeScanner from "./QRCodeScanner";
 import VerifyClient from "./verifyClient";
 import StaffNav from "@/components/staff/StaffNav";
 import { hasManagementAccess } from "@/lib/eventAccess";
+import { unpaidCardAdvice, type UnpaidAdvice } from "@/lib/unpaidAdvice";
 import { ScanLine } from "lucide-react";
 
 export default async function VerifyPage({
@@ -97,6 +98,36 @@ export default async function VerifyPage({
 
   const validation = await validateWinningCard(card.event.id, shortId);
 
+  // Cartela não paga: só para quem tem permissão de conferir (validation.reason só chega aqui para eles).
+  // Mostra com quem a cartela está e, quando faz sentido, o convite para regularizar.
+  let advice: UnpaidAdvice | null = null;
+  if (validation?.reason === "NOT_PAID") {
+    const role = session?.user?.role;
+    const viewerId = session?.user?.id ?? null;
+    let canSell = false;
+    let canTreasury = false;
+    if (viewerId && role === "STAFF") {
+      const rows = await prisma.eventStaff.findMany({
+        where: { eventId: card.event.id, userId: viewerId },
+        select: { canSell: true, canTreasury: true },
+      });
+      canSell = rows.some((r) => r.canSell);
+      canTreasury = rows.some((r) => r.canTreasury);
+    }
+    const holderRow = card.eventStaffId
+      ? await prisma.eventStaff.findUnique({
+          where: { id: card.eventStaffId },
+          select: { id: true, userId: true, user: { select: { name: true } } },
+        })
+      : null;
+    advice = unpaidCardAdvice({
+      eventId: card.event.id,
+      code: card.shortId,
+      holder: holderRow ? { staffId: holderRow.id, userId: holderRow.userId, name: holderRow.user?.name ?? "um voluntário" } : null,
+      viewer: { userId: viewerId, isAdmin: role === "ORG_ADMIN", canSell, canTreasury },
+    });
+  }
+
   return (
     <div className="min-h-screen bg-[#0b0f14] flex flex-col font-sans text-white">
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-40 shadow-md">
@@ -129,6 +160,7 @@ export default async function VerifyPage({
           shortId={card.shortId}
           validation={validation}
           verifierName={session?.user?.name || "Fiscal"}
+          advice={advice}
         />
 
         {/* Scanner para próxima cartela */}

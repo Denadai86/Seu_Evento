@@ -219,15 +219,18 @@ export default async function EventDashboardPage({
                   <div className="w-20 h-20 bg-blue-900/30 text-blue-400 rounded-full flex items-center justify-center mb-6 border border-blue-500/20 group-hover:scale-110 transition-transform duration-500">
                     <Users size={40} />
                   </div>
-                  <h2 className="text-3xl font-black text-white mb-4">Central da Equipe</h2>
+                  <h2 className="text-3xl font-black text-white mb-4">Equipe do evento</h2>
                   <p className="text-slate-400 mb-8 max-w-md">
-                    Aloque voluntários, gere PINs de acesso, defina quem pode vender cartelas e quem terá acesso ao palco do locutor.
+                    Monte a equipe deste evento: escolha quem trabalha nele e o que cada pessoa pode fazer. Dá para trazer a equipe de outro evento de uma vez.
                   </p>
                   <Link 
-                     href="/dashboard/equipe" 
+                     href={`/dashboard/${event.id}/equipe`} 
                     className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-xl transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:shadow-[0_0_50px_rgba(37,99,235,0.5)]"
                   >
-                    Gerenciar Permissões e Escala <ArrowRight size={20} />
+                    Montar a equipe do evento <ArrowRight size={20} />
+                  </Link>
+                  <Link href="/dashboard/equipe" className="mt-4 text-xs font-bold text-slate-500 hover:text-slate-300 underline underline-offset-2">
+                    Central de Voluntários (todos os eventos)
                   </Link>
                 </div>
               </div>

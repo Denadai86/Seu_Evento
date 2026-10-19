@@ -9,10 +9,15 @@ import { hasManagementAccess } from "@/lib/eventAccess";
 
 export default async function VendasPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ subdomain: string }>;
+  searchParams: Promise<{ cartela?: string | string[] }>;
 }) {
   const { subdomain } = await params;
+  // Vindo do Verificador ("Regularizar agora"): a cartela já entra no carrinho. Só aceita um código válido.
+  const rawCartela = (await searchParams).cartela;
+  const initialCard = (Array.isArray(rawCartela) ? rawCartela[0] : rawCartela)?.trim().toUpperCase() ?? "";
 
   // Papéis de gestão (tesoureiro/conselho): quem NÃO vende vai direto para a Gestão; quem vende ganha o atalho no menu.
   const session = await auth();
@@ -35,6 +40,7 @@ export default async function VendasPage({
       fullHousePrice: true,
       priceTiers: { select: { id: true, name: true, quinaPrice: true, fullHousePrice: true, startsAt: true } },
       pixKey: true,
+      tenant: { select: { name: true } },
       staff: {
         where: { canSell: true },
         include: { user: { select: { id: true, name: true } } },
@@ -71,6 +77,8 @@ export default async function VendasPage({
     tierName,
     ticketPrice: activeEvent.ticketPrice || 2500,
     pixKey: activeEvent.pixKey || "",
+    initialCard: /^[A-Z0-9]{4,10}$/.test(initialCard) ? initialCard : null,
+    merchantName: activeEvent.tenant?.name ?? "",
     sellers: activeEvent.staff.map((s) => ({
       id: s.id,
       name: s.user.name || "Vendedor",

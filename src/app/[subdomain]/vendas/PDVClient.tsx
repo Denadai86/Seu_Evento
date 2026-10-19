@@ -7,6 +7,7 @@ import { QrCode, Trash2, Banknote, CreditCard, UserCircle, X, Copy, Camera } fro
 import QRCode from "react-qr-code";
 import TeamPanel from "./TeamPanel";
 import HelpButton from "@/components/manual/HelpButton";
+import { generatePixPayload } from "@/lib/pix";
 import PdvScanner from "./PdvScanner";
 import { UNDO_WINDOW_MS } from "@/lib/saleRules";
 
@@ -25,7 +26,9 @@ interface EventData {
   ticketPrice: number; // Em centavos
   tierName?: string | null; // fase de preço vigente (definida pelo admin)
   meStaffId?: string | null; // o voluntário LOGADO (vem da sessão no servidor)
+  initialCard?: string | null; // cartela a colocar no carrinho ao abrir (vem do Verificador)
   pixKey: string;
+  merchantName?: string; // nome da organização (vai no código PIX)
   sellers: Seller[];
 }
 
@@ -42,8 +45,10 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
   const [inputValue, setInputValue] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [showPixModal, setShowPixModal] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   
   const inputRef = useRef<HTMLInputElement>(null);
+  const preloaded = useRef(false);
 
   // Auto-foco no campo de entrada
   useEffect(() => {
@@ -51,6 +56,16 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
       inputRef.current?.focus();
     }
   }, [selectedSeller, showPixModal]);
+
+  // Chegou pelo "Regularizar agora" do Verificador: coloca a cartela no carrinho (uma vez só).
+  useEffect(() => {
+    if (preloaded.current || !activeEvent?.initialCard || !selectedSeller) return;
+    preloaded.current = true;
+    addById(activeEvent.initialCard).then((err) => {
+      if (err) alert(err);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSeller]);
 
   if (!activeEvent) {
     return <div className="p-10 text-center text-white">Nenhum evento ativo.</div>;
@@ -165,6 +180,8 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
   };
 
   const handleCheckoutClick = (method: "PIX" | "CASH") => {
+    // Segurança extra: alguns navegadores restauram o botão "habilitado" depois de recarregar a página.
+    if (cart.length === 0 || isPending) return;
     if (method === "PIX") {
       setShowPixModal(true);
     } else {
@@ -173,6 +190,22 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
   };
 
   const cartTotalAmount = cart.reduce((sum, item) => sum + item.price, 0) / 100;
+  const brlTotal = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cartTotalAmount);
+
+  // Código PIX "copia e cola" (BR Code) com o VALOR da venda já preenchido: o cliente escaneia e só confirma no banco.
+  // Sem chave PIX cadastrada não dá para gerar nada (e o QR vazio quebrava a tela).
+  const pixKey = (activeEvent.pixKey ?? "").trim();
+  const pixPayload = showPixModal && pixKey ? generatePixPayload(pixKey, activeEvent.merchantName || "Seu Evento", "BRASIL", cartTotalAmount) : "";
+
+  const copyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      window.prompt("Copie o texto abaixo:", text);
+    }
+  };
   const sellerName = activeEvent.sellers.find((s) => s.id === selectedSeller)?.name;
 
   return (
@@ -316,6 +349,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
               type="button"
               onClick={() => handleCheckoutClick("CASH")}
               disabled={cart.length === 0 || isPending}
+              suppressHydrationWarning
               className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 disabled:hover:bg-amber-600 text-white font-black py-4 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
               aria-label="Finalizar venda em dinheiro"
             >
@@ -327,6 +361,7 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
               type="button"
               onClick={() => handleCheckoutClick("PIX")}
               disabled={cart.length === 0 || isPending}
+              suppressHydrationWarning
               className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 disabled:hover:bg-emerald-600 text-white font-black py-4 rounded-xl flex flex-col items-center justify-center gap-1 transition-all shadow-lg shadow-emerald-900/20"
               aria-label="Finalizar venda via PIX"
             >
@@ -339,66 +374,65 @@ export default function PDVClient({ activeEvent }: { activeEvent: EventData | nu
 
       {/* ====================== MODAL PIX ====================== */}
       {showPixModal && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
-          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-3xl p-6 flex flex-col items-center relative shadow-2xl">
-            <button
-              type="button"
-              onClick={() => setShowPixModal(false)}
-              className="absolute top-4 right-4 text-slate-500 hover:text-white"
-              aria-label="Fechar modal"
-            >
-              <X size={24} />
-            </button>
-
-            <div className="bg-emerald-500/10 p-4 rounded-full mb-4">
-              <QrCode size={32} className="text-emerald-400" />
-            </div>
-
-            <h2 className="text-white font-black text-2xl mb-1">Pagamento via PIX</h2>
-            <p className="text-slate-400 text-sm mb-6 text-center">
-              Peça para o cliente escanear o código abaixo
-            </p>
-
-            <div className="bg-white p-4 rounded-2xl mb-6">
-              <QRCode value={activeEvent.pixKey} size={200} level="M" />
-            </div>
-
-            <div className="w-full bg-black/50 border border-slate-800 rounded-xl p-4 mb-6">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Chave PIX</p>
-              <div className="flex justify-between items-center">
-                <p className="font-mono text-emerald-400 font-bold truncate pr-4">
-                  {activeEvent.pixKey}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(activeEvent.pixKey);
-                    alert("Chave PIX copiada!");
-                  }}
-                  className="text-slate-400 hover:text-white"
-                  aria-label="Copiar chave PIX"
-                >
-                  <Copy size={18} />
-                </button>
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4">
+          <div className="bg-slate-900 border border-slate-700 w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl flex flex-col max-h-[94dvh] shadow-2xl">
+            {/* Topo: título e total, sempre visíveis */}
+            <div className="px-6 pt-5 pb-3 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
+              <div>
+                <h2 className="text-white font-black text-xl">Pagamento via PIX</h2>
+                <p className="text-slate-400 text-xs mt-0.5">Total a cobrar</p>
+                <p className="text-emerald-400 font-black text-3xl leading-tight">{brlTotal}</p>
               </div>
-
-              <div className="mt-3 pt-3 border-t border-slate-800 flex justify-between items-end">
-                <span className="text-slate-400 text-sm">Total a cobrar:</span>
-                <span className="text-white font-black text-2xl">
-                  {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cartTotalAmount)}
-                </span>
-              </div>
+              <button type="button" onClick={() => setShowPixModal(false)} className="p-2 -mr-2 text-slate-500 hover:text-white" aria-label="Fechar modal">
+                <X size={24} />
+              </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => executeSale("PIX")}
-              disabled={isPending}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50"
-              aria-label="Confirmar pagamento PIX"
-            >
-              {isPending ? "Confirmando..." : "Confirmar Pagamento Realizado"}
-            </button>
+            {/* Meio: QR e chave (rola se a tela for baixa) */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col items-center">
+              {pixPayload ? (
+                <>
+                  <div className="bg-white p-3 rounded-2xl mb-3">
+                    <QRCode value={pixPayload} size={184} level="M" />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3 text-center">
+                    O cliente abre o app do banco, escolhe Pix e lê o QR Code. O valor já vem preenchido.
+                  </p>
+                  <div className="w-full grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => copyText(pixPayload, "payload")}
+                      className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold py-2.5 rounded-xl transition">
+                      <Copy size={14} /> {copied === "payload" ? "Copiado!" : "Copia e cola"}
+                    </button>
+                    <button type="button" onClick={() => copyText(pixKey, "key")}
+                      className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold py-2.5 rounded-xl transition">
+                      <Copy size={14} /> {copied === "key" ? "Copiada!" : "Copiar chave"}
+                    </button>
+                  </div>
+                  <p className="w-full mt-3 font-mono text-xs text-slate-500 truncate">Chave: {pixKey}</p>
+                </>
+              ) : (
+                <div className="w-full rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  <p className="font-bold mb-1">Este evento ainda não tem chave PIX.</p>
+                  <p className="text-amber-200/80 text-xs">
+                    Peça ao administrador para cadastrá-la no evento (campo Chave PIX do Recebedor). Enquanto isso, só confirme se o cliente pagou de um jeito que você conseguiu conferir.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Rodapé fixo: o botão de confirmar NUNCA fica escondido */}
+            <div className="px-6 pt-3 border-t border-slate-800 shrink-0" style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}>
+              <p className="text-[11px] text-amber-300/90 text-center mb-2">Só confirme depois de ver o dinheiro na conta, no aplicativo do banco.</p>
+              <button
+                type="button"
+                onClick={() => executeSale("PIX")}
+                disabled={isPending}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                aria-label="Confirmar pagamento PIX"
+              >
+                {isPending ? "Confirmando..." : "Confirmar Pagamento Realizado"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ import prisma from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { requireTreasuryAccess } from "@/lib/eventAccess";
 import { groupByPrice } from "@/lib/cardPricing";
-import { logAudit } from "@/lib/audit";
+import { logAudit, codesCheckedUnpaid } from "@/lib/audit";
 import { currentPrices, pricesOfTier } from "@/lib/priceTiers";
 import { revalidatePath } from "next/cache";
 
@@ -289,9 +289,9 @@ async function settlePayment(
           blocked: false, // cartela perdida não entra no acerto
           ...(codes ? { shortId: { in: codes } } : {}),
         },
-        select: { id: true, type: true },
+        select: { id: true, type: true, shortId: true },
       });
-      if (unpaid.length === 0) return { count: 0, amount: 0, breakdown: [] as { price: number; qty: number }[] };
+      if (unpaid.length === 0) return { count: 0, amount: 0, breakdown: [] as { price: number; qty: number }[], codes: [] as string[] };
 
       // Preço de cada cartela pelo TIPO dela, na fase escolhida. O valor fica gravado em `price`.
       let byPrice: Map<number, typeof unpaid>;
@@ -313,7 +313,7 @@ async function settlePayment(
         amount += marked.count * price;
         if (marked.count > 0) breakdown.push({ price, qty: marked.count });
       }
-      if (paidTotal === 0) return { count: 0, amount: 0, breakdown };
+      if (paidTotal === 0) return { count: 0, amount: 0, breakdown, codes: [] as string[] };
 
       await tx.transaction.create({
         data: {
@@ -324,7 +324,7 @@ async function settlePayment(
         },
       });
 
-      return { count: paidTotal, amount, breakdown };
+      return { count: paidTotal, amount, breakdown, codes: unpaid.map((c) => c.shortId) };
     });
 
     if (result.count === 0) {
@@ -332,6 +332,10 @@ async function settlePayment(
     }
 
     revalidatePath(`/dashboard/${eventId}/tesouraria`);
+    const late = await codesCheckedUnpaid(eventId, result.codes);
+    if (late.length > 0) {
+      await logAudit({ action: "PAID_AFTER_BINGO_CHECK", eventId, metadata: { cards: late, via: "ACERTO", staffId: eventStaffId } });
+    }
     await logAudit({
       action: "PAYMENT_REGISTERED",
       eventId,

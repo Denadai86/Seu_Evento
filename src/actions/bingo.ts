@@ -7,7 +7,7 @@ import { requireTenant, requireEventAdmin, requireEventCapability } from "@/lib/
 import { auth } from "@/lib/auth";
 import { secureInt, securePick } from "@/lib/random";
 import { evaluateCard } from "@/lib/bingoRules";
-import { logAudit } from "@/lib/audit";
+import { logAudit, logUnpaidCardCheck } from "@/lib/audit";
 import { cardCanWin, CARD_TYPE_LABEL, type CardType } from "@/lib/cardPricing";
 import { SPONSOR_SELECT, sponsorOrderBy, resolveSponsorSlots } from "@/lib/sponsorRotation";
 import { unstable_noStore as noStore } from "next/cache";
@@ -283,14 +283,18 @@ export async function validateWinningCard(eventId: string, shortId: string) {
   if (card.blocked) {
     return {
       success: false,
+      reason: "BLOCKED",
       error: `⛔ CARTELA BLOQUEADA${card.blockedReason ? ` (${card.blockedReason})` : ""}. Ela foi dada como perdida ou cancelada e não pode ser premiada.`,
     };
   }
 
   // CRITÉRIO 1: Pagamento obrigatório
   if (!card.isPaid) {
+    // Fica registrado: se esta cartela for paga DEPOIS desta conferência, a auditoria destaca (golpe de "pagar depois do bingo").
+    await logUnpaidCardCheck({ tenantId, eventId, shortId: card.shortId, holderStaffId: card.eventStaffId });
     return {
       success: false,
+      reason: "NOT_PAID",
       error: "⚠️ CARTELA NÃO PAGA! O pagamento precisa ser baixado no caixa antes de participar.",
     };
   }

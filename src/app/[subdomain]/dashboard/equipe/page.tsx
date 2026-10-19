@@ -2,7 +2,8 @@
 import prisma from "@/lib/prisma";
 import { requireTenant } from "@/lib/requireTenant";
 import GlobalStaffClient from "./GlobalStaffClient";
-import { Users } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Users } from "lucide-react";
 
 export default async function GlobalEquipePage() {
   const tenantId = await requireTenant();
@@ -52,6 +53,9 @@ export default async function GlobalEquipePage() {
   return (
     <div className="min-h-screen bg-[#0b0f14] text-slate-200 p-8 font-sans pb-20">
       <div className="max-w-6xl mx-auto">
+        <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-white transition mb-6">
+          <ArrowLeft size={18} /> Voltar ao painel
+        </Link>
         <div className="flex items-center gap-4 mb-8">
           <div className="w-16 h-16 bg-blue-900/30 text-blue-400 rounded-2xl flex items-center justify-center border border-blue-500/20">
             <Users size={32} />

@@ -120,3 +120,17 @@ test("fase apagada guarda os valores dela no registro", () => {
   const t = describeAudit("PRICE_TIER_DELETED", { name: "Pré-venda", quinaPrice: 1000, fullHousePrice: 1500 }, who);
   assert.match(t, /Pré-venda/); assert.match(t, /quina R\$\s?10,00/); assert.match(t, /cheia R\$\s?15,00/);
 });
+
+// ── "Regularizar agora": conferência de cartela não paga e pagamento depois dela ──
+test("conferência de cartela não paga mostra com quem estava (ou que estava sem voluntário)", () => {
+  assert.match(describeAudit("UNPAID_CARD_CHECKED", { card: "AB12CD", holderStaffId: "s1" }, who), /cartela AB12CD: ainda não estava paga \(estava com Maria\)/);
+  assert.match(describeAudit("UNPAID_CARD_CHECKED", { card: "AB12CD", holderStaffId: null }, who), /sem voluntário/);
+});
+
+test("pagamento DEPOIS da conferência é ação sensível, descrita por onde entrou", () => {
+  assert.equal(AUDIT_ACTIONS.PAID_AFTER_BINGO_CHECK.sensitive, true);
+  assert.equal(AUDIT_ACTIONS.PAID_AFTER_BINGO_CHECK.category, "DINHEIRO");
+  const pdv = describeAudit("PAID_AFTER_BINGO_CHECK", { cards: ["AB12CD"], via: "PDV", staffId: "s2" }, who);
+  assert.match(pdv, /1 cartela \(AB12CD\)/); assert.match(pdv, /NÃO PAGAS/); assert.match(pdv, /venda no PDV \(João\)/);
+  assert.match(describeAudit("PAID_AFTER_BINGO_CHECK", { cards: ["A1", "B2"], via: "ACERTO" }, who), /2 cartelas \(A1, B2\).*acerto na tesouraria/);
+});

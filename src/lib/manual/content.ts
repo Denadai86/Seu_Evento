@@ -262,6 +262,29 @@ export const TOPICS: Topic[] = [
     related: ["tesouraria-entregar"],
   },
 
+  {
+    id: "equipe-evento",
+    title: "Montar a equipe de cada evento",
+    summary: "Escolha quem trabalha em cada evento e o que cada pessoa pode fazer nele.",
+    category: "evento",
+    icon: "users",
+    roles: ["admin"],
+    keywords: ["equipe", "voluntario", "escala", "permissao", "tesoureiro", "conselho", "copiar equipe", "novo voluntario", "pin", "vespera"],
+    steps: [
+      "Abra o evento e toque em Montar a equipe do evento.",
+      "Para quem já está cadastrado, toque nas etiquetas (Vender, Palco, Fiscal, Tesouraria, Conselho) e em Adicionar.",
+      "Para uma pessoa nova, toque em Novo voluntário, escreva o nome e escolha as permissões. Anote o usuário e o PIN: o PIN aparece uma única vez.",
+      "Para repetir uma equipe, use Trazer a equipe de outro evento: as pessoas vêm com as mesmas permissões e você ajusta o que precisar.",
+      "Para mudar o que alguém faz, toque nas etiquetas dela. Para gerar novo PIN, use o ícone da chave.",
+    ],
+    tips: [
+      "A mesma pessoa pode estar em vários eventos, cada um com permissões diferentes (vendedora num, tesoureira noutro).",
+      "A Central de Voluntários continua existindo: é o cadastro geral de todos os eventos.",
+    ],
+    warnings: ["Toda mudança de permissão e todo PIN novo ficam registrados na auditoria."],
+    related: ["evento-preparar"],
+  },
+
   // ── FISCALIZAÇÃO ───────────────────────────────────────────────────────────
   {
     id: "conselho-auditoria",
@@ -295,9 +318,14 @@ export const TOPICS: Topic[] = [
       "Descubra como a cartela foi vendida: pelo PDV ou em papel.",
       "Se foi pelo PDV, ela deveria estar paga. Confira se a venda não foi desfeita.",
       "Se foi em papel, falta o acerto: o tesoureiro registra o pagamento em Tesouraria, Receber.",
+      "O Verificador mostra com quem a cartela está. Quem tem o botão Regularizar agora (o dono da cartela, o tesoureiro ou o administrador) vai direto ao passo certo.",
       "Confira a cartela de novo no Verificador.",
     ],
-    warnings: ["Nunca pague um prêmio de uma cartela que o sistema marca como não paga."],
+    warnings: [
+      "Nunca pague um prêmio de uma cartela que o sistema marca como não paga.",
+      "Cartela que nunca foi entregue a ninguém não tem convite de venda: sem registro, ela não pode ser premiada.",
+      "Se a cartela for paga depois de ter sido conferida como não paga, a auditoria destaca como Pago após conferência.",
+    ],
     related: ["tesouraria-receber", "fiscal-conferir"],
   },
 ];

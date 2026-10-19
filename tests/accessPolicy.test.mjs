@@ -62,3 +62,8 @@ test("para onde voltar e o nome do papel", () => {
   assert.equal(managementRoleLabel(admin), "Administrador");
   assert.equal(managementRoleLabel(vol), "Voluntário");
 });
+
+test("equipe do evento: só o administrador monta a equipe (tesoureiro, conselho, voluntário e suporte NÃO)", () => {
+  assert.equal(canViewPage(admin, "equipe"), true);
+  for (const a of [tes, cons, both, vol, support]) assert.equal(canViewPage(a, "equipe"), false);
+});

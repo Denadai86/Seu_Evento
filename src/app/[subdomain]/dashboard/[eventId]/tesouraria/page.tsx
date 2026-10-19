@@ -9,11 +9,14 @@ import { canChoosePricePhase, homeFor } from "@/lib/accessPolicy";
 import { currentPrices } from "@/lib/priceTiers";
 
 export default async function TesourariaPage({ 
-  params 
+  params,
+  searchParams,
 }: { 
-  params: Promise<{ subdomain: string; eventId: string }> 
+  params: Promise<{ subdomain: string; eventId: string }>;
+  searchParams: Promise<{ staff?: string; cartela?: string }>;
 }) {
   const { subdomain, eventId } = await params;
+  const { staff: autoStaff, cartela: autoCard } = await searchParams;
 
   // 1. Resolve o tenant pela URL e exige ORG_ADMIN dele (ou Super Admin, só leitura)
   const tenant = await requirePageAccess(subdomain, eventId, "tesouraria");
@@ -102,6 +105,8 @@ export default async function TesourariaPage({
       <main className="max-w-6xl mx-auto px-6 mt-8">
         {/* Passando os dados para o Client Component mesclado */}
         <TesourariaClient 
+          autoOpen={autoStaff && autoCard && /^[A-Z0-9]{4,10}$/i.test(autoCard) ? { staffId: autoStaff, code: autoCard.toUpperCase() } : null}
+         
           eventId={eventId} 
           initialStaff={eventStaff} 
           availableCardsCount={availableCardsCount} 

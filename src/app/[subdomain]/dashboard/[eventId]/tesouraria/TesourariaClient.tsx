@@ -1,7 +1,7 @@
 // src/app/[subdomain]/dashboard/[eventId]/tesouraria/TesourariaClient.tsx
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   assignCardsToStaff, returnCardsFromStaff, registerCardPayment,
   assignCardsByQuantity, previewRemainingPayment, registerPaymentForAllRemaining,
@@ -14,13 +14,15 @@ export default function TesourariaClient({
   initialStaff,
   availableCardsCount,
   priceOptions = [],
-  canChoosePhase = true
+  canChoosePhase = true,
+  autoOpen = null,
 }: { 
   eventId: string; 
   initialStaff: any[];
   availableCardsCount: number;
   priceOptions?: { value: string; label: string }[];
   canChoosePhase?: boolean;
+  autoOpen?: { staffId: string; code: string } | null; // vindo do Verificador: abre o acerto do voluntário com o código
 }) {
   const router = useRouter();
   const [activeStaff, setActiveStaff] = useState<any>(null);
@@ -49,6 +51,18 @@ export default function TesourariaClient({
     setPayAll(false);
     setAssignMode("qty");
   };
+
+  // Vindo do "Regularizar agora" do Verificador: já abre o acerto daquele voluntário com o código preenchido.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (autoOpened.current || !autoOpen) return;
+    const staff = initialStaff.find((s) => s.id === autoOpen.staffId);
+    if (!staff) return;
+    autoOpened.current = true;
+    openModal(staff, "pay");
+    setBatchInput(autoOpen.code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const brl = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 

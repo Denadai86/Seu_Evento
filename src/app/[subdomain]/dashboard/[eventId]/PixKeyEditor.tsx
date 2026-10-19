@@ -40,12 +40,17 @@ export default function PixKeyEditor({ eventId, initialPixKey }: PixKeyEditorPro
         </div>
       </div>
 
+      <p className="text-[11px] text-slate-500 -mb-1">
+        Celular com +55 e DDD (ex.: +5514999999999), e-mail (ex.: email@email.com), CPF ou CNPJ só com números, ou chave aleatória.
+        Sem o +55 no celular, alguns bancos não leem o QR.
+      </p>
+
       <div className="flex flex-col sm:flex-row gap-3 mt-2">
         <input
           type="text"
           value={pixKey}
           onChange={(e) => setPixKey(e.target.value)}
-          placeholder="CNPJ, E-mail, Celular ou Chave Aleatória"
+          placeholder="Ex.: +5514999999999 ou email@email.com"
           className="flex-1 bg-slate-800 border border-slate-700 text-white p-3 rounded-xl outline-none focus:border-emerald-500 transition-colors"
         />
         <button

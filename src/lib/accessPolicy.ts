@@ -19,7 +19,8 @@ export type PageKey =
   | "resultados"
   | "patrocinadores"
   | "auditoria"
-  | "ranking";
+  | "ranking"
+  | "equipe";
 
 export type Actor = { role: Role; canTreasury?: boolean; canAudit?: boolean };
 
@@ -35,7 +36,7 @@ const AUDIT_PAGES: ReadonlySet<PageKey> = new Set([
 
 export function canViewPage(actor: Actor, page: PageKey): boolean {
   if (actor.role === "ORG_ADMIN") return true;
-  if (actor.role === "SUPER_ADMIN") return page !== "ranking";
+  if (actor.role === "SUPER_ADMIN") return page !== "ranking" && page !== "equipe";
   if (actor.role === "STAFF") {
     return (!!actor.canTreasury && TREASURY_PAGES.has(page)) || (!!actor.canAudit && AUDIT_PAGES.has(page));
   }

@@ -5,7 +5,7 @@ import prisma from "@/lib/prisma";
 import { groupByPrice, priceForCard } from "@/lib/cardPricing";
 import { currentPrices } from "@/lib/priceTiers";
 import { UNDO_WINDOW_MS } from "@/lib/saleRules";
-import { buildAuditData } from "@/lib/audit";
+import { buildAuditData, codesCheckedUnpaid, logAudit } from "@/lib/audit";
 import { randomUUID } from "node:crypto";
 import { PaymentMethod } from "@prisma/client";
 import { requireTenant, requireStaffForEvent } from "@/lib/requireTenant"; // 🔥 Importação Corrigida
@@ -136,6 +136,12 @@ export async function processBatchSale(
         })),
       });
     });
+
+    // Cartela que o fiscal já tinha conferido como NÃO paga e que só agora foi paga: fica destacado na auditoria.
+    const late = await codesCheckedUnpaid(eventId, shortIds);
+    if (late.length > 0) {
+      await logAudit({ tenantId, action: "PAID_AFTER_BINGO_CHECK", eventId, metadata: { cards: late, via: "PDV", staffId: eventStaffId } });
+    }
 
     return { success: true };
   } catch (error: any) {

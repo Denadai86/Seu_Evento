@@ -26,6 +26,8 @@ export const AUDIT_ACTIONS: Record<string, { label: string; category: AuditCateg
   TRANSFER_ACCEPTED: { label: "Troca entre voluntários", category: "CARTELAS" },
   CARD_BLOCKED: { label: "Cartela bloqueada", category: "CARTELAS", sensitive: true },
   CARD_UNBLOCKED: { label: "Cartela desbloqueada", category: "CARTELAS", sensitive: true },
+  UNPAID_CARD_CHECKED: { label: "Cartela não paga conferida", category: "SORTEIO" },
+  PAID_AFTER_BINGO_CHECK: { label: "Pago após conferência", category: "DINHEIRO", sensitive: true },
   BINGO_ALERT: { label: "Aviso de bingo", category: "SORTEIO" },
   BINGO_RELEASED: { label: "Bingo solto no telão", category: "SORTEIO" },
   BINGO_FALSE_ALARM: { label: "Falso alarme", category: "SORTEIO", sensitive: true },
@@ -100,6 +102,12 @@ export function describeAudit(action: string, md: Record<string, any> | null | u
       return `Recolheu ${plural(n(m.count), "cartela", "cartelas")} de ${who(m.staffId)}`;
     case "TRANSFER_ACCEPTED":
       return `${who(m.fromStaff)} entregou ${plural(n(m.count), "cartela", "cartelas")} a ${who(m.toStaff)}${range(m.first, m.last)}`;
+    case "UNPAID_CARD_CHECKED":
+      return `O fiscal conferiu a cartela ${m.card}: ainda não estava paga${m.holderStaffId ? ` (estava com ${who(m.holderStaffId)})` : " (sem voluntário)"}`;
+    case "PAID_AFTER_BINGO_CHECK": {
+      const cards = (Array.isArray(m.cards) ? m.cards : []) as string[];
+      return `Pagamento de ${plural(cards.length, "cartela", "cartelas")} (${cards.join(", ")}) que já tinham sido conferidas como NÃO PAGAS — ${m.via === "PDV" ? "venda no PDV" : "acerto na tesouraria"}${m.staffId ? ` (${who(m.staffId)})` : ""}`;
+    }
     case "CARD_BLOCKED":
       return `Bloqueou a cartela ${m.shortId}: ${m.reason ?? "sem motivo"}${m.wasPaid ? " (já estava vendida)" : ""}`;
     case "CARD_UNBLOCKED":
@@ -111,7 +119,7 @@ export function describeAudit(action: string, md: Record<string, any> | null | u
       if (m.assigned === false) return `Retirou ${target} da equipe do evento`;
       const before = (m.before ?? null) as Record<string, boolean> | null;
       const after = (m.after ?? null) as Record<string, boolean> | null;
-      if (!before) return `Escalou ${target} no evento com: ${on(after).join(", ") || "nenhuma permissão"}`;
+      if (!before) return `Escalou ${target} no evento com: ${on(after).join(", ") || "nenhuma permissão"}${m.copiedFrom ? ` (equipe copiada do evento "${m.copiedFrom}")` : ""}`;
       const gained = on(after).filter((l) => !on(before).includes(l));
       const lost = on(before).filter((l) => !on(after).includes(l));
       const parts = [gained.length ? `passou a ter ${gained.join(", ")}` : null, lost.length ? `deixou de ter ${lost.join(", ")}` : null].filter(Boolean);
