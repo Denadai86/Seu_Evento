@@ -134,3 +134,38 @@ test("pagamento DEPOIS da conferência é ação sensível, descrita por onde en
   assert.match(pdv, /1 cartela \(AB12CD\)/); assert.match(pdv, /NÃO PAGAS/); assert.match(pdv, /venda no PDV \(João\)/);
   assert.match(describeAudit("PAID_AFTER_BINGO_CHECK", { cards: ["A1", "B2"], via: "ACERTO" }, who), /2 cartelas \(A1, B2\).*acerto na tesouraria/);
 });
+
+// ── Venda no PDV agora entra no log (antes só o "desfazer" aparecia) ──
+test("venda no PDV: quem vendeu, quais cartelas, quanto e como", () => {
+  const t = describeAudit("SALE_COMPLETED", { staffId: "s1", codes: ["AB12CD", "XY98ZT"], total: 2500, method: "PIX" }, who);
+  assert.match(t, /Vendeu 2 cartelas \(AB12CD, XY98ZT\)/);
+  assert.match(t, /R\$\s?25,00/); assert.match(t, /no PIX \(Maria\)/);
+  assert.match(describeAudit("SALE_COMPLETED", { staffId: "s2", codes: ["A1"], total: 1000, method: "CASH" }, who), /1 cartela \(A1\).*no dinheiro \(João\)/);
+  assert.equal(AUDIT_ACTIONS.SALE_COMPLETED.category, "DINHEIRO");
+});
+
+// ── Fila de avisos de bingo: ganhadores simultâneos ──
+test("bingo solto: ganhador único, com quem cedeu", () => {
+  const t = describeAudit("BINGO_RELEASED", { mode: "UNICO", winners: [{ card: "AB12CD", name: "Maria" }], yielded: [{ name: "José" }] }, who);
+  assert.match(t, /Maria \(cartela AB12CD\)/); assert.match(t, /ganhador único/); assert.match(t, /cederam: José/);
+});
+
+test("bingo solto: prêmio DIVIDIDO mostra todos os ganhadores", () => {
+  const t = describeAudit("BINGO_RELEASED", { mode: "DIVIDIDO", winners: [{ card: "A1", name: "Maria" }, { card: "B2", name: "José" }], yielded: [] }, who);
+  assert.match(t, /Maria \(cartela A1\) e José \(cartela B2\)/); assert.match(t, /prêmio DIVIDIDO/); assert.doesNotMatch(t, /cederam/);
+});
+
+test("registros antigos de bingo solto (antes da fila) continuam legíveis", () => {
+  assert.match(describeAudit("BINGO_RELEASED", { card: "CMCPKW", winnerName: "ze (Fiscal: jao)" }, who), /cartela CMCPKW, ganhador "ze"/);
+});
+
+test("descartar aviso e reabrir decisão são ações sensíveis e descritas", () => {
+  assert.equal(AUDIT_ACTIONS.BINGO_CLAIM_DISCARDED.sensitive, true);
+  assert.equal(AUDIT_ACTIONS.BINGO_DECISION_REOPENED.sensitive, true);
+  assert.match(describeAudit("BINGO_CLAIM_DISCARDED", { card: "AB12CD", name: "Maria" }, who), /Descartou o aviso de bingo da cartela AB12CD \(Maria\)/);
+  assert.match(describeAudit("BINGO_DECISION_REOPENED", {}, who), /Reabriu a decisão do bingo/);
+});
+
+test("aviso de bingo mostra em qual pedra a cartela fechou", () => {
+  assert.match(describeAudit("BINGO_ALERT", { card: "AB12CD", winnerName: "Maria", fiscal: "Paulo", closedAtDraw: 41 }, who), /fechou na pedra 41/);
+});

@@ -18,6 +18,19 @@ export function cardNumbers(m: BingoMatrix): number[] {
   return out;
 }
 
+/**
+ * Em QUAL pedra (1ª, 2ª, 3ª…) a cartela fechou o padrão da rodada, ou null se ainda não fechou.
+ * Serve para desempatar de forma OBJETIVA quando dois fiscais avisam bingo: quem fechou primeiro, e quem fechou
+ * na MESMA pedra (empate de verdade). `drawn` precisa estar na ORDEM em que as pedras saíram.
+ */
+export function closingDrawIndex(m: BingoMatrix, drawn: number[], target: "QUINA" | "FULL_HOUSE"): number | null {
+  for (let k = 1; k <= drawn.length; k++) {
+    const e = evaluateCard(m, drawn.slice(0, k));
+    if (target === "FULL_HOUSE" ? e.isFullHouse : e.hasQuina) return k;
+  }
+  return null;
+}
+
 export function evaluateCard(m: BingoMatrix, drawnNumbers: number[]) {
   const drawn = new Set(drawnNumbers);
   const missing = (nums: number[]) => nums.filter((n) => !drawn.has(n)).length;

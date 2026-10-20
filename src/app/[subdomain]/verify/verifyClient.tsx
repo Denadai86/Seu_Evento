@@ -81,7 +81,7 @@ export default function VerifyClient({ eventId, shortId, validation, verifierNam
 
           {isSent ? (
             <div className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2">
-              <CheckCircle2 size={24} /> Aviso enviado para o telão!
+              <CheckCircle2 size={24} /> Aviso enviado ao locutor!
             </div>
           ) : (
             <button

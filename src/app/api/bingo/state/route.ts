@@ -1,5 +1,4 @@
 // src/app/api/bingo/state/route.ts
-
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { auth } from "@/lib/auth";
@@ -80,7 +79,20 @@ export async function GET(request: Request) {
       }
     }
 
+    // Fila de avisos da rodada atual. O público só vê os NOMES dos ganhadores, e só depois da decisão.
+    const currentPrizeId = event.prizes[0]?.id ?? null;
+    const claims =
+      currentPrizeId && (isStaffView || event.bingoConfirmed)
+        ? await prisma.bingoClaim.findMany({
+            where: { eventId, prizeId: currentPrizeId, status: { in: ["PENDING", "WINNER"] } },
+            orderBy: [{ closedAtDraw: "asc" }, { createdAt: "asc" }],
+            select: { id: true, cardShortId: true, claimantName: true, fiscalName: true, closedAtDraw: true, drawnCount: true, status: true, createdAt: true },
+          })
+        : [];
+    const winners = event.bingoConfirmed ? claims.filter((c) => c.status === "WINNER").map((c) => c.claimantName) : [];
+
     const body: Record<string, unknown> = {
+      winners, // vários nomes quando o prêmio é dividido
       drawnNumbers: event.drawnNumbers || [],
       latest: event.drawnNumbers[event.drawnNumbers.length - 1] || null,
       showBoard: event.showBoard,
@@ -99,6 +111,16 @@ export async function GET(request: Request) {
     if (isStaffView) {
       body.pendingWinnerCard = event.pendingWinnerCard;
       body.pendingWinnerName = event.pendingWinnerName;
+      body.claims = claims.map((c) => ({
+        id: c.id,
+        card: c.cardShortId,
+        name: c.claimantName,
+        fiscal: c.fiscalName,
+        closedAtDraw: c.closedAtDraw,
+        drawnCount: c.drawnCount,
+        status: c.status,
+        createdAt: c.createdAt,
+      }));
     }
 
     const response = NextResponse.json(body);

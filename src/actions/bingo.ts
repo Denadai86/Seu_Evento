@@ -6,8 +6,9 @@ import prisma from "@/lib/prisma";
 import { requireTenant, requireEventAdmin, requireEventCapability } from "@/lib/requireTenant";
 import { auth } from "@/lib/auth";
 import { secureInt, securePick } from "@/lib/random";
-import { evaluateCard } from "@/lib/bingoRules";
-import { logAudit, logUnpaidCardCheck } from "@/lib/audit";
+import { evaluateCard, closingDrawIndex } from "@/lib/bingoRules";
+import { joinNames, validateSelection } from "@/lib/bingoClaims";
+import { logAudit, logUnpaidCardCheck, buildAuditData } from "@/lib/audit";
 import { cardCanWin, CARD_TYPE_LABEL, type CardType } from "@/lib/cardPricing";
 import { SPONSOR_SELECT, sponsorOrderBy, resolveSponsorSlots } from "@/lib/sponsorRotation";
 import { unstable_noStore as noStore } from "next/cache";
@@ -201,6 +202,11 @@ export async function resetGame(eventId: string) {
       bingoConfirmedAt: null,
     },
   });
+  // Os avisos ainda sem decisão perdem o sentido (as pedras foram zeradas): saem da fila.
+  await prisma.bingoClaim.updateMany({
+    where: { eventId, status: "PENDING" },
+    data: { status: "DISCARDED", activeKey: null, decidedAt: new Date() },
+  });
   await logAudit({ tenantId, action: "GAME_RESET", eventId });
   return { success: true };
 }
@@ -322,6 +328,9 @@ export async function validateWinningCard(eventId: string, shortId: string) {
     }
   }
 
+  // Em qual pedra a cartela fechou o padrão da rodada (desempate objetivo na fila de avisos).
+  const closedAtDraw = isWinner && currentPrize ? closingDrawIndex(matrix, drawn, currentPrize.type as "QUINA" | "FULL_HOUSE") : null;
+
   return {
     success: true,
     cardId: card.shortId,
@@ -330,6 +339,7 @@ export async function validateWinningCard(eventId: string, shortId: string) {
     isFullHouse,
     hasQuina,
     isWinner,
+    closedAtDraw,
     winMessage,
     currentPrize,
     stats: { hasHorizontalQuina, hasVerticalQuina, hasDiag1, hasDiag2, drawnCount: drawn.length },
@@ -360,55 +370,188 @@ export async function alertLocutor(eventId: string, shortId: string, winnerName:
   const session = await auth();
   const fiscal = String(session?.user?.name ?? "Fiscal").slice(0, 40);
 
-  await prisma.event.updateMany({
-    where: { id: eventId, tenantId },
-    data: {
-      pendingWinnerCard: validation.cardId ?? shortId.trim().toUpperCase(),
-      pendingWinnerName: `${cleanName} (Fiscal: ${fiscal})`,
-      bingoConfirmed: false,
-    },
-  });
+  // FILA: todo aviso válido entra, mesmo que já haja outros (ganhadores simultâneos são aceitos).
+  // Quem decide é o LOCUTOR: um ganhador (os outros cedem) ou prêmio dividido.
+  const claimedCard = validation.cardId ?? shortId.trim().toUpperCase();
+  const prize = validation.currentPrize;
+  if (!prize) return { success: false, error: "Não há rodada ativa para receber o aviso." };
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const ev = await tx.event.findFirst({ where: { id: eventId, tenantId }, select: { bingoConfirmed: true } });
+      if (!ev) throw new Error("Evento inválido ou acesso negado.");
+      if (ev.bingoConfirmed) {
+        throw new Error("A rodada já foi decidida e solta no telão. Fale com o locutor (ele pode reabrir a decisão).");
+      }
+      await tx.bingoClaim.create({
+        data: {
+          eventId,
+          prizeId: prize.id,
+          cardShortId: claimedCard,
+          claimantName: cleanName,
+          fiscalName: fiscal,
+          fiscalUserId: session?.user?.id ?? null,
+          closedAtDraw: validation.closedAtDraw ?? null,
+          drawnCount: validation.stats?.drawnCount ?? 0,
+          activeKey: `${prize.id}:${claimedCard}`,
+        },
+      });
+    });
+  } catch (error: any) {
+    if (error?.code === "P2002") {
+      return { success: false, error: "Esta cartela já foi avisada nesta rodada. O locutor já tem o aviso dela na fila." };
+    }
+    return { success: false, error: error?.message ?? "Não foi possível enviar o aviso." };
+  }
 
   await logAudit({
     tenantId,
     action: "BINGO_ALERT",
     eventId,
-    metadata: { card: validation.cardId ?? shortId.trim().toUpperCase(), winnerName: cleanName, fiscal },
+    metadata: { card: claimedCard, winnerName: cleanName, fiscal, closedAtDraw: validation.closedAtDraw ?? null },
   });
 
   revalidatePath("/", "layout");
   return { success: true };
 }
 
-export async function toggleBingoCelebration(eventId: string, confirm: boolean) {
-  // ⚠️ CORREÇÃO CRÍTICA (Item 4): Garantindo posse do evento.
-  const { tenantId } = await requireEventCapability(eventId, "canOperate");
+// ─────────────────────────────────────────────────────────────────────────────
+// DECISÃO DO LOCUTOR SOBRE A FILA DE AVISOS
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // Lê o ganhador ANTES de limpar (o falso alarme apaga), para o log dizer de qual cartela se tratava.
-  const pending = await prisma.event.findUnique({
-    where: { id: eventId },
-    select: { pendingWinnerCard: true, pendingWinnerName: true },
-  });
+/**
+ * Solta no telão o(s) ganhador(es) escolhido(s): UM só (os demais avisos ficam como "cederam") ou VÁRIOS
+ * (prêmio dividido: o telão mostra todos os nomes). A decisão e o registro de auditoria entram na MESMA
+ * transação: sem registro, não há decisão.
+ */
+export async function releaseWinners(eventId: string, claimIds: string[]) {
+  try {
+    const { tenantId } = await requireEventCapability(eventId, "canOperate");
+    const session = await auth();
+    const now = new Date();
 
-  await prisma.event.update({
-    where: { id: eventId },
-    // Ao CONFIRMAR ("soltar no telão") o ganhador precisa continuar gravado: é o nome que a tela
-    // grande mostra. Antes ele era apagado aqui e o telão exibia só "Ganhador". O ganhador é limpo
-    // no falso alarme (confirm = false) e ao encerrar a rodada (completeCurrentPrizeAndNext).
-    data: confirm
-      ? { bingoConfirmed: true, bingoConfirmedAt: new Date() }
-      : { bingoConfirmed: false, bingoConfirmedAt: null, pendingWinnerCard: null, pendingWinnerName: null },
-  });
+    const result = await prisma.$transaction(async (tx) => {
+      const ev = await tx.event.findFirst({ where: { id: eventId, tenantId }, select: { bingoConfirmed: true } });
+      if (!ev) throw new Error("Evento inválido ou acesso negado.");
+      if (ev.bingoConfirmed) return { already: true as const };
 
-  await logAudit({
-    tenantId,
-    action: confirm ? "BINGO_RELEASED" : "BINGO_FALSE_ALARM",
-    eventId,
-    metadata: { card: pending?.pendingWinnerCard ?? null, winnerName: pending?.pendingWinnerName ?? null },
-  });
+      const prize = await tx.prize.findFirst({ where: { eventId, isCompleted: false }, orderBy: { order: "asc" }, select: { id: true } });
+      if (!prize) throw new Error("Não há rodada ativa.");
 
-  revalidatePath("/", "layout");
-  return { success: true };
+      const pending = await tx.bingoClaim.findMany({
+        where: { eventId, prizeId: prize.id, status: "PENDING" },
+        orderBy: [{ closedAtDraw: "asc" }, { createdAt: "asc" }],
+      });
+      const sel = validateSelection(pending.map((p) => p.id), claimIds ?? []);
+      if (!sel.ok) throw new Error(sel.error);
+
+      const won = await tx.bingoClaim.updateMany({
+        where: { id: { in: sel.chosen }, eventId, prizeId: prize.id, status: "PENDING" },
+        data: { status: "WINNER", decidedById: session?.user?.id ?? null, decidedAt: now },
+      });
+      if (won.count !== sel.chosen.length) throw new Error("Os avisos mudaram enquanto você decidia. Atualize a tela e tente de novo.");
+
+      if (sel.yielded.length > 0) {
+        await tx.bingoClaim.updateMany({
+          where: { id: { in: sel.yielded }, eventId, prizeId: prize.id, status: "PENDING" },
+          data: { status: "YIELDED", decidedById: session?.user?.id ?? null, decidedAt: now },
+        });
+      }
+
+      const winners = pending.filter((p) => sel.chosen.includes(p.id));
+      const flipped = await tx.event.updateMany({
+        where: { id: eventId, tenantId, bingoConfirmed: false },
+        data: {
+          bingoConfirmed: true,
+          bingoConfirmedAt: now,
+          // O telão e a mesa leem estes dois campos; para vários ganhadores eles trazem todos.
+          pendingWinnerCard: winners.map((w) => w.cardShortId).join(", "),
+          pendingWinnerName: joinNames(winners.map((w) => w.claimantName)),
+        },
+      });
+      if (flipped.count !== 1) throw new Error("A rodada já foi decidida.");
+
+      await tx.auditLog.create({
+        data: await buildAuditData({
+          action: "BINGO_RELEASED",
+          eventId,
+          tenantId,
+          metadata: {
+            mode: sel.mode,
+            winners: winners.map((w) => ({ card: w.cardShortId, name: w.claimantName, closedAtDraw: w.closedAtDraw })),
+            yielded: pending.filter((p) => sel.yielded.includes(p.id)).map((p) => ({ card: p.cardShortId, name: p.claimantName })),
+          },
+        }),
+      });
+      return { already: false as const, mode: sel.mode, count: winners.length };
+    });
+
+    revalidatePath("/", "layout");
+    return { success: true as const, ...result };
+  } catch (error: any) {
+    return { success: false as const, error: (error?.message as string) ?? "Não foi possível soltar o telão." };
+  }
+}
+
+/** Descarta um aviso da fila (falso alarme, nome errado…). O fiscal pode reenviar a cartela com o nome corrigido. */
+export async function discardClaim(eventId: string, claimId: string) {
+  try {
+    const { tenantId } = await requireEventCapability(eventId, "canOperate");
+    const session = await auth();
+
+    const done = await prisma.$transaction(async (tx) => {
+      const claim = await tx.bingoClaim.findFirst({ where: { id: claimId, eventId, status: "PENDING" } });
+      if (!claim) return false;
+      await tx.bingoClaim.update({
+        where: { id: claim.id },
+        data: { status: "DISCARDED", activeKey: null, decidedById: session?.user?.id ?? null, decidedAt: new Date() },
+      });
+      await tx.auditLog.create({
+        data: await buildAuditData({
+          action: "BINGO_CLAIM_DISCARDED",
+          eventId,
+          tenantId,
+          metadata: { card: claim.cardShortId, name: claim.claimantName },
+        }),
+      });
+      return true;
+    });
+
+    revalidatePath("/", "layout");
+    return { success: true as const, nothingToDo: !done };
+  } catch (error: any) {
+    return { success: false as const, error: (error?.message as string) ?? "Não foi possível descartar." };
+  }
+}
+
+/** Desfaz a decisão já solta no telão (por engano, ou apareceu mais alguém): todos voltam para a fila. */
+export async function reopenDecision(eventId: string) {
+  try {
+    const { tenantId } = await requireEventCapability(eventId, "canOperate");
+
+    const done = await prisma.$transaction(async (tx) => {
+      const flipped = await tx.event.updateMany({
+        where: { id: eventId, tenantId, bingoConfirmed: true },
+        data: { bingoConfirmed: false, bingoConfirmedAt: null, pendingWinnerCard: null, pendingWinnerName: null },
+      });
+      if (flipped.count !== 1) return false;
+
+      const prize = await tx.prize.findFirst({ where: { eventId, isCompleted: false }, orderBy: { order: "asc" }, select: { id: true } });
+      if (prize) {
+        await tx.bingoClaim.updateMany({
+          where: { eventId, prizeId: prize.id, status: { in: ["WINNER", "YIELDED"] } },
+          data: { status: "PENDING", decidedById: null, decidedAt: null },
+        });
+      }
+      await tx.auditLog.create({ data: await buildAuditData({ action: "BINGO_DECISION_REOPENED", eventId, tenantId }) });
+      return true;
+    });
+
+    revalidatePath("/", "layout");
+    return { success: true as const, nothingToDo: !done };
+  } catch (error: any) {
+    return { success: false as const, error: (error?.message as string) ?? "Não foi possível reabrir a decisão." };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -428,12 +571,24 @@ export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeI
     throw new Error("Manipulação detectada. O prêmio não pertence a este evento.");
   }
 
-  await prisma.$transaction([
-    prisma.prize.update({
-      where: { id: currentPrizeId },
+  // Avisos de bingo AGUARDANDO decisão: não deixa encerrar (um ganhador legítimo se perderia). Decida ou descarte antes.
+  const waiting = await prisma.bingoClaim.count({ where: { eventId, prizeId: currentPrizeId, status: "PENDING" } });
+  if (waiting > 0) {
+    return {
+      success: false,
+      error: `Há ${waiting} aviso${waiting === 1 ? "" : "s"} de bingo aguardando decisão. Solte o telão ou descarte antes de encerrar a rodada.`,
+    };
+  }
+
+  // 🔒 Só UMA chamada encerra a rodada: o `where` exige o prêmio ainda aberto. Um segundo clique (ou outro aparelho)
+  // encontra count = 0 e não zera as pedras da rodada seguinte por engano.
+  const closedNow = await prisma.$transaction(async (tx) => {
+    const closed = await tx.prize.updateMany({
+      where: { id: currentPrizeId, eventId, isCompleted: false },
       data: { isCompleted: true },
-    }),
-    prisma.event.update({
+    });
+    if (closed.count !== 1) return false;
+    await tx.event.update({
       where: { id: eventId },
       data: {
         drawnNumbers: [],
@@ -442,8 +597,14 @@ export async function completeCurrentPrizeAndNext(eventId: string, currentPrizeI
         bingoConfirmed: false,
         bingoConfirmedAt: null,
       },
-    }),
-  ]);
+    });
+    return true;
+  });
+
+  if (!closedNow) {
+    revalidatePath("/", "layout");
+    return { success: true, alreadyCompleted: true }; // já estava encerrada: nada a fazer, sem registro repetido
+  }
 
   await logAudit({ tenantId, action: "ROUND_COMPLETED", eventId, metadata: { prizeName: prize.prizeName, prizeType: prize.type } });
 

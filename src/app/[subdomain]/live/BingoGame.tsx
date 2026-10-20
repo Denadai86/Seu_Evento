@@ -10,9 +10,10 @@ import {
   checkCard, 
   toggleBoardVisibility, 
   getEventCards, 
-  toggleBingoCelebration,
+  reopenDecision,
   completeCurrentPrizeAndNext 
 } from "@/actions/bingo";
+import ClaimsQueue from "./ClaimsQueue";
 import { MonitorPlay, Copy, CheckCircle2, Search, XCircle, Eye, EyeOff, Trophy, LogOut } from "lucide-react";
 import { notifyProjector } from "@/lib/projectorSync";
 import { evaluateCard } from "@/lib/bingoRules";
@@ -199,6 +200,8 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
         setDisplayNumber(null);
         setAuditResult(null);
         refresh();
+      } else if ("error" in res && res.error) {
+        alert(res.error); // por exemplo: ainda há aviso de bingo aguardando decisão
       }
     });
   };
@@ -285,28 +288,27 @@ export default function BingoGame({ eventId, eventName, initialDrawn, sponsors }
 
       {/* CONTRATO DE BINGO (5 E 6 UNIFICADOS) */}
       <div className="max-w-[1400px] mx-auto mb-6">
-        {data?.pendingWinnerCard && !data?.bingoConfirmed && (
-          <div className="bg-amber-500 text-black p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between animate-pulse border-4 border-white shadow-[0_0_30px_rgba(245,158,11,0.5)] gap-4">
-            <div>
-              <p className="font-black uppercase text-xs tracking-tighter">🚨 ALERTA DE BINGO NO PÁTIO!</p>
-              <p className="text-2xl font-black">Cartela {data.pendingWinnerCard} — {data.pendingWinnerName}</p>
-            </div>
-            <div className="flex gap-2 w-full md:w-auto">
-              <button onClick={() => toggleBingoCelebration(eventId, false).then(() => refresh())} className="flex-1 md:flex-none bg-black text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-slate-800">
-                Falso Alarme (Limpar)
-              </button>
-              <button onClick={() => toggleBingoCelebration(eventId, true).then(() => refresh())} className="flex-1 md:flex-none bg-white text-black px-6 py-3 rounded-xl font-black text-lg shadow-xl hover:scale-105 transition-transform">
-                🎉 SOLTAR TELÃO!
-              </button>
-            </div>
-          </div>
+        {!data?.bingoConfirmed && (data?.claims ?? []).some((c: { status: string }) => c.status === "PENDING") && (
+          <ClaimsQueue eventId={eventId} claims={data.claims} onChanged={() => refresh()} />
         )}
 
         {data?.bingoConfirmed && currentPrize && (
           <div className="bg-emerald-500 text-white p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between border-4 border-white shadow-[0_0_30px_rgba(16,185,129,0.5)] gap-4">
             <div>
               <p className="font-black uppercase text-xs tracking-tighter text-emerald-900">🎉 FESTA ROLANDO NO TELÃO DO PROJETOR!</p>
-              <p className="text-2xl font-black">Ganhador(a): {data.pendingWinnerName}</p>
+              <p className="text-2xl font-black">
+                {(data.winners?.length ?? 0) > 1 ? "Prêmio dividido entre" : "Ganhador(a)"}: {data.pendingWinnerName}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirm("Reabrir a decisão? O telão volta ao normal e os avisos voltam para a fila.")) return;
+                  reopenDecision(eventId).then((r) => { if (!r.success) alert(r.error); refresh(); });
+                }}
+                className="mt-1 text-xs font-black text-emerald-950/70 hover:text-emerald-950 underline underline-offset-2"
+              >
+                Decidi errado: reabrir a decisão
+              </button>
             </div>
             <button 
               onClick={() => handleNextRound(currentPrize.id)}

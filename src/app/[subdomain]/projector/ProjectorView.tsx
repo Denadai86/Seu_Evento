@@ -1,6 +1,5 @@
-"use client";
-
 // src/app/[subdomain]/projector/ProjectorView.tsx
+"use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import useSWR from "swr";
@@ -89,6 +88,9 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
   const drawnNumbers: number[] = data?.drawnNumbers || [];
   const bingoConfirmed = data?.bingoConfirmed;
   const winnerName = data?.pendingWinnerName || "Ganhador";
+  // Prêmio dividido: a API traz todos os nomes. Com 1 só, continua igual ao de sempre.
+  const winners: string[] = Array.isArray(data?.winners) && data.winners.length > 0 ? data.winners : [winnerName];
+  const nameSize = winners.length <= 1 ? "text-9xl" : winners.length === 2 ? "text-8xl" : winners.length <= 4 ? "text-6xl" : "text-5xl";
   const currentPrize = data?.currentPrize;
   const showBoard = data?.showBoard !== false;
   const currentBall = formatBall(displayNumber);
@@ -335,12 +337,16 @@ export default function ProjectorView({ eventId, eventName, initialDrawn, sponso
               </div>
               <div className="text-center space-y-4">
                 <h2 className="text-emerald-400 text-2xl font-black uppercase tracking-[0.5em] animate-pulse">
-                  Temos um Ganhador!
+                  {winners.length > 1 ? "Prêmio dividido entre os ganhadores!" : "Temos um Ganhador!"}
                 </h2>
                 <div className="relative">
-                  <h3 className="text-9xl font-black text-white tracking-tighter drop-shadow-[0_10px_30px_rgba(255,255,255,0.2)]">
-                    {winnerName.split(" (Fiscal:")[0].split(" (Ref:")[0]}
-                  </h3>
+                  <div className="flex flex-col items-center gap-3">
+                    {winners.map((name, i) => (
+                      <h3 key={i} className={`${nameSize} font-black text-white tracking-tighter drop-shadow-[0_10px_30px_rgba(255,255,255,0.2)]`}>
+                        {name.split(" (Fiscal:")[0].split(" (Ref:")[0]}
+                      </h3>
+                    ))}
+                  </div>
                   <div className="absolute -inset-4 bg-emerald-500/20 blur-3xl -z-10 rounded-full" />
                 </div>
                 <div className="flex items-center justify-center gap-4 text-yellow-500 pt-8">

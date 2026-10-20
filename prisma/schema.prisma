@@ -51,7 +51,8 @@ model Tenant {
   
   logoUrl     String?
   active      Boolean   @default(true)
-  token       String?   // Token Mágico de Impersonation
+  token       String?   // Token Mágico de Impersonation (uso único)
+  tokenExpiresAt DateTime? // Validade do token mágico (10 minutos)
   
   planType    PlanType  @default(SINGLE_EVENT)
   expiresAt   DateTime? // Data limite de acesso
@@ -129,6 +130,7 @@ model Event {
   exposures     SponsorExposure[]
   priceTiers    PriceTier[]
   cardTransfers CardTransfer[]
+  bingoClaims   BingoClaim[]
 
   @@map("events")
 }
@@ -228,6 +230,8 @@ model Prize {
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  claims      BingoClaim[]
 
   @@map("prizes")
 }
@@ -341,4 +345,40 @@ model CardTransfer {
   @@index([eventId, status])
   @@index([ownerId, status])
   @@map("card_transfers")
+}
+
+// ==========================================
+// FILA DE AVISOS DE BINGO (ganhadores simultâneos)
+// Todo aviso válido entra aqui; o LOCUTOR decide na hora: um ganhador (os outros cedem) ou prêmio dividido.
+// ==========================================
+enum ClaimStatus {
+  PENDING   // aguardando a decisão do locutor
+  WINNER    // ganhador (um só, ou um dos que dividem o prêmio)
+  YIELDED   // cedeu para o(s) outro(s)
+  DISCARDED // descartado pelo locutor (falso alarme, erro de nome…)
+}
+
+model BingoClaim {
+  id           String      @id @default(cuid())
+  eventId      String
+  prizeId      String      // a rodada em que o aviso foi feito
+  cardShortId  String
+  claimantName String      // nome informado pelo fiscal
+  fiscalName   String
+  fiscalUserId String?
+  closedAtDraw Int?        // em qual pedra (1ª, 2ª…) a cartela fechou o padrão: desempate objetivo
+  drawnCount   Int         @default(0) // quantas pedras já tinham saído quando o fiscal avisou
+  status       ClaimStatus @default(PENDING)
+  // "rodada:cartela" enquanto o aviso está ATIVO; NULL quando descartado (permite reenviar com o nome corrigido).
+  // O UNIQUE impede, no banco, a mesma cartela duas vezes na fila (dois fiscais avisando juntos).
+  activeKey    String?     @unique
+  decidedById  String?
+  decidedAt    DateTime?
+  createdAt    DateTime    @default(now())
+
+  event        Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  prize        Prize       @relation(fields: [prizeId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, prizeId, status])
+  @@map("bingo_claims")
 }

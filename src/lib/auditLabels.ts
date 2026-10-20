@@ -15,6 +15,7 @@ export const CATEGORY_LABEL: Record<AuditCategory, string> = {
 
 // `sensitive` = ação que merece atenção do administrador (destaque na tela).
 export const AUDIT_ACTIONS: Record<string, { label: string; category: AuditCategory; sensitive?: boolean }> = {
+  SALE_COMPLETED: { label: "Venda no PDV", category: "DINHEIRO" },
   PAYMENT_REGISTERED: { label: "Pagamento registrado", category: "DINHEIRO" },
   SALE_UNDONE: { label: "Venda desfeita", category: "DINHEIRO", sensitive: true },
   PRICE_TIER_CREATED: { label: "Fase de preço criada", category: "DINHEIRO" },
@@ -30,6 +31,8 @@ export const AUDIT_ACTIONS: Record<string, { label: string; category: AuditCateg
   PAID_AFTER_BINGO_CHECK: { label: "Pago após conferência", category: "DINHEIRO", sensitive: true },
   BINGO_ALERT: { label: "Aviso de bingo", category: "SORTEIO" },
   BINGO_RELEASED: { label: "Bingo solto no telão", category: "SORTEIO" },
+  BINGO_CLAIM_DISCARDED: { label: "Aviso de bingo descartado", category: "SORTEIO", sensitive: true },
+  BINGO_DECISION_REOPENED: { label: "Decisão do bingo reaberta", category: "SORTEIO", sensitive: true },
   BINGO_FALSE_ALARM: { label: "Falso alarme", category: "SORTEIO", sensitive: true },
   ROUND_COMPLETED: { label: "Rodada encerrada", category: "SORTEIO" },
   GAME_RESET: { label: "Globo zerado", category: "SORTEIO", sensitive: true },
@@ -74,6 +77,10 @@ const dateBR = (iso: unknown) =>
 export function describeAudit(action: string, md: Record<string, any> | null | undefined, who: (staffId: string) => string): string {
   const m = md ?? {};
   switch (action) {
+    case "SALE_COMPLETED": {
+      const codes = (Array.isArray(m.codes) ? m.codes : []) as string[];
+      return `Vendeu ${plural(codes.length || n(m.count), "cartela", "cartelas")}${codes.length ? ` (${codes.join(", ")})` : ""} por ${brl(m.total)} no ${m.method === "PIX" ? "PIX" : "dinheiro"} (${who(m.staffId)})`;
+    }
     case "PAYMENT_REGISTERED": {
       // Desdobramento do valor (ex.: 3 × R$ 10,00 + 2 × R$ 15,00) para o conselho conferir a conta.
       const parts =
@@ -128,9 +135,21 @@ export function describeAudit(action: string, md: Record<string, any> | null | u
     case "PIN_RESET":
       return `Redefiniu o PIN de ${m.targetName ?? "um voluntário"}${m.targetUsername ? ` (${m.targetUsername})` : ""}`;
     case "BINGO_ALERT":
-      return `O fiscal ${m.fiscal ?? ""} avisou bingo: cartela ${m.card}, ganhador "${m.winnerName}"`.replace("fiscal  ", "fiscal ");
-    case "BINGO_RELEASED":
+      return `O fiscal ${m.fiscal ?? ""} avisou bingo: cartela ${m.card}, ganhador "${m.winnerName}"${m.closedAtDraw ? ` (fechou na pedra ${m.closedAtDraw})` : ""}`.replace("fiscal  ", "fiscal ");
+    case "BINGO_RELEASED": {
+      const winners = (Array.isArray(m.winners) ? m.winners : []) as { card: string; name: string }[];
+      if (winners.length > 0) {
+        const who2 = winners.map((w) => `${w.name} (cartela ${w.card})`).join(" e ");
+        const yielded = (Array.isArray(m.yielded) ? m.yielded : []) as { name: string }[];
+        return `Soltou no telão: ${who2} — ${winners.length > 1 ? "prêmio DIVIDIDO" : "ganhador único"}${yielded.length ? `; cederam: ${yielded.map((y) => y.name).join(", ")}` : ""}`;
+      }
+      // registros de antes da fila de avisos
       return `Soltou o bingo no telão: cartela ${m.card ?? "?"}, ganhador "${String(m.winnerName ?? "").split(" (Fiscal:")[0]}"`;
+    }
+    case "BINGO_CLAIM_DISCARDED":
+      return `Descartou o aviso de bingo da cartela ${m.card ?? "?"}${m.name ? ` (${m.name})` : ""}`;
+    case "BINGO_DECISION_REOPENED":
+      return "Reabriu a decisão do bingo: os avisos voltaram para a fila";
     case "BINGO_FALSE_ALARM":
       return `Limpou um aviso de bingo (falso alarme)${m.card ? `: cartela ${m.card}` : ""}`;
     case "ROUND_COMPLETED":
