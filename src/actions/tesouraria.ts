@@ -6,7 +6,7 @@ import prisma from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { requireTreasuryAccess } from "@/lib/eventAccess";
 import { groupByPrice } from "@/lib/cardPricing";
-import { logAudit, codesCheckedUnpaid } from "@/lib/audit";
+import { logAudit, buildAuditData, codesCheckedUnpaid } from "@/lib/audit";
 import { currentPrices, pricesOfTier } from "@/lib/priceTiers";
 import { revalidatePath } from "next/cache";
 
@@ -34,34 +34,41 @@ export async function assignCardsToStaff(eventId: string, eventStaffId: string, 
     await requireEventAccess(eventId);
     await requireStaffOfEvent(eventId, eventStaffId);
 
-    if (!codes || codes.length === 0) throw new Error("Nenhum código informado.");
+    const wanted = [...new Set((codes ?? []).map((c) => String(c).trim().toUpperCase()).filter(Boolean))];
+    if (wanted.length === 0) throw new Error("Nenhum código informado.");
 
-    // Busca apenas cartelas que existem no evento e estão LIVRES
-    const availableCards = await prisma.card.findMany({
-      where: {
-        eventId,
-        shortId: { in: codes },
-        eventStaffId: null,
-        blocked: false,
-      },
-      select: { id: true, shortId: true },
-    });
+    // TUDO OU NADA: ou entrega todas as cartelas informadas, ou nenhuma (e diz quais não puderam).
+    // O registro de auditoria entra na mesma transação: se não gravar, a entrega não acontece.
+    const count = await prisma.$transaction(async (tx) => {
+      const free = await tx.card.findMany({
+        where: { eventId, shortId: { in: wanted }, eventStaffId: null, blocked: false, isPaid: false },
+        select: { id: true, shortId: true },
+      });
 
-    if (availableCards.length === 0) {
-      return { success: false as const, error: "Nenhuma cartela livre encontrada com os códigos informados." };
-    }
+      if (free.length !== wanted.length) {
+        const found = new Set(free.map((c) => c.shortId));
+        const missing = wanted.filter((c) => !found.has(c));
+        throw new Error(
+          `Estas cartelas não estão livres (não existem, já estão com alguém, foram pagas ou estão bloqueadas): ${missing.join(", ")}. Nada foi entregue.`
+        );
+      }
 
-    const cardIds = availableCards.map(c => c.id);
+      const updated = await tx.card.updateMany({
+        where: { id: { in: free.map((c) => c.id) }, eventId, eventStaffId: null },
+        data: { eventStaffId },
+      });
+      if (updated.count !== free.length) {
+        throw new Error("Outra entrega ocupou algumas dessas cartelas agora há pouco. Nada foi entregue. Tente de novo.");
+      }
 
-    // Atualiza em lote — só as que AINDA estão livres (duas pessoas atribuindo juntas não se sobrescrevem)
-    const assigned = await prisma.card.updateMany({
-      where: { id: { in: cardIds }, eventId, eventStaffId: null },
-      data: { eventStaffId },
+      await tx.auditLog.create({
+        data: await buildAuditData({ action: "CARDS_ASSIGNED", eventId, metadata: { staffId: eventStaffId, count: updated.count, mode: "codes" } }),
+      });
+      return updated.count;
     });
 
     revalidatePath(`/dashboard/${eventId}/tesouraria`);
-    await logAudit({ action: "CARDS_ASSIGNED", eventId, metadata: { staffId: eventStaffId, count: assigned.count, mode: "codes" } });
-    return { success: true as const, count: assigned.count };
+    return { success: true as const, count };
   } catch (error: any) {
     console.error("[ASSIGN_CARDS_ERROR]", error);
     return { success: false as const, error: error.message };
@@ -97,13 +104,20 @@ export async function returnCardsFromStaff(eventId: string, eventStaffId: string
     const cardIds = returnableCards.map(c => c.id);
 
     // Remove o vínculo — só de cartelas que continuam com esse vendedor e NÃO pagas
-    const returned = await prisma.card.updateMany({
-      where: { id: { in: cardIds }, eventId, eventStaffId, isPaid: false },
-      data: { eventStaffId: null },
+    const returned = await prisma.$transaction(async (tx) => {
+      const r = await tx.card.updateMany({
+        where: { id: { in: cardIds }, eventId, eventStaffId, isPaid: false },
+        data: { eventStaffId: null },
+      });
+      if (r.count > 0) {
+        await tx.auditLog.create({
+          data: await buildAuditData({ action: "CARDS_RETURNED", eventId, metadata: { staffId: eventStaffId, count: r.count } }),
+        });
+      }
+      return r;
     });
 
     revalidatePath(`/dashboard/${eventId}/tesouraria`);
-    await logAudit({ action: "CARDS_RETURNED", eventId, metadata: { staffId: eventStaffId, count: returned.count } });
     return { success: true as const, count: returned.count };
   } catch (error: any) {
     console.error("[RETURN_CARDS_ERROR]", error);
@@ -166,15 +180,19 @@ export async function assignCardsByQuantity(
         throw new Error("Outra entrega ocupou algumas dessas cartelas agora há pouco. Tente de novo.");
       }
 
-      return free.map((c) => c.shortId);
+      // Auditoria na MESMA transação: se o registro não gravar, a entrega não acontece.
+      const out = free.map((c) => c.shortId);
+      await tx.auditLog.create({
+        data: await buildAuditData({
+          action: "CARDS_ASSIGNED",
+          eventId,
+          metadata: { staffId: eventStaffId, count: out.length, type, first: out[0], last: out[out.length - 1], mode: "quantity" },
+        }),
+      });
+      return out;
     });
 
     revalidatePath(`/dashboard/${eventId}/tesouraria`);
-    await logAudit({
-      action: "CARDS_ASSIGNED",
-      eventId,
-      metadata: { staffId: eventStaffId, count: codes.length, type, first: codes[0], last: codes[codes.length - 1], mode: "quantity" },
-    });
     return { success: true as const, count: codes.length, first: codes[0], last: codes[codes.length - 1], codes };
   } catch (error: any) {
     console.error("[ASSIGN_BY_QUANTITY_ERROR]", error);
@@ -324,6 +342,25 @@ async function settlePayment(
         },
       });
 
+      // O registro do pagamento na MESMA transação: se não gravar, o acerto não acontece.
+      await tx.auditLog.create({
+        data: await buildAuditData({
+          action: "PAYMENT_REGISTERED",
+          eventId,
+          metadata: {
+            staffId: eventStaffId,
+            count: paidTotal,
+            amount,
+            breakdown, // ex.: 3 × R$ 10,00 + 2 × R$ 15,00
+            tier: prices.tier?.name ?? null, // fase aplicada
+            vigente: prices.vigenteName, // fase vigente na hora do acerto
+            overridden: prices.overridden, // o administrador escolheu outra fase que não a vigente
+            mode: codes ? "codes" : "all",
+            asAdmin: event.isAdmin,
+          },
+        }),
+      });
+
       return { count: paidTotal, amount, breakdown, codes: unpaid.map((c) => c.shortId) };
     });
 
@@ -336,21 +373,6 @@ async function settlePayment(
     if (late.length > 0) {
       await logAudit({ action: "PAID_AFTER_BINGO_CHECK", eventId, metadata: { cards: late, via: "ACERTO", staffId: eventStaffId } });
     }
-    await logAudit({
-      action: "PAYMENT_REGISTERED",
-      eventId,
-      metadata: {
-        staffId: eventStaffId,
-        count: result.count,
-        amount: result.amount,
-        breakdown: result.breakdown, // ex.: 3 × R$ 10,00 + 2 × R$ 15,00
-        tier: prices.tier?.name ?? null, // fase aplicada
-        vigente: prices.vigenteName, // fase vigente na hora do acerto
-        overridden: prices.overridden, // o administrador escolheu outra fase que não a vigente
-        mode: codes ? "codes" : "all",
-        asAdmin: event.isAdmin,
-      },
-    });
     return { success: true as const, count: result.count, amount: result.amount, tierName: prices.tier?.name ?? null };
   } catch (error: any) {
     console.error("[REGISTER_PAYMENT_ERROR]", error);

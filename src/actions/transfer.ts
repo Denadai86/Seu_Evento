@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { requireTenant, requireStaffForEvent } from "@/lib/requireTenant";
 import { pickTransferCards, summarizeHolding, matchesRequestedType } from "@/lib/cardHolding";
 import { UNDO_WINDOW_MS } from "@/lib/saleRules";
-import { logAudit } from "@/lib/audit";
+import { buildAuditData } from "@/lib/audit";
 
 // Quem sou eu neste evento (o EventStaff do usuário LOGADO — nunca vem do navegador).
 async function getMe(eventId: string) {
@@ -210,14 +210,18 @@ export async function respondToTransfer(eventId: string, transferId: string, acc
       });
       if (closed.count !== 1) throw new Error("O pedido já foi respondido.");
 
-      requesterOut = transfer.requesterId;
-      return chosen.map((c) => c.shortId).sort();
-    });
+      // Auditoria na MESMA transação: se o registro não gravar, a troca não acontece.
+      const codesOut = chosen.map((c) => c.shortId).sort();
+      await tx.auditLog.create({
+        data: await buildAuditData({
+          action: "TRANSFER_ACCEPTED",
+          eventId,
+          metadata: { fromStaff: me.id, toStaff: transfer.requesterId, count: codesOut.length, first: codesOut[0], last: codesOut[codesOut.length - 1] },
+        }),
+      });
 
-    await logAudit({
-      action: "TRANSFER_ACCEPTED",
-      eventId,
-      metadata: { fromStaff: me.id, toStaff: requesterOut, count: result.length, first: result[0], last: result[result.length - 1] },
+      requesterOut = transfer.requesterId;
+      return codesOut;
     });
 
     revalidatePath(`/dashboard/${eventId}/tesouraria`);

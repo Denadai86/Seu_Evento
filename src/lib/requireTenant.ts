@@ -1,5 +1,4 @@
 // src/lib/requireTenant.ts
-
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma"; // Adicione essa importação se não tiver
 
@@ -31,6 +30,10 @@ export async function requireTenant() {
 export async function requireStaffForEvent(eventId: string, capability: 'canSell' | 'canOperate' | 'canVerify') {
   const tenantId = await requireTenant();
   const session = await auth();
+
+  // Defesa em profundidade: o evento TEM que ser deste cliente, mesmo que quem chama esqueça de conferir.
+  const event = await prisma.event.findFirst({ where: { id: eventId, tenantId }, select: { id: true } });
+  if (!event) throw new Error("Evento inválido ou acesso negado.");
 
   const staff = await prisma.eventStaff.findFirst({
     where: {

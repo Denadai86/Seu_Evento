@@ -29,7 +29,8 @@ export async function buildAuditData(input: AuditInput) {
   let ua: string | null = null;
   try {
     const h = await headers();
-    ip = (h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "").trim() || null;
+    // Prefere o cabeçalho que a PLATAFORMA (Vercel) define; o x-forwarded-for pode vir com valores de quem fez o pedido.
+    ip = (h.get("x-vercel-forwarded-for") ?? h.get("x-real-ip") ?? h.get("x-forwarded-for")?.split(",")[0] ?? "").trim() || null;
     ua = (h.get("user-agent") ?? "").slice(0, 160) || null;
   } catch {
     // fora de um pedido web (ex.: script): segue sem IP/aparelho

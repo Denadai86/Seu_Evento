@@ -5,6 +5,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/prisma";
 import { compare } from "bcryptjs";
 import { checkLoginRateLimit, getClientIp } from "@/lib/ratelimit";
+import { isMagicTokenUsable } from "@/lib/magicToken";
 
 // Extrai domínio de uma URL, removendo protocolo se existir
 const extractDomain = (url: string) => {
@@ -131,13 +132,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           },
         });
 
-        if (!tenant || !tenant.token) return null;
+        if (!tenant || !isMagicTokenUsable(tenant.token, tenant.tokenExpiresAt)) return null;
 
-        // 🔥 SEGURANÇA SÊNIOR: Invalida o token imediatamente (Consumível)
-        await prisma.tenant.update({
-          where: { id: tenant.id },
-          data: { token: null },
+        // 🔥 SEGURANÇA: consumo ATÔMICO. Duas requisições com o mesmo token ao mesmo tempo: só UMA consegue
+        // (o `where` exige que o token ainda seja o mesmo); a outra encontra count = 0 e é recusada.
+        const consumed = await prisma.tenant.updateMany({
+          where: { id: tenant.id, token: tenant.token },
+          data: { token: null, tokenExpiresAt: null },
         });
+        if (consumed.count !== 1) return null;
 
         const user = tenant.users[0];
         if (!user) return null;

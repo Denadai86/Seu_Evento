@@ -69,7 +69,8 @@ export default async function AuditoriaPage({
     where: {
       tenantId: tenant.id,
       metadata: { path: ["eventId"], equals: eventId },
-      ...(actionFilter ? { action: { in: actionFilter } } : {}),
+      // Sem filtro: as vendas do PDV (uma linha por venda) ficam de fora para não esconder o que importa; estão em "Dinheiro".
+      ...(actionFilter ? { action: { in: actionFilter } } : { action: { not: "SALE_COMPLETED" } }),
     },
     orderBy: { createdAt: "desc" },
     take: LIMIT,
@@ -175,7 +176,8 @@ export default async function AuditoriaPage({
         <p className="text-xs text-slate-400 mt-8 print:hidden">
           Linhas em destaque amarelo merecem atenção: vendas desfeitas, bloqueios e desbloqueios, falsos alarmes, mudanças de permissão,
           PIN redefinido, reset do globo, encerramento e acertos em que o administrador usou uma fase de preço diferente da vigente.
-          Cada linha mostra quem fez, com qual papel, de qual IP e aparelho. O sistema não permite editar nem apagar registros.
+          Cada linha mostra quem fez, com qual papel, de qual IP e aparelho. As vendas do PDV, uma linha por venda, aparecem no filtro Dinheiro.
+          O sistema não permite editar nem apagar registros.
         </p>
       </main>
     </div>

@@ -135,6 +135,23 @@ export async function processBatchSale(
           batchId, // agrupa esta venda: é o que permite desfazer
         })),
       });
+
+      // O registro da venda no log de auditoria na MESMA transação: se não gravar, a venda não acontece.
+      // Assim o rastro continua existindo mesmo se a venda for desfeita depois.
+      await tx.auditLog.create({
+        data: await buildAuditData({
+          action: "SALE_COMPLETED",
+          eventId,
+          tenantId,
+          metadata: {
+            staffId: eventStaffId,
+            batchId,
+            codes: existingCards.map((c) => c.shortId).sort(),
+            total: existingCards.reduce((sum, c) => sum + (priceById.get(c.id) ?? 0), 0),
+            method,
+          },
+        }),
+      });
     });
 
     // Cartela que o fiscal já tinha conferido como NÃO paga e que só agora foi paga: fica destacado na auditoria.

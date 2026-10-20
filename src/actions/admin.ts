@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "crypto";
+import { MAGIC_TOKEN_TTL_MS } from "@/lib/magicToken";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔐 GUARD: Apenas Super Admin passa
@@ -254,7 +255,7 @@ export async function getImpersonationToken(tenantId: string) {
 
     const tenant = await prisma.tenant.update({
       where: { id: tenantId },
-      data: { token: magicToken },
+      data: { token: magicToken, tokenExpiresAt: new Date(Date.now() + MAGIC_TOKEN_TTL_MS) },
     });
 
     return { success: true, token: magicToken, subdomain: tenant.subdomain };
