@@ -6,6 +6,8 @@ import PrintButton from "./PrintButton";
 import QRCode from "qrcode";
 import { requireReportAccess } from "@/lib/requireReportAccess";
 import { isCardType, CARD_TYPE_LABEL } from "@/lib/cardPricing";
+import { siteConfig } from "@/config/site";
+import { buildVerifyUrl } from "@/lib/verifyUrl";
 
 // --- Tipos ---
 type Layout = "a4-4" | "a4-2" | "a4-1" | "a4-6" | "a6";
@@ -46,16 +48,15 @@ function getLayoutConfig(layout: Layout) {
 
 // --- QR Code Generator ---
 async function generateQRCode(shortId: string, eventId: string, subdomain: string): Promise<string> {
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || "acaoleve.dev.br";
-  const protocol = process.env.NEXT_PUBLIC_PROTOCOL || "https://";
-  const isLocal = process.env.NODE_ENV === "development";
-  
-  // Montagem dinâmica e correta do subdomínio
-  const fullDomain = isLocal 
-    ? `${subdomain}.localhost:3000` 
-    : `${subdomain}.${rootDomain}`;
-
-  const verifyUrl = `${protocol}${fullDomain}/verify?event=${eventId}&id=${shortId}`;
+  // Montagem única e testada (src/lib/verifyUrl.ts): o domínio vem normalizado, sem "https://" duplicado.
+  const verifyUrl = buildVerifyUrl({
+    subdomain,
+    rootDomain: siteConfig.rootDomain,
+    eventId,
+    shortId,
+    isLocal: process.env.NODE_ENV === "development",
+    protocol: process.env.NEXT_PUBLIC_PROTOCOL,
+  });
 
   return await QRCode.toDataURL(verifyUrl, {
     width: 140,

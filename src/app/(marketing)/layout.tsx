@@ -2,10 +2,9 @@
 
 import type { Metadata } from "next";
 import { siteConfig } from "@/config/site";
+import StructuredData from "@/components/marketing/StructuredData";
 
-const title = "Seu Evento | Gestão de Bingos e Sorteios Profissionais";
-const description =
-  "Plataforma completa para Paróquias, ONGs e Empresas. Crie cartelas, gerencie vendas e tenha um telão interativo incrível.";
+const { title, description } = siteConfig.seo;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
@@ -31,6 +30,7 @@ export default function MarketingLayout({
 }) {
   return (
     <div className="min-h-screen bg-[#091510]">
+      <StructuredData />
       {children}
     </div>
   );

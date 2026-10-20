@@ -23,7 +23,7 @@ export default function OpengraphImage() {
       >
         <div style={{ display: "flex", fontSize: 40, fontWeight: 700, color: "#facc15" }}>Seu Evento</div>
         <div style={{ display: "flex", fontSize: 76, fontWeight: 800, lineHeight: 1.1, marginTop: 28 }}>
-          Bingo beneficente com controle de verdade
+          Eventos beneficentes com controle de verdade
         </div>
         <div style={{ display: "flex", fontSize: 34, marginTop: 36, color: "#a1a1aa" }}>
           Cartelas, voluntários, telão ao vivo e fechamento de caixa

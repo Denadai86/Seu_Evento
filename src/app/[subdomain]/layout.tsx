@@ -1,4 +1,5 @@
 // src/app/[subdomain]/layout.tsx
+import type { Metadata } from "next";
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
@@ -11,6 +12,11 @@ interface Props {
   children: React.ReactNode;
   params: Promise<{ subdomain: string }>;
 }
+
+// O ambiente de cada cliente (venda, caixa, telão, verificador) não é conteúdo público: nunca vai para o Google.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export default async function SubdomainLayout({ children, params }: Props) {
   const { subdomain } = await params;
