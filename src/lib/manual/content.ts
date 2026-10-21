@@ -293,6 +293,31 @@ export const TOPICS: Topic[] = [
     related: ["evento-preparar"],
   },
 
+  {
+    id: "cartela-modelo",
+    title: "Escolher o modelo da cartela (cores ou preto e branco)",
+    summary: "Escolha o tema, o colorido ou o preto e branco, e veja a amostra antes de imprimir.",
+    category: "evento",
+    icon: "settings",
+    roles: ["admin"],
+    keywords: ["modelo", "cartela", "tema", "cor", "colorido", "preto e branco", "amostra", "canhoto", "imprimir", "junina", "natal", "copiadora", "grafica"],
+    steps: [
+      "No evento, em Fábrica de Cartelas, toque em Modelo da cartela.",
+      "Escolha o tema (Festa junina, Natal, Clássico ou Simples) e, abaixo, Colorido ou Preto e branco (para copiadora).",
+      "Se quiser, preencha a data, o local e para quê é a renda. Tudo é opcional.",
+      "Ligue ou desligue os prêmios, os apoiadores e o canhoto destacável (com nome e telefone, cada um opcional).",
+      "Confira a amostra ao lado. Toque em Imprimir amostra para testar o papel e a tinta antes de imprimir todas.",
+      "Toque em Salvar modelo. Ao imprimir, a cartela já sai assim.",
+    ],
+    tips: [
+      "O modelo é só o desenho: trocar de tema não exige gerar as cartelas de novo.",
+      "Na tela de impressão dá para trocar entre Colorido e Preto e branco só naquela impressão (por exemplo, colorido para a gráfica e preto e branco para a copiadora).",
+      "Cada tipo tem a sua cor: no colorido, Quina e Cartela Cheia têm molduras diferentes, o que separa as pilhas só de olhar.",
+    ],
+    warnings: ["No formato de 6 cartelas por folha o espaço é pequeno: aparecem só o nome, o QR e os números, sem texto miúdo."],
+    related: ["evento-preparar"],
+  },
+
   // ── FISCALIZAÇÃO ───────────────────────────────────────────────────────────
   {
     id: "conselho-auditoria",

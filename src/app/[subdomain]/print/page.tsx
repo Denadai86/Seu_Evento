@@ -1,31 +1,25 @@
 // src/app/[subdomain]/print/page.tsx
+//
+// IMPRESSÃO DAS CARTELAS. O desenho vem do modelo escolhido pelo organizador (src/lib/cardDesign.ts) e é o MESMO
+// componente da amostra: o que aparece na amostra é o que sai no papel. ?mode=bw|color e ?theme=… trocam só nesta
+// impressão (o mesmo evento pode ir colorido para a gráfica e preto e branco para a copiadora).
 
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import PrintButton from "./PrintButton";
 import QRCode from "qrcode";
 import { requireReportAccess } from "@/lib/requireReportAccess";
 import { isCardType, CARD_TYPE_LABEL } from "@/lib/cardPricing";
 import { siteConfig } from "@/config/site";
 import { buildVerifyUrl } from "@/lib/verifyUrl";
-
-// --- Tipos ---
-type Layout = "a4-4" | "a4-2" | "a4-1" | "a4-6" | "a6";
-
-type SponsorItem = {
-  id: string;
-  name: string;
-  logoUrl: string | null;
-  contribution: number;
-};
-
-type CardWithQR = {
-  id: string;
-  shortId: string;
-  matrix: any;
-};
+import CardFace from "@/components/print/CardFace";
+import { CARD_CSS } from "@/components/print/cardCss";
+import { layoutProfile, parseCardDesign, prizeLine, type CardKind } from "@/lib/cardDesign";
+import type { BingoMatrix } from "@/lib/bingoRules";
 
 // --- Configuração de Layouts ---
+type Layout = "a4-4" | "a4-2" | "a4-1" | "a4-6" | "a6";
 const VALID_LAYOUTS: Layout[] = ["a4-4", "a4-2", "a4-1", "a4-6", "a6"];
 
 const LAYOUT_LABELS: Record<Layout, string> = {
@@ -46,9 +40,8 @@ function getLayoutConfig(layout: Layout) {
   }
 }
 
-// --- QR Code Generator ---
+// --- QR Code: o endereço vem de uma função testada (src/lib/verifyUrl.ts) ---
 async function generateQRCode(shortId: string, eventId: string, subdomain: string): Promise<string> {
-  // Montagem única e testada (src/lib/verifyUrl.ts): o domínio vem normalizado, sem "https://" duplicado.
   const verifyUrl = buildVerifyUrl({
     subdomain,
     rootDomain: siteConfig.rootDomain,
@@ -57,63 +50,21 @@ async function generateQRCode(shortId: string, eventId: string, subdomain: strin
     isLocal: process.env.NODE_ENV === "development",
     protocol: process.env.NEXT_PUBLIC_PROTOCOL,
   });
-
-  return await QRCode.toDataURL(verifyUrl, {
-    width: 140,
-    margin: 1,
-    color: { dark: "#000000", light: "#ffffff" },
-  });
+  return await QRCode.toDataURL(verifyUrl, { width: 140, margin: 1, color: { dark: "#000000", light: "#ffffff" } });
 }
 
-// --- Componentes ---
-function SponsorBar({ sponsors }: { sponsors: SponsorItem[] }) {
-  if (sponsors.length === 0) {
-    return (
-      <div className="mt-3 pt-2 border-t border-slate-300 text-center">
-        <p className="text-[7px] uppercase tracking-widest text-slate-500">Apoio Cultural</p>
-        <span className="text-[8px] text-slate-400 italic">Espaço para Patrocinador</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-3 pt-2 border-t border-slate-300 shrink-0">
-      <p className="text-[7px] uppercase tracking-widest text-center text-slate-500 mb-1 font-bold">
-        Apoio Cultural
-      </p>
-      <div className="flex justify-center items-center gap-3 h-6 overflow-hidden">
-        {sponsors.map((s) => (
-          <div key={s.id} className="flex-shrink-0">
-            {s.logoUrl ? (
-              <img src={s.logoUrl} className="h-5 object-contain grayscale" alt={s.name} />
-            ) : (
-              <span className="text-[8px] font-bold uppercase">{s.name}</span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function chunk<T>(arr: T[], size: number): T[][] {
+  return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size));
 }
 
-function QRCodeSection({ qrCodeDataUrl, shortId }: { qrCodeDataUrl: string; shortId: string }) {
-  return (
-    <div className="absolute top-2 right-2 flex flex-col items-end">
-      <img src={qrCodeDataUrl} alt="QR Code" className="w-16 h-16 border border-black bg-white p-0.5" />
-      <span className="text-[7px] font-mono text-black mt-0.5">{shortId}</span>
-    </div>
-  );
-}
-
-// --- Página Principal ---
 interface PrintPageProps {
   params: Promise<{ subdomain: string }>;
-  searchParams: Promise<{ eventId?: string; layout?: string; type?: string }>;
+  searchParams: Promise<{ eventId?: string; layout?: string; type?: string; mode?: string; theme?: string }>;
 }
 
 export default async function PrintView({ params, searchParams }: PrintPageProps) {
   const { subdomain } = await params;
-  const { eventId, layout: rawLayout = "a4-4", type: rawType } = await searchParams;
+  const { eventId, layout: rawLayout = "a4-4", type: rawType, mode: rawMode, theme: rawTheme } = await searchParams;
 
   if (!eventId) notFound();
 
@@ -131,6 +82,7 @@ export default async function PrintView({ params, searchParams }: PrintPageProps
       tenant: true,
       cards: { where: typeFilter ? { type: typeFilter } : {}, orderBy: { shortId: "asc" } },
       sponsors: true,
+      prizes: { orderBy: { order: "asc" }, select: { type: true, prizeName: true } },
     },
   });
 
@@ -138,20 +90,36 @@ export default async function PrintView({ params, searchParams }: PrintPageProps
     return <div className="p-10 text-center text-red-500">Nenhuma cartela encontrada.</div>;
   }
 
+  // Modelo salvo + troca só para esta impressão (?mode, ?theme). parseCardDesign nunca quebra.
+  const design = parseCardDesign({
+    ...((event.cardDesign as Record<string, unknown> | null) ?? {}),
+    ...(rawMode ? { mode: rawMode } : {}),
+    ...(rawTheme ? { theme: rawTheme } : {}),
+  });
+  const profile = layoutProfile(layout);
+  const prizesText = prizeLine(event.prizes);
+  const sponsors = event.sponsors.map((s) => ({ id: s.id, name: s.name, logoUrl: s.logoUrl }));
+
   const { gridClass, cardClass, perPage, pageSize } = getLayoutConfig(layout);
   const pages = chunk(event.cards, perPage);
 
-  // Gera QR Codes para todas as cartelas
   const cardsWithQR = await Promise.all(
-    event.cards.map(async (card) => ({
-      ...card,
-      qrCode: await generateQRCode(card.shortId, eventId, subdomain),
-    }))
+    event.cards.map(async (card) => ({ ...card, qrCode: await generateQRCode(card.shortId, eventId, subdomain) }))
   );
+  const qrById = new Map(cardsWithQR.map((c) => [c.id, c.qrCode]));
+
+  // Links da barra: preservam o que já foi escolhido.
+  const href = (over: Record<string, string>) => {
+    const q = new URLSearchParams({ eventId, layout, ...(typeFilter ? { type: typeFilter } : {}), mode: design.mode, theme: design.theme, ...over });
+    return `/print?${q.toString()}`;
+  };
+  const chip = (active: boolean) =>
+    `px-3 py-1.5 rounded-lg text-xs font-bold border transition ${active ? "bg-emerald-600 border-emerald-500 text-white" : "bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500"}`;
 
   return (
     <div className="min-h-screen bg-slate-200 print:bg-white text-black font-sans">
       <style dangerouslySetInnerHTML={{ __html: `
+        ${CARD_CSS}
         @media print {
           @page { margin: 10mm; size: ${pageSize}; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -159,94 +127,47 @@ export default async function PrintView({ params, searchParams }: PrintPageProps
       `}} />
 
       {/* Barra de Controle */}
-      <div className="print:hidden sticky top-0 bg-slate-900 text-white p-4 shadow-xl z-50 flex justify-between items-center">
+      <div className="print:hidden sticky top-0 bg-slate-900 text-white p-4 shadow-xl z-50 flex flex-wrap gap-3 justify-between items-center">
         <div>
           <h1 className="font-bold">Impressão: {LAYOUT_LABELS[layout]}</h1>
           <p className="text-xs text-slate-400">
             {typeFilter ? `${CARD_TYPE_LABEL[typeFilter]} • ` : ""}{event.cards.length} cartelas • {pages.length} página{pages.length > 1 ? "s" : ""}
           </p>
         </div>
-        <PrintButton />
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={href({ mode: "color" })} className={chip(design.mode === "color")}>Colorido</Link>
+          <Link href={href({ mode: "bw" })} className={chip(design.mode === "bw")}>Preto e branco</Link>
+          <Link href={`/dashboard/${eventId}/modelo`} className="text-xs font-bold text-emerald-400 hover:text-emerald-300 underline underline-offset-2 ml-2">
+            Editar o modelo
+          </Link>
+          <PrintButton />
+        </div>
       </div>
 
       <div className="p-4 md:p-8 print:p-0">
         {pages.map((pageCards, pageIndex) => (
-          <div
-            key={pageIndex}
-            className={`${gridClass} ${pageIndex < pages.length - 1 ? "break-after-page" : ""}`}
-          >
-            {pageCards.map((card) => {
-              const cardWithQR = cardsWithQR.find(c => c.id === card.id)!;
-
-              return (
-                <div
-                  key={card.id}
-                  className={`relative border-2 border-dashed border-slate-300 print:border-black p-4 bg-white flex flex-col ${cardClass}`}
-                >
-                  {/* QR Code no canto superior direito */}
-                  <QRCodeSection qrCodeDataUrl={cardWithQR.qrCode} shortId={card.shortId} />
-
-                  {/* Cabeçalho */}
-                  <div className="flex justify-between items-start border-b-2 border-black pb-2 mb-3">
-                    <div>
-                      <h2 className="text-lg font-black uppercase tracking-tight leading-none">
-                        {event.name}
-                      </h2>
-                      <p className="text-[9px] text-slate-600 font-bold tracking-widest mt-1">
-                        ID: {card.shortId}
-                      </p>
-                      {card.type && (
-                        <span
-                          className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
-                            card.type === "FULL_HOUSE" ? "bg-black text-white" : "border-2 border-black text-black"
-                          }`}
-                        >
-                          {CARD_TYPE_LABEL[card.type]}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Grade do Bingo */}
-                  <div className="flex-1 flex flex-col border-2 border-black rounded-lg overflow-hidden">
-                    <div className="grid grid-cols-5 bg-black text-white text-center font-black text-xl py-1">
-                      {["B", "I", "N", "G", "O"].map((l) => <div key={l}>{l}</div>)}
-                    </div>
-
-                    <div className="flex-1 grid grid-cols-5 grid-rows-5 text-2xl font-black">
-                      {([0,1,2,3,4] as const).map((row) =>
-                        (["B","I","N","G","O"] as const).map((letter) => {
-                          const isCenter = letter === "N" && row === 2;
-                          const number = isCenter ? null : (card.matrix as any)[letter][row];
-
-                          return (
-                            <div
-                              key={`${letter}-${row}`}
-                              className={`border border-black flex items-center justify-center ${isCenter ? "bg-slate-200" : "bg-white"}`}
-                            >
-                              {isCenter ? "★" : number}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Patrocinadores */}
-                  <SponsorBar sponsors={event.sponsors} />
-                </div>
-              );
-            })}
+          <div key={pageIndex} className={`${gridClass} ${pageIndex < pages.length - 1 ? "break-after-page" : ""}`}>
+            {pageCards.map((card) => (
+              // A linha tracejada fica só como guia de corte; a moldura e as cores são da própria cartela.
+              <div key={card.id} className={`p-[3mm] border border-dashed border-slate-300 print:border-slate-400 bg-white ${cardClass}`}>
+                <CardFace
+                  design={design}
+                  kind={card.type as CardKind}
+                  matrix={card.matrix as BingoMatrix}
+                  shortId={card.shortId}
+                  qrCodeDataUrl={qrById.get(card.id)!}
+                  eventName={event.name}
+                  organization={event.tenant.name}
+                  sponsors={sponsors}
+                  prizesText={prizesText}
+                  compact={profile.compact}
+                  scale={profile.scale}
+                />
+              </div>
+            ))}
           </div>
         ))}
       </div>
     </div>
-  );
-}
-
-// Helper chunk
-function chunk<T>(arr: T[], size: number): T[][] {
-  return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
-    arr.slice(i * size, i * size + size)
   );
 }

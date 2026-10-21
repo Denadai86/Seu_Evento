@@ -194,7 +194,17 @@ export default function GenerateCardsButton({
     ))}
   </div>
 
-  <PrintOptions eventId={eventId} type={printType} />
+  <a
+          href={`/dashboard/${eventId}/modelo`}
+          className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-600/40 bg-emerald-500/5 hover:bg-emerald-500/10 px-5 py-4 mb-4 transition"
+        >
+          <span>
+            <span className="block font-black text-white">🎨 Modelo da cartela</span>
+            <span className="block text-xs text-slate-400">Escolha o tema, colorido ou preto e branco, e veja a amostra antes de imprimir</span>
+          </span>
+          <span className="text-emerald-400 font-black text-sm shrink-0">Abrir →</span>
+        </a>
+        <PrintOptions eventId={eventId} type={printType} />
 </div>
 
     </div>

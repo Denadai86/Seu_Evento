@@ -22,6 +22,7 @@ export const AUDIT_ACTIONS: Record<string, { label: string; category: AuditCateg
   PRICE_TIER_DELETED: { label: "Fase de preço apagada", category: "DINHEIRO", sensitive: true },
   TICKET_PRICE_CHANGED: { label: "Preço padrão alterado", category: "DINHEIRO" },
   CARDS_GENERATED: { label: "Cartelas geradas", category: "CARTELAS" },
+  CARD_DESIGN_CHANGED: { label: "Modelo da cartela", category: "CARTELAS" },
   CARDS_ASSIGNED: { label: "Cartelas entregues", category: "CARTELAS" },
   CARDS_RETURNED: { label: "Cartelas recolhidas", category: "CARTELAS" },
   TRANSFER_ACCEPTED: { label: "Troca entre voluntários", category: "CARTELAS" },
@@ -103,6 +104,8 @@ export function describeAudit(action: string, md: Record<string, any> | null | u
       return `Alterou o preço padrão da ${m.kind === "FULL_HOUSE" ? "cartela cheia" : "cartela"}${m.from != null ? ` de ${brl(m.from)}` : ""} para ${brl(m.price)}`;
     case "CARDS_GENERATED":
       return `Gerou ${plural(n(m.quantity), "cartela", "cartelas")} de ${typeLabel(m.type)}`;
+    case "CARD_DESIGN_CHANGED":
+      return `Mudou o modelo da cartela impressa: tema ${m.theme ?? "?"}, ${m.mode === "bw" ? "preto e branco" : "colorido"}`;
     case "CARDS_ASSIGNED":
       return `Entregou ${plural(n(m.count), "cartela", "cartelas")} a ${who(m.staffId)}${range(m.first, m.last)}${m.mode === "codes" ? " — por códigos" : ""}`;
     case "CARDS_RETURNED":

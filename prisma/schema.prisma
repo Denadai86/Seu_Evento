@@ -108,6 +108,8 @@ model Event {
   // Preço da CARTELA CHEIA (centavos). null = ainda não definido (não dá para gerar/vender cartela cheia).
   fullHousePrice    Float?
   pixKey            String?
+  // Modelo visual da cartela impressa (tema, colorido/P&B, data/local/causa, canhoto). JSON para não enrijecer.
+  cardDesign        Json?
   
   // Celebração de Bingo (State)
   pendingWinnerCard String?
