@@ -1,10 +1,20 @@
 // src/app/layout.tsx
-import type { Metadata } from "next";
-import "./globals.css";
+import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
+import "./globals.css";
 
-// Só ícones e manifest (caminhos fixos em /public). Nada de URL montada por variável de ambiente aqui.
-// Vale para todo o app: landing e também os subdomínios dos clientes (telão, PDV, painel).
+// Inter servida pelo próprio site (next/font): sem requisição ao Google Fonts no navegador
+// e sem "pulo" de layout quando a fonte chega. A variável alimenta o font-sans do Tailwind.
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "500", "700", "900"],
+  display: "swap",
+  variable: "--font-inter",
+});
+
+// Vale para o app inteiro: landing e subdomínios dos clientes (telão, PDV, painel).
+// Só caminhos fixos de /public: nada de URL montada por variável de ambiente aqui.
 export const metadata: Metadata = {
   icons: {
     icon: [
@@ -17,20 +27,16 @@ export const metadata: Metadata = {
   manifest: "/site.webmanifest",
 };
 
+// Cor da barra do navegador no celular (mesma do site.webmanifest).
+export const viewport: Viewport = {
+  themeColor: "#091510",
+  colorScheme: "dark",
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR">
-      <head>
-        {/* Importação clássica do Google Fonts direto pelo navegador */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      {/* Usamos font-sans para herdar a fonte configurada no Tailwind */}
-      <body className="font-sans antialiased text-slate-200 bg-black min-h-screen">
+    <html lang="pt-BR" className={inter.variable}>
+      <body className="min-h-screen bg-black font-sans text-slate-200 antialiased">
         {children}
         <Toaster position="top-right" richColors />
       </body>
