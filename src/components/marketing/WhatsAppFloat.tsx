@@ -3,6 +3,10 @@
 
 // Botão flutuante do WhatsApp, só nas páginas públicas (entra pelo layout de (marketing)).
 // Número e link vêm do siteConfig: trocar o WhatsApp é só em src/config/site.ts.
+//
+// IMPORTANTE: o menu fica SEMPRE no DOM (só esconde com CSS). Antes ele era desmontado no clique
+// do link; o React 19 aplica o setState antes do navegador seguir o link, e um <a> removido da
+// página não navega. Por isso o fechamento também espera o clique terminar (setTimeout).
 
 import { useEffect, useRef, useState } from "react";
 import { whatsappLink } from "@/config/site";
@@ -44,35 +48,37 @@ export default function WhatsAppFloat() {
   return (
     <div
       ref={raiz}
-      className="fixed z-40 flex flex-col items-end gap-3"
+      className="fixed z-[60] flex flex-col items-end gap-3"
       style={{
         right: "calc(1rem + env(safe-area-inset-right, 0px))",
         bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
       }}
     >
-      {aberto && (
-        <div
-          id="wa-menu"
-          role="menu"
-          className="w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-yellow-500/15 bg-[#0f2119] p-2 text-white shadow-2xl shadow-black/50 motion-safe:animate-[waIn_.16s_ease-out]"
-        >
-          <p className="px-3 pb-2 pt-1 text-sm text-white/60">Fale com a gente no WhatsApp</p>
-          {OPCOES.map((op) => (
-            <a
-              key={op.id}
-              role="menuitem"
-              href={whatsappLink(op.texto)}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setAberto(false)}
-              className="flex flex-col rounded-xl px-3 py-2.5 transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
-            >
-              <span className="font-bold">{op.titulo}</span>
-              <span className="text-sm text-white/55">{op.descricao}</span>
-            </a>
-          ))}
-        </div>
-      )}
+      <div
+        id="wa-menu"
+        role="menu"
+        aria-hidden={!aberto}
+        className={`w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-yellow-500/15 bg-[#0f2119] p-2 text-white shadow-2xl shadow-black/50 transition duration-150 motion-reduce:transition-none ${
+          aberto ? "visible translate-y-0 opacity-100" : "invisible pointer-events-none translate-y-1.5 opacity-0"
+        }`}
+      >
+        <p className="px-3 pb-2 pt-1 text-sm text-white/60">Fale com a gente no WhatsApp</p>
+        {OPCOES.map((op) => (
+          <a
+            key={op.id}
+            role="menuitem"
+            href={whatsappLink(op.texto)}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={aberto ? 0 : -1}
+            onClick={() => setTimeout(() => setAberto(false), 0)}
+            className="flex flex-col rounded-xl px-3 py-2.5 transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
+          >
+            <span className="font-bold">{op.titulo}</span>
+            <span className="text-sm text-white/55">{op.descricao}</span>
+          </a>
+        ))}
+      </div>
 
       <button
         type="button"
@@ -95,9 +101,6 @@ export default function WhatsAppFloat() {
           </svg>
         )}
       </button>
-
-      {/* Animação de entrada do menu (sem precisar mexer no tailwind.config) */}
-      <style>{`@keyframes waIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}`}</style>
     </div>
   );
 }
