@@ -3,7 +3,8 @@ import Link from "next/link";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { siteConfig } from "@/config/site";
 
-export const metadata = { title: "Política de Privacidade" };
+// src/app/(marketing)/privacidade/page.tsx
+export const metadata = { title: "Política de Privacidade", alternates: { canonical: "/privacidade" } };
 
 export default function PrivacidadePage() {
   return (

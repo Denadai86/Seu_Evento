@@ -5,9 +5,10 @@ import { auth } from "@/lib/auth";
 import { getRootDomain, isLocalHost, toLogin, toSubdomain, to } from "@/lib/middleware/helpers";
 import { isPublicPath } from "@/lib/publicRoutes";
 
+
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp|pdf)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp|pdf|webmanifest)$).*)",
   ],
 };
 

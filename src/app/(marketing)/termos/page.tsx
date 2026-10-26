@@ -3,7 +3,8 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { siteConfig } from "@/config/site";
 
-export const metadata = { title: "Termos de Uso" };
+// src/app/(marketing)/termos/page.tsx
+export const metadata = { title: "Termos de Uso", alternates: { canonical: "/termos" } };
 
 export default function TermosPage() {
   return (
