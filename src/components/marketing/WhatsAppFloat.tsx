@@ -4,11 +4,12 @@
 // Botão flutuante do WhatsApp, só nas páginas públicas (entra pelo layout de (marketing)).
 // Número e link vêm do siteConfig: trocar o WhatsApp é só em src/config/site.ts.
 //
-// IMPORTANTE: o menu fica SEMPRE no DOM (só esconde com CSS). Antes ele era desmontado no clique
-// do link; o React 19 aplica o setState antes do navegador seguir o link, e um <a> removido da
-// página não navega. Por isso o fechamento também espera o clique terminar (setTimeout).
+// Tudo o que decide se o botão APARECE (posição, tamanho, cor, camada, visibilidade do menu)
+// está em estilo inline: não depende de nenhuma classe do Tailwind ser gerada.
+// O menu fica sempre no DOM (só esconde): um <a> removido no clique não navega no React 19.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { whatsappLink } from "@/config/site";
 
 const OPCOES = [
@@ -26,9 +27,48 @@ const OPCOES = [
   },
 ] as const;
 
+const S: Record<string, CSSProperties> = {
+  raiz: {
+    position: "fixed",
+    right: "calc(16px + env(safe-area-inset-right, 0px))",
+    bottom: "calc(16px + env(safe-area-inset-bottom, 0px))",
+    zIndex: 2147483000,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 12,
+  },
+  botao: {
+    width: 56,
+    height: 56,
+    borderRadius: "50%",
+    border: "none",
+    background: "#25D366",
+    color: "#fff",
+    display: "grid",
+    placeItems: "center",
+    cursor: "pointer",
+    boxShadow: "0 6px 18px rgba(37, 211, 102, 0.35)",
+  },
+  menu: {
+    width: "min(288px, calc(100vw - 32px))",
+    background: "#0f2119",
+    color: "#fff",
+    border: "1px solid rgba(234, 179, 8, 0.15)",
+    borderRadius: 16,
+    padding: 8,
+    boxShadow: "0 12px 32px rgba(0, 0, 0, 0.5)",
+    transition: "opacity .15s ease, transform .15s ease, visibility .15s",
+  },
+};
+
 export default function WhatsAppFloat() {
   const [aberto, setAberto] = useState(false);
+  const [montado, setMontado] = useState(false);
   const raiz = useRef<HTMLDivElement>(null);
+
+  // Portal direto no <body>: nenhum container da página "prende" o position: fixed
+  useEffect(() => setMontado(true), []);
 
   // Fecha com Esc ou com clique fora
   useEffect(() => {
@@ -45,22 +85,21 @@ export default function WhatsAppFloat() {
     };
   }, [aberto]);
 
-  return (
-    <div
-      ref={raiz}
-      className="fixed z-[60] flex flex-col items-end gap-3"
-      style={{
-        right: "calc(1rem + env(safe-area-inset-right, 0px))",
-        bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
-      }}
-    >
+  if (!montado) return null;
+
+  return createPortal(
+    <div ref={raiz} style={S.raiz} data-wa-float="">
       <div
         id="wa-menu"
         role="menu"
         aria-hidden={!aberto}
-        className={`w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-yellow-500/15 bg-[#0f2119] p-2 text-white shadow-2xl shadow-black/50 transition duration-150 motion-reduce:transition-none ${
-          aberto ? "visible translate-y-0 opacity-100" : "invisible pointer-events-none translate-y-1.5 opacity-0"
-        }`}
+        style={{
+          ...S.menu,
+          visibility: aberto ? "visible" : "hidden",
+          opacity: aberto ? 1 : 0,
+          transform: aberto ? "none" : "translateY(6px)",
+          pointerEvents: aberto ? "auto" : "none",
+        }}
       >
         <p className="px-3 pb-2 pt-1 text-sm text-white/60">Fale com a gente no WhatsApp</p>
         {OPCOES.map((op) => (
@@ -72,7 +111,8 @@ export default function WhatsAppFloat() {
             rel="noopener noreferrer"
             tabIndex={aberto ? 0 : -1}
             onClick={() => setTimeout(() => setAberto(false), 0)}
-            className="flex flex-col rounded-xl px-3 py-2.5 transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
+            className="flex flex-col rounded-xl px-3 py-2.5 hover:bg-white/5"
+            style={{ textDecoration: "none", color: "inherit" }}
           >
             <span className="font-bold">{op.titulo}</span>
             <span className="text-sm text-white/55">{op.descricao}</span>
@@ -86,7 +126,7 @@ export default function WhatsAppFloat() {
         aria-label={aberto ? "Fechar opções de contato" : "Falar no WhatsApp"}
         aria-expanded={aberto}
         aria-controls="wa-menu"
-        className="grid h-14 w-14 place-items-center rounded-full bg-[#25D366] text-white shadow-lg shadow-[#25D366]/30 transition-transform hover:scale-105 active:scale-95 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[3px] focus-visible:outline-yellow-400 motion-reduce:transition-none"
+        style={S.botao}
       >
         {aberto ? (
           <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
@@ -101,6 +141,7 @@ export default function WhatsAppFloat() {
           </svg>
         )}
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
