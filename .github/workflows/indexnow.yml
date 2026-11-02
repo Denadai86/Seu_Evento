@@ -1,0 +1,24 @@
+# .github/workflows/indexnow.yml
+#
+# Depois que a Vercel termina um deploy de PRODUÇÃO com sucesso, avisa o Bing via IndexNow.
+# Roda após o deploy (e não no build) para o Bing encontrar a versão nova já no ar.
+
+name: IndexNow
+
+on: deployment_status
+
+jobs:
+  avisar-bing:
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/indexnow.mjs
+        env:
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
+          SITE_URL: https://acaoleve.dev.br

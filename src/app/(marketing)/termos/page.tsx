@@ -4,7 +4,11 @@ import { ArrowLeft } from "lucide-react";
 import { siteConfig } from "@/config/site";
 
 // src/app/(marketing)/termos/page.tsx
-export const metadata = { title: "Termos de Uso", alternates: { canonical: "/termos" } };
+export const metadata = {
+  title: "Termos de Uso",
+  description: "Termos de uso do Seu Evento: planos, garantia de 7 dias, reembolso e responsabilidades.",
+  alternates: { canonical: "/termos" }
+};
 
 export default function TermosPage() {
   return (

@@ -8,7 +8,7 @@ import { isPublicPath } from "@/lib/publicRoutes";
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp|pdf|webmanifest)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|opengraph-image|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp|pdf|webmanifest|txt)$).*)",
   ],
 };
 
