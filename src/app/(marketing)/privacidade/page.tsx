@@ -4,13 +4,17 @@ import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { siteConfig } from "@/config/site";
 
 // src/app/(marketing)/privacidade/page.tsx
-export const metadata = { title: "Política de Privacidade", alternates: { canonical: "/privacidade" } };
+export const metadata = {
+  title: "Política de Privacidade",
+  description: "Como o Seu Evento trata dados pessoais, cookies e os seus direitos pela LGPD.",
+  alternates: { canonical: "/privacidade" }
+};
 
 export default function PrivacidadePage() {
   return (
     <>
       <Navbar />
-      <main className="flex-1 md:ml-80 bg-slate-50 min-h-screen py-20 px-8 lg:px-16">
+      <main className="bg-slate-50 min-h-screen pt-28 pb-20 px-6 lg:px-16">
         <div className="max-w-3xl mx-auto bg-white p-10 md:p-16 rounded-3xl border border-slate-200 shadow-sm">
           
           <Link href="/" className="inline-flex items-center gap-2 text-emerald-600 font-bold mb-8 hover:text-emerald-700 transition-colors">
@@ -59,7 +63,7 @@ export default function PrivacidadePage() {
 
             <section>
               <h2 className="text-2xl font-bold text-slate-900 mb-4">6. Cookies e terceiros</h2>
-              <p>Usamos apenas o cookie necessário para manter o seu login. Para segurança e prestação de contas, o registro de auditoria do evento guarda quem fez cada ação, quando, de qual endereço IP e aparelho. Não usamos cookies de publicidade nem ferramentas de análise de terceiros. As fontes de texto são carregadas do Google Fonts, o que pode expor o seu endereço IP ao Google.</p>
+              <p>Usamos apenas o cookie necessário para manter o seu login. Para segurança e prestação de contas, o registro de auditoria do evento guarda quem fez cada ação, quando, de qual endereço IP e aparelho. Não usamos cookies de publicidade nem ferramentas de análise de terceiros.As fontes de texto são servidas pelo próprio site, sem chamadas ao Google Fonts.</p>
             </section>
 
             <section>

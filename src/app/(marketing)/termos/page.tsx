@@ -10,7 +10,7 @@ export default function TermosPage() {
   return (
     <>
       <Navbar />
-      <main className="flex-1 md:ml-80 bg-slate-50 min-h-screen py-20 px-8 lg:px-16">
+      <main className="bg-slate-50 min-h-screen pt-28 pb-20 px-6 lg:px-16">
         <div className="max-w-3xl mx-auto bg-white p-10 md:p-16 rounded-3xl border border-slate-200 shadow-sm">
           
           <Link href="/" className="inline-flex items-center gap-2 text-emerald-600 font-bold mb-8 hover:text-emerald-700 transition-colors">

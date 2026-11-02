@@ -52,7 +52,7 @@ export const siteConfig = {
 
   // Data exibida em Termos e Privacidade. ATUALIZE manualmente quando o texto mudar
   // (antes a página mostrava a data de HOJE, o que fazia o documento parecer mudar todo dia).
-  legalUpdatedAt: "10 de outubro de 2026",
+  legalUpdatedAt: "01 de novembro de 2026",
 
   urls: {
     home: "/",
