@@ -29,10 +29,10 @@ type Company = {
 };
 
 const company: Company = {
-  legalName: "",
-  cnpj: "",
-  email: "",
-  city: "",
+  legalName: "Ação Leve DEV",
+  cnpj: "69.924.466/0001-80",
+  email: "contato@acaoleve.dev.br",
+  city: "SP-BR",
 };
 
 export const siteConfig = {
@@ -46,7 +46,7 @@ export const siteConfig = {
   seo: {
     title: "Seu Evento | Sistema para eventos e bingos beneficentes",
     description:
-      "Cartelas, vendas, voluntários, sorteio ao vivo no telão e prestação de contas para paróquias, ONGs e associações. Tudo no navegador, sem aplicativo.",
+      "Sistema online para organizar bingo beneficente: controle cartelas, vendas, voluntários, sorteio no telão e prestação de contas para igrejas e ONGs.",
     ogHeadline: "Eventos beneficentes com controle de verdade",
   },
 

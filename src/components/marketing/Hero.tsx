@@ -21,9 +21,9 @@ export default function Hero() {
           </h1>
 
           <p className="mt-8 text-lg text-zinc-400 max-w-xl leading-relaxed">
-            Venda cartelas, acompanhe voluntários,
-            valide ganhadores, controle pagamentos
-            e apresente sorteios em um telão profissional.
+            O sistema para organizar bingo beneficente: venda cartelas,
+            acompanhe voluntários, valide ganhadores, controle pagamentos
+            e apresente o sorteio ao vivo no telão.
 
             Tudo no navegador.
             Sem aplicativo.
